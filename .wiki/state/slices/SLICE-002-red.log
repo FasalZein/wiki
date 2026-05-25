@@ -55,3 +55,38 @@ error: Vault root not configured: set KNOWLEDGE_VAULT_ROOT or ~/.config/wiki/con
  1 fail
  16 expect() calls
 Ran 10 tests across 2 files. [25.00ms]
+### RED 3: getVaultRoot clear unconfigured error
+bun test v1.4.0-canary.1 (184d0371a)
+
+tests/schema.test.ts:
+(pass) template schemas > loads every shipped template with declared field constraints [3.62ms]
+(pass) template schemas > validates fully populated input and returns the normalized record [0.23ms]
+(pass) template schemas > rejects input missing a required field with the field name [0.13ms]
+(pass) template schemas > rejects a type mismatch with the field name and expected type [0.16ms]
+(pass) template schemas > rejects enum values outside the allowed set with the allowed values [0.14ms]
+(pass) template schemas > rejects a list below its minimum count with the field name and minimum [0.12ms]
+(pass) template schemas > rejects a string below its minimum length with the field name and minimum [0.10ms]
+(pass) template schemas > rejects pattern mismatches with the field name and pattern [0.12ms]
+
+tests/config.test.ts:
+(pass) vault config > getVaultRoot resolves the vault path from KNOWLEDGE_VAULT_ROOT first [0.52ms]
+(pass) vault config > getVaultRoot falls back to config file vault.root when env var is unset [1.50ms]
+43 |     const home = await mkdtemp(join(tmpdir(), "wiki-home-"));
+44 |     tempPaths.push(home);
+45 |     delete process.env.KNOWLEDGE_VAULT_ROOT;
+46 |     process.env.HOME = home;
+47 | 
+48 |     await expect(getVaultRoot()).rejects.toThrow(
+                                              ^
+error: expect(received).toThrow(expected)
+
+Expected substring: "Vault root not configured: set KNOWLEDGE_VAULT_ROOT or ~/.config/wiki/config.toml vault.root"
+Received message: "ENOENT: no such file or directory, open '/var/folders/s4/q7gwyx7x7w7d1z8x5vg5cspr0000gn/T/wiki-home-Ekv0aU/.config/wiki/config.toml'"
+
+      at <anonymous> (/Users/tothemoon/Dev/code-forge/wiki/tests/config.test.ts:48:42)
+(fail) vault config > getVaultRoot fails clearly when no vault root is configured [0.37ms]
+
+ 10 pass
+ 1 fail
+ 18 expect() calls
+Ran 11 tests across 2 files. [30.00ms]

@@ -38,4 +38,15 @@ describe("vault config", () => {
 
     expect(await getVaultRoot()).toBe(vaultRoot);
   });
+
+  test("getVaultRoot fails clearly when no vault root is configured", async () => {
+    const home = await mkdtemp(join(tmpdir(), "wiki-home-"));
+    tempPaths.push(home);
+    delete process.env.KNOWLEDGE_VAULT_ROOT;
+    process.env.HOME = home;
+
+    await expect(getVaultRoot()).rejects.toThrow(
+      "Vault root not configured: set KNOWLEDGE_VAULT_ROOT or ~/.config/wiki/config.toml vault.root",
+    );
+  });
 });

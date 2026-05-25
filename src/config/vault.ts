@@ -4,9 +4,9 @@ import { resolve } from "node:path";
 import { getConfig } from "./config";
 
 export async function getVaultRoot(): Promise<string> {
-  const configuredRoot = process.env.KNOWLEDGE_VAULT_ROOT ?? (await getConfig()).vault.root;
+  const configuredRoot = await readConfiguredRoot();
   if (configuredRoot.length === 0) {
-    throw new Error("Vault root not configured: set KNOWLEDGE_VAULT_ROOT or ~/.config/wiki/config.toml vault.root");
+    throw unconfiguredError();
   }
 
   const root = resolve(configuredRoot);
@@ -16,4 +16,28 @@ export async function getVaultRoot(): Promise<string> {
   }
 
   return root;
+}
+
+async function readConfiguredRoot(): Promise<string> {
+  const envRoot = process.env.KNOWLEDGE_VAULT_ROOT;
+  if (envRoot !== undefined) {
+    return envRoot;
+  }
+
+  try {
+    return (await getConfig()).vault.root;
+  } catch (error) {
+    if (isFileNotFound(error)) {
+      throw unconfiguredError();
+    }
+    throw error;
+  }
+}
+
+function unconfiguredError(): Error {
+  return new Error("Vault root not configured: set KNOWLEDGE_VAULT_ROOT or ~/.config/wiki/config.toml vault.root");
+}
+
+function isFileNotFound(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
 }
