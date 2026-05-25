@@ -297,3 +297,29 @@ ENOENT: no such file or directory, open '/var/folders/s4/q7gwyx7x7w7d1z8x5vg5csp
  1 fail
  22 expect() calls
 Ran 15 tests across 2 files. [39.00ms]
+### RED 8: detectHarness env vars
+bun test v1.4.0-canary.1 (184d0371a)
+
+tests/schema.test.ts:
+(pass) template schemas > loads every shipped template with declared field constraints [3.40ms]
+(pass) template schemas > validates fully populated input and returns the normalized record [0.21ms]
+(pass) template schemas > rejects input missing a required field with the field name [0.12ms]
+(pass) template schemas > rejects a type mismatch with the field name and expected type [0.10ms]
+(pass) template schemas > rejects enum values outside the allowed set with the allowed values [0.08ms]
+(pass) template schemas > rejects a list below its minimum count with the field name and minimum [0.08ms]
+(pass) template schemas > rejects a string below its minimum length with the field name and minimum [0.07ms]
+(pass) template schemas > rejects pattern mismatches with the field name and pattern [0.07ms]
+
+tests/config.test.ts:
+
+# Unhandled error between tests
+-------------------------------
+error: Cannot find module '../src/config/harness' from '/Users/tothemoon/Dev/code-forge/wiki/tests/config.test.ts'
+-------------------------------
+
+
+ 8 pass
+ 1 fail
+ 1 error
+ 15 expect() calls
+Ran 9 tests across 2 files. [31.00ms]

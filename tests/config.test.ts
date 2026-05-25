@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 
 import { getConfig } from "../src/config/config";
+import { detectHarness } from "../src/config/harness";
 import { getVaultRoot } from "../src/config/vault";
 
 const originalEnv = { ...process.env };
@@ -119,5 +120,33 @@ describe("vault config", () => {
       },
       harness: { detected: "none" },
     });
+  });
+
+  test("detectHarness returns the harness named by explicit env vars", () => {
+    process.env.PI_SESSION_ID = "pi-session";
+    expect(detectHarness()).toBe("pi");
+
+    delete process.env.PI_SESSION_ID;
+    process.env.PI_AGENT = "1";
+    expect(detectHarness()).toBe("pi");
+
+    delete process.env.PI_AGENT;
+    process.env.CLAUDECODE = "1";
+    expect(detectHarness()).toBe("claude-code");
+
+    delete process.env.CLAUDECODE;
+    process.env.CLAUDE_CODE_ENTRYPOINT = "cli";
+    expect(detectHarness()).toBe("claude-code");
+
+    delete process.env.CLAUDE_CODE_ENTRYPOINT;
+    process.env.CODEX_HOME = "/tmp/codex";
+    expect(detectHarness()).toBe("codex");
+
+    delete process.env.CODEX_HOME;
+    process.env.OPENAI_CODEX = "1";
+    expect(detectHarness()).toBe("codex");
+
+    delete process.env.OPENAI_CODEX;
+    expect(detectHarness()).toBe("none");
   });
 });
