@@ -61,3 +61,26 @@ tests/config.test.ts:
  0 fail
  18 expect() calls
 Ran 11 tests across 2 files. [29.00ms]
+### GREEN 4: getVaultRoot expands tilde
+bun test v1.4.0-canary.1 (184d0371a)
+
+tests/schema.test.ts:
+(pass) template schemas > loads every shipped template with declared field constraints [3.08ms]
+(pass) template schemas > validates fully populated input and returns the normalized record [0.21ms]
+(pass) template schemas > rejects input missing a required field with the field name [0.13ms]
+(pass) template schemas > rejects a type mismatch with the field name and expected type [0.13ms]
+(pass) template schemas > rejects enum values outside the allowed set with the allowed values [0.11ms]
+(pass) template schemas > rejects a list below its minimum count with the field name and minimum [0.11ms]
+(pass) template schemas > rejects a string below its minimum length with the field name and minimum [0.09ms]
+(pass) template schemas > rejects pattern mismatches with the field name and pattern [0.09ms]
+
+tests/config.test.ts:
+(pass) vault config > getVaultRoot resolves the vault path from KNOWLEDGE_VAULT_ROOT first [0.45ms]
+(pass) vault config > getVaultRoot falls back to config file vault.root when env var is unset [1.49ms]
+(pass) vault config > getVaultRoot fails clearly when no vault root is configured [0.26ms]
+(pass) vault config > getVaultRoot expands tilde to the user's home directory [0.31ms]
+
+ 12 pass
+ 0 fail
+ 19 expect() calls
+Ran 12 tests across 2 files. [24.00ms]

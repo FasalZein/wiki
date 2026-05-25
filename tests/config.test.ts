@@ -49,4 +49,15 @@ describe("vault config", () => {
       "Vault root not configured: set KNOWLEDGE_VAULT_ROOT or ~/.config/wiki/config.toml vault.root",
     );
   });
+
+  test("getVaultRoot expands tilde to the user's home directory", async () => {
+    const home = await mkdtemp(join(tmpdir(), "wiki-home-"));
+    tempPaths.push(home);
+    const vaultRoot = join(home, "Knowledge");
+    await mkdir(vaultRoot);
+    process.env.HOME = home;
+    process.env.KNOWLEDGE_VAULT_ROOT = "~/Knowledge";
+
+    expect(await getVaultRoot()).toBe(vaultRoot);
+  });
 });

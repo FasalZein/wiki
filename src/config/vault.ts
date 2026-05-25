@@ -9,7 +9,7 @@ export async function getVaultRoot(): Promise<string> {
     throw unconfiguredError();
   }
 
-  const root = resolve(configuredRoot);
+  const root = resolve(expandHome(configuredRoot));
   const stats = await stat(root);
   if (!stats.isDirectory()) {
     throw new Error(`Vault root does not exist: ${root}`);
@@ -36,6 +36,24 @@ async function readConfiguredRoot(): Promise<string> {
 
 function unconfiguredError(): Error {
   return new Error("Vault root not configured: set KNOWLEDGE_VAULT_ROOT or ~/.config/wiki/config.toml vault.root");
+}
+
+function expandHome(path: string): string {
+  if (path === "~") {
+    return homeDirectory();
+  }
+  if (path.startsWith("~/")) {
+    return `${homeDirectory()}${path.slice(1)}`;
+  }
+  return path;
+}
+
+function homeDirectory(): string {
+  const home = process.env.HOME;
+  if (home === undefined || home.length === 0) {
+    throw new Error("HOME is not set");
+  }
+  return home;
 }
 
 function isFileNotFound(error: unknown): boolean {
