@@ -1,6 +1,6 @@
 import { join } from "node:path";
 
-import { ArtifactValidationError, createArtifact } from "../../artifacts/store";
+import { ArtifactValidationError, createArtifact, readArtifact } from "../../artifacts/store";
 import { assertProjectStructure } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import { parseCommand, stringValue } from "../parse";
@@ -11,8 +11,26 @@ export async function handleDecision(args: string[]): Promise<CliResult> {
   if (subverb === "create") {
     return createDecision(rest);
   }
+  if (subverb === "show") {
+    return showDecision(rest);
+  }
   console.error(`unknown decision subverb: ${subverb ?? ""}`.trim());
   return { code: 1 };
+}
+
+async function showDecision(args: string[]): Promise<CliResult> {
+  const parsed = parseCommand(args, ["project", "field"]);
+  const id = parsed.positionals[0];
+  const project = stringValue(parsed.values, "project");
+  if (id === undefined || project === undefined) {
+    console.error("missing required field: id, project");
+    return { code: 1 };
+  }
+
+  const vaultRoot = await getVaultRoot();
+  const artifact = await readArtifact({ type: "decision", vaultRoot, project, id });
+  process.stdout.write(artifact.body);
+  return { code: 0 };
 }
 
 async function createDecision(args: string[]): Promise<CliResult> {

@@ -45,6 +45,18 @@ describe("decision CLI", () => {
     expect(result.stderr).toContain("title");
     expect(result.stdout).toBe("");
   });
+
+  test("decision show prints the rendered body", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    await runWiki(createArgs(), vaultRoot);
+
+    const result = await runWiki(["decision", "show", "DECISION-0001", "--project", "wiki-v2"], vaultRoot);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("# Use SQLite");
+    expect(result.stdout).toContain("## Decision\n\nUse SQLite for local persistence.");
+    expect(result.stderr).toBe("");
+  });
 });
 
 function createArgs(): string[] {

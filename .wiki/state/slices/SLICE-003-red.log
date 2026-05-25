@@ -1,23 +1,23 @@
 bun test v1.4.0-canary.1 (184d0371a)
 
 tests/cli-decision.test.ts:
-39 |     const args = createArgs();
-40 |     args[args.indexOf("Use SQLite")] = "Tiny";
-41 | 
-42 |     const result = await runWiki(args, vaultRoot);
-43 | 
-44 |     expect(result.exitCode).toBe(1);
+50 |     const vaultRoot = await createFixtureVault("wiki-v2");
+51 |     await runWiki(createArgs(), vaultRoot);
+52 | 
+53 |     const result = await runWiki(["decision", "show", "DECISION-0001", "--project", "wiki-v2"], vaultRoot);
+54 | 
+55 |     expect(result.exitCode).toBe(0);
                                  ^
 error: expect(received).toBe(expected)
 
-Expected: 1
-Received: 10
+Expected: 0
+Received: 1
 
-      at <anonymous> (/Users/tothemoon/Dev/code-forge/wiki/tests/cli-decision.test.ts:44:29)
-(fail) decision CLI > decision create exits 1 and names a schema-invalid field [34.50ms]
+      at <anonymous> (/Users/tothemoon/Dev/code-forge/wiki/tests/cli-decision.test.ts:55:29)
+(fail) decision CLI > decision show prints the rendered body [59.40ms]
 
  0 pass
- 2 filtered out
+ 3 filtered out
  1 fail
  1 expect() calls
-Ran 1 test across 1 file. [45.00ms]
+Ran 1 test across 1 file. [68.00ms]
