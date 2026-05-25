@@ -4,19 +4,7 @@ import type { Constraints, FieldDef, FieldType, Schema } from "./types";
 
 export type TemplateType = "prd" | "slice" | "decision" | "handover";
 
-type RawField = {
-  type?: unknown;
-  required?: unknown;
-  min?: unknown;
-  max?: unknown;
-  values?: unknown;
-  pattern?: unknown;
-  target?: unknown;
-  item_type?: unknown;
-  description?: unknown;
-};
-
-const fieldTypes = new Set<FieldType>([
+const fieldTypes: ReadonlySet<string> = new Set<FieldType>([
   "string",
   "text",
   "list",
@@ -55,33 +43,37 @@ function parseField(template: string, name: string, raw: unknown): FieldDef {
     throw new Error(`Template ${template} field ${name} must be an object`);
   }
 
-  const field = raw as RawField;
-  if (typeof field.type !== "string" || !fieldTypes.has(field.type as FieldType)) {
+  const fieldType = raw.type;
+  if (!isFieldType(fieldType)) {
     throw new Error(`Template ${template} field ${name} has unsupported type`);
   }
 
   return {
     name,
-    type: field.type as FieldType,
-    required: field.required === true,
-    constraints: parseConstraints(field),
+    type: fieldType,
+    required: raw.required === true,
+    constraints: parseConstraints(raw),
   };
 }
 
-function parseConstraints(field: RawField): Constraints {
+function parseConstraints(raw: Record<string, unknown>): Constraints {
   const constraints: Constraints = {};
-  if (typeof field.min === "number") constraints.min = field.min;
-  if (typeof field.max === "number") constraints.max = field.max;
-  if (Array.isArray(field.values) && field.values.every((value) => typeof value === "string")) {
-    constraints.values = field.values;
+  if (typeof raw.min === "number") constraints.min = raw.min;
+  if (typeof raw.max === "number") constraints.max = raw.max;
+  if (Array.isArray(raw.values) && raw.values.every((value): value is string => typeof value === "string")) {
+    constraints.values = raw.values;
   }
-  if (typeof field.pattern === "string") constraints.pattern = field.pattern;
-  if (typeof field.target === "string") constraints.target = field.target;
-  if (typeof field.item_type === "string" && fieldTypes.has(field.item_type as FieldType)) {
-    constraints.item_type = field.item_type as FieldType;
+  if (typeof raw.pattern === "string") constraints.pattern = raw.pattern;
+  if (typeof raw.target === "string") constraints.target = raw.target;
+  if (isFieldType(raw.item_type)) {
+    constraints.item_type = raw.item_type;
   }
-  if (typeof field.description === "string") constraints.description = field.description;
+  if (typeof raw.description === "string") constraints.description = raw.description;
   return constraints;
+}
+
+function isFieldType(value: unknown): value is FieldType {
+  return typeof value === "string" && fieldTypes.has(value);
 }
 
 function normalizeInlineMaps(template: string): string {
