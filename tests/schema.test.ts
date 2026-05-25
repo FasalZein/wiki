@@ -67,4 +67,23 @@ describe("template schemas", () => {
       errors: [{ field: "title", reason: "required", expected: "string" }],
     });
   });
+
+  test("rejects a type mismatch with the field name and expected type", async () => {
+    const schema = await loadTemplate("slice");
+
+    expect(
+      validate(schema, {
+        id: "SLICE-001",
+        title: "Template schema loader",
+        project: "wiki-v2",
+        parent_prd: "PRD-001",
+        status: "planned",
+        type: "AFK",
+        acceptance: "must be a list",
+      }),
+    ).toEqual({
+      ok: false,
+      errors: [{ field: "acceptance", reason: "type mismatch", expected: "list" }],
+    });
+  });
 });
