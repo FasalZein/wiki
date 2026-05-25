@@ -123,7 +123,11 @@ describe("vault config", () => {
     });
   });
 
-  test("detectHarness returns the harness named by explicit env vars", () => {
+  test("detectHarness returns the harness named by explicit env vars", async () => {
+    const home = await mkdtemp(join(tmpdir(), "wiki-home-"));
+    tempPaths.push(home);
+    process.env.HOME = home;
+
     process.env.PI_SESSION_ID = "pi-session";
     expect(detectHarness()).toBe("pi");
 
@@ -149,6 +153,15 @@ describe("vault config", () => {
 
     delete process.env.OPENAI_CODEX;
     expect(detectHarness()).toBe("none");
+  });
+
+  test("detectHarness detects Pi from the fallback marker when explicit env vars are absent", async () => {
+    const home = await mkdtemp(join(tmpdir(), "wiki-home-"));
+    tempPaths.push(home);
+    process.env.HOME = home;
+    await mkdir(join(home, ".pi"));
+
+    expect(detectHarness()).toBe("pi");
   });
 
   test("getConfig includes the harness detected at read time", async () => {

@@ -350,3 +350,80 @@ tests/config.test.ts:
  0 fail
  36 expect() calls
 Ran 20 tests across 2 files. [40.00ms]
+### GREEN 13: detectHarness Pi fallback marker
+bun test v1.4.0-canary.1 (184d0371a)
+
+tests/schema.test.ts:
+(pass) template schemas > loads every shipped template with declared field constraints [3.99ms]
+(pass) template schemas > validates fully populated input and returns the normalized record [0.24ms]
+(pass) template schemas > rejects input missing a required field with the field name [0.12ms]
+(pass) template schemas > rejects a type mismatch with the field name and expected type [0.11ms]
+(pass) template schemas > rejects enum values outside the allowed set with the allowed values [0.10ms]
+(pass) template schemas > rejects a list below its minimum count with the field name and minimum [0.13ms]
+(pass) template schemas > rejects a string below its minimum length with the field name and minimum [0.14ms]
+(pass) template schemas > rejects pattern mismatches with the field name and pattern [0.13ms]
+
+tests/config.test.ts:
+(pass) vault config > getVaultRoot resolves the vault path from KNOWLEDGE_VAULT_ROOT first [0.77ms]
+(pass) vault config > getVaultRoot falls back to config file vault.root when env var is unset [1.90ms]
+(pass) vault config > getVaultRoot fails clearly when no vault root is configured [0.89ms]
+(pass) vault config > getVaultRoot expands tilde to the user's home directory [0.76ms]
+(pass) vault config > getVaultRoot returns an absolute path and rejects nonexistent roots [1.05ms]
+(pass) vault config > getConfig reads TOML and returns a typed WikiConfig object [1.20ms]
+(pass) vault config > getConfig returns defaults when the config file does not exist [0.45ms]
+146 |     delete process.env.CODEX_HOME;
+147 |     process.env.OPENAI_CODEX = "1";
+148 |     expect(detectHarness()).toBe("codex");
+149 | 
+150 |     delete process.env.OPENAI_CODEX;
+151 |     expect(detectHarness()).toBe("none");
+                                  ^
+error: expect(received).toBe(expected)
+
+Expected: "none"
+Received: "pi"
+
+      at <anonymous> (/Users/tothemoon/Dev/code-forge/wiki/tests/config.test.ts:151:29)
+(fail) vault config > detectHarness returns the harness named by explicit env vars [0.15ms]
+(pass) vault config > detectHarness detects Pi from the fallback marker when explicit env vars are absent [0.43ms]
+(pass) vault config > getConfig includes the harness detected at read time [0.28ms]
+(pass) vault config > resolveCurrentProject returns the project name when cwd is inside a project folder [0.62ms]
+(pass) vault config > resolveCurrentProject returns null outside a project folder [0.76ms]
+(pass) vault config > assertProjectStructure verifies required project folders and _project.md [1.75ms]
+
+ 20 pass
+ 1 fail
+ 37 expect() calls
+Ran 21 tests across 2 files. [39.00ms]
+### GREEN 13: detectHarness Pi fallback marker
+bun test v1.4.0-canary.1 (184d0371a)
+
+tests/schema.test.ts:
+(pass) template schemas > loads every shipped template with declared field constraints [3.49ms]
+(pass) template schemas > validates fully populated input and returns the normalized record [0.22ms]
+(pass) template schemas > rejects input missing a required field with the field name [0.14ms]
+(pass) template schemas > rejects a type mismatch with the field name and expected type [0.13ms]
+(pass) template schemas > rejects enum values outside the allowed set with the allowed values [0.10ms]
+(pass) template schemas > rejects a list below its minimum count with the field name and minimum [0.09ms]
+(pass) template schemas > rejects a string below its minimum length with the field name and minimum [0.07ms]
+(pass) template schemas > rejects pattern mismatches with the field name and pattern [0.08ms]
+
+tests/config.test.ts:
+(pass) vault config > getVaultRoot resolves the vault path from KNOWLEDGE_VAULT_ROOT first [0.80ms]
+(pass) vault config > getVaultRoot falls back to config file vault.root when env var is unset [1.97ms]
+(pass) vault config > getVaultRoot fails clearly when no vault root is configured [1.01ms]
+(pass) vault config > getVaultRoot expands tilde to the user's home directory [0.84ms]
+(pass) vault config > getVaultRoot returns an absolute path and rejects nonexistent roots [0.64ms]
+(pass) vault config > getConfig reads TOML and returns a typed WikiConfig object [1.25ms]
+(pass) vault config > getConfig returns defaults when the config file does not exist [0.77ms]
+(pass) vault config > detectHarness returns the harness named by explicit env vars [0.63ms]
+(pass) vault config > detectHarness detects Pi from the fallback marker when explicit env vars are absent [1.20ms]
+(pass) vault config > getConfig includes the harness detected at read time [0.43ms]
+(pass) vault config > resolveCurrentProject returns the project name when cwd is inside a project folder [1.39ms]
+(pass) vault config > resolveCurrentProject returns null outside a project folder [1.02ms]
+(pass) vault config > assertProjectStructure verifies required project folders and _project.md [1.28ms]
+
+ 21 pass
+ 0 fail
+ 37 expect() calls
+Ran 21 tests across 2 files. [46.00ms]

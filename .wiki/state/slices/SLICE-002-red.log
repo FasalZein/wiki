@@ -464,3 +464,48 @@ Received promise that resolved: Promise { <resolved> }
  1 fail
  35 expect() calls
 Ran 20 tests across 2 files. [45.00ms]
+### RED 13: detectHarness Pi fallback marker
+bun test v1.4.0-canary.1 (184d0371a)
+
+tests/schema.test.ts:
+(pass) template schemas > loads every shipped template with declared field constraints [4.27ms]
+(pass) template schemas > validates fully populated input and returns the normalized record [0.23ms]
+(pass) template schemas > rejects input missing a required field with the field name [0.11ms]
+(pass) template schemas > rejects a type mismatch with the field name and expected type [0.10ms]
+(pass) template schemas > rejects enum values outside the allowed set with the allowed values [0.08ms]
+(pass) template schemas > rejects a list below its minimum count with the field name and minimum [0.09ms]
+(pass) template schemas > rejects a string below its minimum length with the field name and minimum [0.07ms]
+(pass) template schemas > rejects pattern mismatches with the field name and pattern [0.07ms]
+
+tests/config.test.ts:
+(pass) vault config > getVaultRoot resolves the vault path from KNOWLEDGE_VAULT_ROOT first [0.85ms]
+(pass) vault config > getVaultRoot falls back to config file vault.root when env var is unset [1.86ms]
+(pass) vault config > getVaultRoot fails clearly when no vault root is configured [1.01ms]
+(pass) vault config > getVaultRoot expands tilde to the user's home directory [0.61ms]
+(pass) vault config > getVaultRoot returns an absolute path and rejects nonexistent roots [0.75ms]
+(pass) vault config > getConfig reads TOML and returns a typed WikiConfig object [0.81ms]
+(pass) vault config > getConfig returns defaults when the config file does not exist [0.53ms]
+(pass) vault config > detectHarness returns the harness named by explicit env vars [0.05ms]
+155 |     const home = await mkdtemp(join(tmpdir(), "wiki-home-"));
+156 |     tempPaths.push(home);
+157 |     process.env.HOME = home;
+158 |     await mkdir(join(home, ".pi"));
+159 | 
+160 |     expect(detectHarness()).toBe("pi");
+                                  ^
+error: expect(received).toBe(expected)
+
+Expected: "pi"
+Received: "none"
+
+      at <anonymous> (/Users/tothemoon/Dev/code-forge/wiki/tests/config.test.ts:160:29)
+(fail) vault config > detectHarness detects Pi from the fallback marker when explicit env vars are absent [0.67ms]
+(pass) vault config > getConfig includes the harness detected at read time [0.54ms]
+(pass) vault config > resolveCurrentProject returns the project name when cwd is inside a project folder [0.69ms]
+(pass) vault config > resolveCurrentProject returns null outside a project folder [0.92ms]
+(pass) vault config > assertProjectStructure verifies required project folders and _project.md [1.49ms]
+
+ 20 pass
+ 1 fail
+ 37 expect() calls
+Ran 21 tests across 2 files. [55.00ms]
