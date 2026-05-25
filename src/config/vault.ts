@@ -10,9 +10,16 @@ export async function getVaultRoot(): Promise<string> {
   }
 
   const root = resolve(expandHome(configuredRoot));
-  const stats = await stat(root);
-  if (!stats.isDirectory()) {
-    throw new Error(`Vault root does not exist: ${root}`);
+  try {
+    const stats = await stat(root);
+    if (!stats.isDirectory()) {
+      throw new Error(`Vault root does not exist: ${root}`);
+    }
+  } catch (error) {
+    if (isFileNotFound(error)) {
+      throw new Error(`Vault root does not exist: ${root}`);
+    }
+    throw error;
   }
 
   return root;

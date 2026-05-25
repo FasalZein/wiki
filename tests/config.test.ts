@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative, resolve } from "node:path";
 
 import { getVaultRoot } from "../src/config/vault";
 
@@ -59,5 +59,23 @@ describe("vault config", () => {
     process.env.KNOWLEDGE_VAULT_ROOT = "~/Knowledge";
 
     expect(await getVaultRoot()).toBe(vaultRoot);
+  });
+
+  test("getVaultRoot returns an absolute path and rejects nonexistent roots", async () => {
+    const workDir = await mkdtemp(join(tmpdir(), "wiki-work-"));
+    tempPaths.push(workDir);
+    const vaultRoot = join(workDir, "vault");
+    await mkdir(vaultRoot);
+    const previousCwd = process.cwd();
+    process.chdir(workDir);
+    try {
+      process.env.KNOWLEDGE_VAULT_ROOT = relative(workDir, vaultRoot);
+      expect(await getVaultRoot()).toBe(resolve("vault"));
+
+      process.env.KNOWLEDGE_VAULT_ROOT = "missing-vault";
+      await expect(getVaultRoot()).rejects.toThrow(`Vault root does not exist: ${resolve("missing-vault")}`);
+    } finally {
+      process.chdir(previousCwd);
+    }
   });
 });
