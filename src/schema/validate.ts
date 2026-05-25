@@ -39,6 +39,10 @@ export function validate(
       if (min !== undefined && value.length < min) {
         errors.push({ field: field.name, reason: "below minimum length", expected: `at least ${min} characters` });
       }
+      const pattern = field.constraints.pattern;
+      if (pattern !== undefined && !new RegExp(`^${pattern}$`).test(value)) {
+        errors.push({ field: field.name, reason: "pattern mismatch", expected: pattern });
+      }
     }
   }
 

@@ -136,4 +136,23 @@ describe("template schemas", () => {
       errors: [{ field: "title", reason: "below minimum length", expected: "at least 5 characters" }],
     });
   });
+
+  test("rejects pattern mismatches with the field name and pattern", async () => {
+    const schema = await loadTemplate("slice");
+
+    expect(
+      validate(schema, {
+        id: "TASK-001",
+        title: "Template schema loader",
+        project: "wiki-v2",
+        parent_prd: "PRD-001",
+        status: "planned",
+        type: "AFK",
+        acceptance: ["schema loads"],
+      }),
+    ).toEqual({
+      ok: false,
+      errors: [{ field: "id", reason: "pattern mismatch", expected: "SLICE-\\d{3,}" }],
+    });
+  });
 });
