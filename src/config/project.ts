@@ -17,6 +17,8 @@ export async function resolveCurrentProject(cwd = process.cwd()): Promise<string
 export type ProjectConfig = {
   repo: string;
   test_command: string;
+  qmd_command: string;
+  research_path: string;
 };
 
 export class ProjectConfigError extends Error {
@@ -46,7 +48,12 @@ export async function loadProjectConfig(projectPath: string): Promise<ProjectCon
   if (!isNonEmptyString(data.repo) || !isNonEmptyString(data.test_command)) {
     throw new ProjectConfigError();
   }
-  return { repo: data.repo, test_command: data.test_command };
+  return {
+    repo: data.repo,
+    test_command: data.test_command,
+    qmd_command: isNonEmptyString(data.qmd_command) ? data.qmd_command : "qmd",
+    research_path: expandHome(isNonEmptyString(data.research_path) ? data.research_path : "~/.pi/artifacts/research"),
+  };
 }
 
 async function assertFile(path: string, label: string): Promise<void> {
@@ -79,6 +86,24 @@ async function assertDirectory(path: string, label: string): Promise<void> {
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function expandHome(path: string): string {
+  if (path === "~") {
+    return homeDirectory();
+  }
+  if (path.startsWith("~/")) {
+    return `${homeDirectory()}${path.slice(1)}`;
+  }
+  return path;
+}
+
+function homeDirectory(): string {
+  const home = process.env.HOME;
+  if (home === undefined || home.length === 0) {
+    throw new Error("HOME is not set");
+  }
+  return home;
 }
 
 function isFileNotFound(error: unknown): boolean {

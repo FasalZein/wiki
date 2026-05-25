@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -19,10 +19,36 @@ describe("search CLI", () => {
     expect(result.stdout).toBe("");
     expect(result.stderr).toContain("missing required field: query");
   });
+
+  test("search prints QMD results as tab-separated lines", async () => {
+    const fixture = await createSearchFixture("wiki-v2");
+    await writeFile(
+      fixture.resultsFile,
+      JSON.stringify([
+        { path: join(fixture.projectPath, "prds", "PRD-001.md"), score: 0.9, snippet: "First\nresult" },
+        { path: join(fixture.projectPath, "slices", "SLICE-001.md"), score: 0.72, snippet: "Second result" },
+      ]),
+    );
+
+    const result = await runWiki(["search", "vault", "--project", "wiki-v2"], fixture);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe(
+      `${join(fixture.projectPath, "prds", "PRD-001.md")}\t0.9\tFirst result\n` +
+        `${join(fixture.projectPath, "slices", "SLICE-001.md")}\t0.72\tSecond result\n`,
+    );
+    expect(result.stderr).toBe("");
+    expect(await readFile(fixture.stateFile, "utf8")).toBe(
+      `collection list\ncollection add wiki-v2 ${fixture.projectPath} **/*.md\nquery vault --json --collection wiki-v2\n`,
+    );
+  });
 });
 
 type SearchFixture = {
   vaultRoot: string;
+  projectPath: string;
+  stateFile: string;
+  resultsFile: string;
   env: Record<string, string>;
 };
 
@@ -57,5 +83,48 @@ async function createSearchFixture(project: string): Promise<SearchFixture> {
   await mkdir(join(projectPath, "decisions"));
   await mkdir(join(projectPath, "handovers"));
   await writeFile(join(projectPath, "_project.md"), "---\nrepo: /tmp/repo\ntest_command: bun test\n---\n");
-  return { vaultRoot, env: {} };
+
+  const stateFile = join(root, "qmd-state.log");
+  const registeredFile = join(root, "qmd-registered.txt");
+  const resultsFile = join(root, "qmd-results.json");
+  const qmdCommand = join(root, "fake-qmd");
+  await writeFile(resultsFile, "[]");
+  await writeFile(
+    qmdCommand,
+    `#!/usr/bin/env bash
+set -euo pipefail
+echo "$@" >> "$STATE_FILE"
+case "\${1:-}" in
+  collection)
+    case "\${2:-}" in
+      list)
+        if [ -f "$REGISTERED_FILE" ]; then
+          cat "$REGISTERED_FILE"
+        fi
+        ;;
+      add)
+        echo "$3" >> "$REGISTERED_FILE"
+        ;;
+    esac
+    ;;
+  query)
+    cat "$RESULTS_FILE"
+    ;;
+esac
+`,
+  );
+  await chmod(qmdCommand, 0o755);
+
+  return {
+    vaultRoot,
+    projectPath,
+    stateFile,
+    resultsFile,
+    env: {
+      QMD_COMMAND: qmdCommand,
+      STATE_FILE: stateFile,
+      REGISTERED_FILE: registeredFile,
+      RESULTS_FILE: resultsFile,
+    },
+  };
 }
