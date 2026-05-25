@@ -1,10 +1,11 @@
 bun test v1.4.0-canary.1 (184d0371a)
 
 tests/artifacts.test.ts:
-(pass) artifact store > creates DECISION-0001 in an empty decisions folder [5.49ms]
-(pass) artifact store > creates the next unused decision id when files already exist [1.72ms]
+(pass) artifact store > creates DECISION-0001 in an empty decisions folder [5.42ms]
+(pass) artifact store > creates the next unused decision id when files already exist [1.66ms]
+(pass) artifact store > reads a decision artifact with frontmatter fields and rendered body [1.51ms]
 
- 2 pass
+ 3 pass
  0 fail
- 9 expect() calls
-Ran 2 tests across 1 file. [25.00ms]
+ 12 expect() calls
+Ran 3 tests across 1 file. [25.00ms]

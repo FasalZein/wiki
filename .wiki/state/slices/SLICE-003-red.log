@@ -1,10 +1,14 @@
 bun test v1.4.0-canary.1 (184d0371a)
 
 tests/artifacts.test.ts:
-(pass) artifact store > creates DECISION-0001 in an empty decisions folder [5.47ms]
-(pass) artifact store > creates the next unused decision id when files already exist [1.68ms]
 
- 2 pass
- 0 fail
- 9 expect() calls
-Ran 2 tests across 1 file. [23.00ms]
+# Unhandled error between tests
+-------------------------------
+SyntaxError: Export named 'readArtifact' not found in module '/Users/tothemoon/Dev/code-forge/wiki/src/artifacts/store.ts'.
+-------------------------------
+
+
+ 0 pass
+ 1 fail
+ 1 error
+Ran 1 test across 1 file. [17.00ms]

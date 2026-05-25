@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { createArtifact } from "../src/artifacts/store";
+import { createArtifact, readArtifact } from "../src/artifacts/store";
 
 const tempPaths: string[] = [];
 
@@ -47,6 +47,17 @@ describe("artifact store", () => {
     });
 
     expect(artifact.id).toBe("DECISION-0002");
+  });
+
+  test("reads a decision artifact with frontmatter fields and rendered body", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    await createArtifact({ type: "decision", vaultRoot, project: "wiki-v2", fields: decisionFields() });
+
+    const artifact = await readArtifact({ type: "decision", vaultRoot, project: "wiki-v2", id: "DECISION-0001" });
+
+    expect(artifact.fields.title).toBe("Use SQLite");
+    expect(artifact.body).toContain("# Use SQLite");
+    expect(artifact.body).toContain("## Decision\n\nUse SQLite for local persistence.");
   });
 });
 

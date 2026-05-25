@@ -1,4 +1,5 @@
-import { rename, writeFile } from "node:fs/promises";
+import matter from "gray-matter";
+import { readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { loadTemplate, type TemplateType } from "../schema/load";
@@ -13,6 +14,13 @@ export type CreateArtifactInput = {
   vaultRoot: string;
   project: string;
   fields: Record<string, unknown>;
+};
+
+export type ReadArtifactInput = {
+  type: TemplateType;
+  vaultRoot: string;
+  project: string;
+  id: string;
 };
 
 export type Artifact = {
@@ -31,6 +39,17 @@ export class ArtifactValidationError extends Error {
   }
 }
 
+export async function readArtifact(input: ReadArtifactInput): Promise<Artifact> {
+  const path = artifactPath(input.type, input.vaultRoot, input.project, input.id);
+  const parsed = matter(await readFile(path, "utf8"));
+  return {
+    id: input.id,
+    path,
+    fields: parsed.data,
+    body: parsed.content.trimStart(),
+  };
+}
+
 export async function createArtifact(input: CreateArtifactInput): Promise<Artifact> {
   const schema = await loadTemplate(input.type);
   const id = await nextId(input.type, input.vaultRoot, input.project);
@@ -46,7 +65,7 @@ export async function createArtifact(input: CreateArtifactInput): Promise<Artifa
 
   const templateFile = Bun.file(new URL(`../../templates/${input.type}.md`, import.meta.url));
   const content = renderArtifact(await templateFile.text(), result.value);
-  const path = join(artifactDirectory(input.type, input.vaultRoot, input.project), `${id}.md`);
+  const path = artifactPath(input.type, input.vaultRoot, input.project, id);
   await atomicWrite(path, content);
 
   return {
@@ -55,6 +74,10 @@ export async function createArtifact(input: CreateArtifactInput): Promise<Artifa
     fields: result.value,
     body: content,
   };
+}
+
+function artifactPath(type: TemplateType, vaultRoot: string, project: string, id: string): string {
+  return join(artifactDirectory(type, vaultRoot, project), `${id}.md`);
 }
 
 async function atomicWrite(path: string, content: string): Promise<void> {
