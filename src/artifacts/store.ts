@@ -125,9 +125,23 @@ export async function createArtifact(input: CreateArtifactInput): Promise<Artifa
 
 async function assertKnownField(type: TemplateType, existing: Artifact, fieldName: string): Promise<void> {
   const schema = await loadTemplate(type);
-  if (!schema.fields.some((field) => field.name === fieldName) && existing.fields[fieldName] === undefined) {
+  const templateFile = Bun.file(new URL(`../../templates/${type}.md`, import.meta.url));
+  const template = await templateFile.text();
+  if (
+    !schema.fields.some((field) => field.name === fieldName) &&
+    existing.fields[fieldName] === undefined &&
+    !templatePlaceholders(template).has(fieldName)
+  ) {
     throw new ArtifactValidationError([{ field: fieldName, reason: "unknown field" }]);
   }
+}
+
+function templatePlaceholders(template: string): Set<string> {
+  return new Set([...template.matchAll(/{{([A-Za-z0-9_]+)}}/g)].map((match) => match[1]).filter(isString));
+}
+
+function isString(value: string | undefined): value is string {
+  return value !== undefined;
 }
 
 async function writeFields(input: ReadArtifactInput, existing: Artifact, fields: NormalizedRecord): Promise<Artifact> {

@@ -49,6 +49,25 @@ describe("artifact store", () => {
     expect(artifact.id).toBe("DECISION-0002");
   });
 
+  test("creates PRD-0001 in an empty prds folder", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    const artifact = await createArtifact({
+      type: "prd",
+      vaultRoot,
+      project: "wiki-v2",
+      fields: { title: "Core wiki CLI" },
+    });
+
+    expect(artifact.id).toBe("PRD-0001");
+    expect(artifact.path).toBe(join(vaultRoot, "projects", "wiki-v2", "prds", "PRD-0001.md"));
+
+    const file = await readFile(artifact.path, "utf8");
+    expect(file).toContain("id: PRD-0001");
+    expect(file).toContain("title: Core wiki CLI");
+    expect(file).toContain("project: wiki-v2");
+    expect(file).toContain("status: draft");
+  });
+
   test("reads a decision artifact with frontmatter fields and rendered body", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
     await createArtifact({ type: "decision", vaultRoot, project: "wiki-v2", fields: decisionFields() });
