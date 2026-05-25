@@ -105,3 +105,27 @@ tests/cli-slice.test.ts:
  0 fail
  3 expect() calls
 Ran 1 test across 1 file. [130.00ms]
+--- slice append acceptance RED ---
+bun test v1.4.0-canary.1 (184d0371a)
+
+tests/cli-slice.test.ts:
+117 |     const result = await runWiki(
+118 |       ["slice", "append", "SLICE-0001", "--project", "wiki-v2", "--field", "acceptance", "First criterion"],
+119 |       vaultRoot,
+120 |     );
+121 | 
+122 |     expect(result.exitCode).toBe(0);
+                                  ^
+error: expect(received).toBe(expected)
+
+Expected: 0
+Received: 1
+
+      at <anonymous> (/Users/tothemoon/Dev/code-forge/wiki/tests/cli-slice.test.ts:122:29)
+(fail) slice CLI > slice append adds a value to the acceptance list [89.87ms]
+
+ 0 pass
+ 6 filtered out
+ 1 fail
+ 2 expect() calls
+Ran 1 test across 1 file. [97.00ms]

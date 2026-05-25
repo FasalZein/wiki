@@ -108,6 +108,21 @@ describe("slice CLI", () => {
     );
     expect(show.stdout).toBe("First line\nSecond line\n");
   });
+
+  test("slice append adds a value to the acceptance list", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    await seedPrd(vaultRoot);
+    await runWiki(createArgs(), vaultRoot);
+
+    const result = await runWiki(
+      ["slice", "append", "SLICE-0001", "--project", "wiki-v2", "--field", "acceptance", "First criterion"],
+      vaultRoot,
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toContain("updated SLICE-0001");
+    expect(await readSlice(vaultRoot, "SLICE-0001")).toContain("acceptance:\n  - First criterion");
+  });
 });
 
 function createArgs(): string[] {
