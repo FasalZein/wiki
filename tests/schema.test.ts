@@ -108,4 +108,23 @@ describe("template schemas", () => {
       ],
     });
   });
+
+  test("rejects a list below its minimum count with the field name and minimum", async () => {
+    const schema = await loadTemplate("slice");
+
+    expect(
+      validate(schema, {
+        id: "SLICE-001",
+        title: "Template schema loader",
+        project: "wiki-v2",
+        parent_prd: "PRD-001",
+        status: "planned",
+        type: "AFK",
+        acceptance: [],
+      }),
+    ).toEqual({
+      ok: false,
+      errors: [{ field: "acceptance", reason: "below minimum count", expected: "at least 1 item" }],
+    });
+  });
 });

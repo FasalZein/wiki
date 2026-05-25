@@ -28,6 +28,12 @@ export function validate(
         expected: `one of: ${field.constraints.values.join(", ")}`,
       });
     }
+    if ((field.type === "list" || field.type === "link_list") && Array.isArray(value)) {
+      const min = field.constraints.min;
+      if (min !== undefined && value.length < min) {
+        errors.push({ field: field.name, reason: "below minimum count", expected: `at least ${min} item` });
+      }
+    }
   }
 
   if (errors.length > 0) {
