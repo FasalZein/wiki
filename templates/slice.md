@@ -10,7 +10,7 @@ schema:
   type:            { type: enum,      required: true, values: [HITL, AFK], default: AFK, description: "HITL = needs human interaction; AFK = agent-completable" }
   blocked_by:      { type: link_list, target: slice, default: [] }
   user_stories:    { type: list,      default: [], description: "References to PRD user-story IDs covered by this slice" }
-  acceptance:      { type: list,      required: true, min: 1, description: "Checkboxes; one per criterion" }
+  acceptance:      { type: list,      required: true, default: [], description: "Checkboxes; one per criterion. SLICE-006 state machine enforces non-empty before transitioning out of planned." }
   todo:            { type: list,      default: [], description: "Structured items with id/text/done; CLI gates close on all done" }
   red_log_ref:     { type: file_ref,  description: "CLI-state path to captured failing-test output; set by `wiki slice red`" }
   green_log_ref:   { type: file_ref,  description: "CLI-state path to captured passing-test output; set by `wiki slice green`" }

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { loadTemplate } from "../src/schema/load";
+import type { Schema } from "../src/schema/types";
 import { validate } from "../src/schema/validate";
 
 describe("template schemas", () => {
@@ -109,22 +110,16 @@ describe("template schemas", () => {
     });
   });
 
-  test("rejects a list below its minimum count with the field name and minimum", async () => {
-    const schema = await loadTemplate("slice");
+  test("rejects a list below its minimum count with the field name and minimum", () => {
+    const schema: Schema = {
+      template: "synthetic",
+      version: 1,
+      fields: [{ name: "tags", type: "list", required: true, constraints: { min: 2 } }],
+    };
 
-    expect(
-      validate(schema, {
-        id: "SLICE-001",
-        title: "Template schema loader",
-        project: "wiki-v2",
-        parent_prd: "PRD-001",
-        status: "planned",
-        type: "AFK",
-        acceptance: [],
-      }),
-    ).toEqual({
+    expect(validate(schema, { tags: ["only-one"] })).toEqual({
       ok: false,
-      errors: [{ field: "acceptance", reason: "below minimum count", expected: "at least 1 item" }],
+      errors: [{ field: "tags", reason: "below minimum count", expected: "at least 2 item" }],
     });
   });
 
