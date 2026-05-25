@@ -58,6 +58,7 @@ export async function readArtifact(input: ReadArtifactInput): Promise<Artifact> 
 }
 
 export async function setField(input: SetFieldInput): Promise<Artifact> {
+  await assertKnownField(input.type, input.field);
   const existing = await readArtifact(input);
   return writeFields(input, existing, {
     ...existing.fields,
@@ -104,6 +105,13 @@ export async function createArtifact(input: CreateArtifactInput): Promise<Artifa
     fields: result.value,
     body: content,
   };
+}
+
+async function assertKnownField(type: TemplateType, fieldName: string): Promise<void> {
+  const schema = await loadTemplate(type);
+  if (!schema.fields.some((field) => field.name === fieldName)) {
+    throw new ArtifactValidationError([{ field: fieldName, reason: "unknown field" }]);
+  }
 }
 
 async function writeFields(input: ReadArtifactInput, existing: Artifact, fields: NormalizedRecord): Promise<Artifact> {

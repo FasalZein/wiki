@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { appendField, createArtifact, readArtifact, setField } from "../src/artifacts/store";
+import { appendField, ArtifactValidationError, createArtifact, readArtifact, setField } from "../src/artifacts/store";
 
 const tempPaths: string[] = [];
 
@@ -95,6 +95,22 @@ describe("artifact store", () => {
 
     expect(after.fields.context_terms).toEqual(["Vault"]);
     expect(after.body).toBe(before.body);
+  });
+
+  test("rejects setting a field not declared by the template schema", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    await createArtifact({ type: "decision", vaultRoot, project: "wiki-v2", fields: decisionFields() });
+
+    await expect(
+      setField({
+        type: "decision",
+        vaultRoot,
+        project: "wiki-v2",
+        id: "DECISION-0001",
+        field: "unknown",
+        value: "value",
+      }),
+    ).rejects.toThrow(ArtifactValidationError);
   });
 });
 

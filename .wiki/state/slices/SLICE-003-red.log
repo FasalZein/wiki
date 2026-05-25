@@ -1,14 +1,27 @@
 bun test v1.4.0-canary.1 (184d0371a)
 
 tests/artifacts.test.ts:
+(pass) artifact store > creates DECISION-0001 in an empty decisions folder [6.59ms]
+(pass) artifact store > creates the next unused decision id when files already exist [2.15ms]
+(pass) artifact store > reads a decision artifact with frontmatter fields and rendered body [1.53ms]
+(pass) artifact store > sets one frontmatter field and preserves the rendered body [1.90ms]
+(pass) artifact store > appends to a list frontmatter field in order and preserves the body [1.81ms]
+108 |         project: "wiki-v2",
+109 |         id: "DECISION-0001",
+110 |         field: "unknown",
+111 |         value: "value",
+112 |       }),
+113 |     ).rejects.toThrow(ArtifactValidationError);
+                    ^
+error: expect(received).rejects.toThrow(expected)
 
-# Unhandled error between tests
--------------------------------
-SyntaxError: Export named 'appendField' not found in module '/Users/tothemoon/Dev/code-forge/wiki/src/artifacts/store.ts'.
--------------------------------
+Expected promise that rejects
+Received promise that resolved: Promise { <resolved> }
 
+      at <anonymous> (/Users/tothemoon/Dev/code-forge/wiki/tests/artifacts.test.ts:113:15)
+(fail) artifact store > rejects setting a field not declared by the template schema [1.83ms]
 
- 0 pass
+ 5 pass
  1 fail
- 1 error
-Ran 1 test across 1 file. [20.00ms]
+ 18 expect() calls
+Ran 6 tests across 1 file. [39.00ms]
