@@ -1,6 +1,7 @@
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
 
+import { decideTransition } from "../../artifacts/transitions";
 import {
   appendField,
   ArtifactNotFoundError,
@@ -27,6 +28,9 @@ export async function handleSlice(args: string[]): Promise<CliResult> {
   }
   if (subverb === "append") {
     return appendSlice(rest);
+  }
+  if (subverb === "red") {
+    return redSlice(rest);
   }
   console.error(`unknown slice subverb: ${subverb ?? ""}`.trim());
   return { code: 1 };
@@ -119,6 +123,33 @@ async function setSlice(args: string[]): Promise<CliResult> {
     return { code: 0 };
   } catch (error) {
     if (error instanceof ArtifactNotFoundError || error instanceof ArtifactValidationError) {
+      console.error(error.message);
+      return { code: 1 };
+    }
+    throw error;
+  }
+}
+
+async function redSlice(args: string[]): Promise<CliResult> {
+  const parsed = parseCommand(args, ["project"]);
+  const id = parsed.positionals[0];
+  const project = stringValue(parsed.values, "project");
+  if (id === undefined || project === undefined) {
+    console.error("missing required field: id, project");
+    return { code: 1 };
+  }
+
+  const vaultRoot = await getVaultRoot();
+  try {
+    const artifact = await readArtifact({ type: "slice", vaultRoot, project, id });
+    const decision = decideTransition({ id, verb: "red", status: artifact.fields.status });
+    if (!decision.ok) {
+      console.error(decision.reason);
+      return { code: decision.exitCode };
+    }
+    return { code: 0 };
+  } catch (error) {
+    if (error instanceof ArtifactNotFoundError) {
       console.error(error.message);
       return { code: 1 };
     }
