@@ -169,4 +169,15 @@ describe("vault config", () => {
 
     expect(await resolveCurrentProject(nestedPath)).toBe("wiki-v2");
   });
+
+  test("resolveCurrentProject returns null outside a project folder", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "wiki-vault-"));
+    const outsidePath = await mkdtemp(join(tmpdir(), "wiki-outside-"));
+    tempPaths.push(vaultRoot, outsidePath);
+    await mkdir(join(vaultRoot, "projects"));
+    process.env.KNOWLEDGE_VAULT_ROOT = vaultRoot;
+
+    expect(await resolveCurrentProject(join(vaultRoot, "projects"))).toBeNull();
+    expect(await resolveCurrentProject(outsidePath)).toBeNull();
+  });
 });

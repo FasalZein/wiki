@@ -390,3 +390,33 @@ error: Cannot find module '../src/config/project' from '/Users/tothemoon/Dev/cod
  1 error
  15 expect() calls
 Ran 9 tests across 2 files. [29.00ms]
+### RED 11: resolveCurrentProject outside project
+bun test v1.4.0-canary.1 (184d0371a)
+
+tests/schema.test.ts:
+(pass) template schemas > loads every shipped template with declared field constraints [4.47ms]
+(pass) template schemas > validates fully populated input and returns the normalized record [0.23ms]
+(pass) template schemas > rejects input missing a required field with the field name [0.15ms]
+(pass) template schemas > rejects a type mismatch with the field name and expected type [0.16ms]
+(pass) template schemas > rejects enum values outside the allowed set with the allowed values [0.12ms]
+(pass) template schemas > rejects a list below its minimum count with the field name and minimum [0.10ms]
+(pass) template schemas > rejects a string below its minimum length with the field name and minimum [0.08ms]
+(pass) template schemas > rejects pattern mismatches with the field name and pattern [0.10ms]
+
+tests/config.test.ts:
+(pass) vault config > getVaultRoot resolves the vault path from KNOWLEDGE_VAULT_ROOT first [0.84ms]
+(pass) vault config > getVaultRoot falls back to config file vault.root when env var is unset [1.86ms]
+(pass) vault config > getVaultRoot fails clearly when no vault root is configured [0.88ms]
+(pass) vault config > getVaultRoot expands tilde to the user's home directory [0.74ms]
+(pass) vault config > getVaultRoot returns an absolute path and rejects nonexistent roots [0.85ms]
+(pass) vault config > getConfig reads TOML and returns a typed WikiConfig object [0.89ms]
+(pass) vault config > getConfig returns defaults when the config file does not exist [0.58ms]
+(pass) vault config > detectHarness returns the harness named by explicit env vars [0.05ms]
+(pass) vault config > getConfig includes the harness detected at read time [1.16ms]
+(pass) vault config > resolveCurrentProject returns the project name when cwd is inside a project folder [0.91ms]
+(pass) vault config > resolveCurrentProject returns null outside a project folder [1.02ms]
+
+ 19 pass
+ 0 fail
+ 34 expect() calls
+Ran 19 tests across 2 files. [47.00ms]
