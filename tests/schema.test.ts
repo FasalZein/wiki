@@ -58,4 +58,13 @@ describe("template schemas", () => {
 
     expect(validate(schema, input)).toEqual({ ok: true, value: input });
   });
+
+  test("rejects input missing a required field with the field name", async () => {
+    const schema = await loadTemplate("prd");
+
+    expect(validate(schema, { id: "PRD-001", project: "wiki-v2", status: "draft" })).toEqual({
+      ok: false,
+      errors: [{ field: "title", reason: "required", expected: "string" }],
+    });
+  });
 });
