@@ -1,10 +1,9 @@
 bun test v1.4.0-canary.1 (184d0371a)
 
-tests/artifacts.test.ts:
-(pass) artifact store > rejects setting a field not declared by the template schema [6.15ms]
+tests/cli-decision.test.ts:
+(pass) decision CLI > decision create writes a new decision file and reports the id [36.95ms]
 
  1 pass
- 5 filtered out
  0 fail
- 1 expect() calls
-Ran 1 test across 1 file. [27.00ms]
+ 5 expect() calls
+Ran 1 test across 1 file. [46.00ms]
