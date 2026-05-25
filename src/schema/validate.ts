@@ -34,6 +34,12 @@ export function validate(
         errors.push({ field: field.name, reason: "below minimum count", expected: `at least ${min} item` });
       }
     }
+    if (isStringLike(field) && typeof value === "string") {
+      const min = field.constraints.min;
+      if (min !== undefined && value.length < min) {
+        errors.push({ field: field.name, reason: "below minimum length", expected: `at least ${min} characters` });
+      }
+    }
   }
 
   if (errors.length > 0) {
@@ -60,6 +66,10 @@ function matchesType(field: FieldDef, value: unknown): boolean {
     case "integer":
       return Number.isInteger(value);
   }
+}
+
+function isStringLike(field: FieldDef): boolean {
+  return field.type === "string" || field.type === "text" || field.type === "link" || field.type === "file_ref";
 }
 
 function expectedType(field: FieldDef): string {

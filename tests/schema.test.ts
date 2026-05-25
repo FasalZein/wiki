@@ -127,4 +127,13 @@ describe("template schemas", () => {
       errors: [{ field: "acceptance", reason: "below minimum count", expected: "at least 1 item" }],
     });
   });
+
+  test("rejects a string below its minimum length with the field name and minimum", async () => {
+    const schema = await loadTemplate("prd");
+
+    expect(validate(schema, { id: "PRD-001", title: "Tiny", project: "wiki-v2", status: "draft" })).toEqual({
+      ok: false,
+      errors: [{ field: "title", reason: "below minimum length", expected: "at least 5 characters" }],
+    });
+  });
 });
