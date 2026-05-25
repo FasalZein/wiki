@@ -42,15 +42,16 @@ async function setDecision(args: string[]): Promise<CliResult> {
 async function updateDecisionField(args: string[], mode: "set" | "append"): Promise<CliResult> {
   const parsed = parseCommand(args, ["project", "field"]);
   const id = parsed.positionals[0];
-  const value = parsed.positionals[1];
+  const rawValue = parsed.positionals[1];
   const project = stringValue(parsed.values, "project");
   const field = stringValue(parsed.values, "field");
-  if (id === undefined || project === undefined || field === undefined || value === undefined) {
+  if (id === undefined || project === undefined || field === undefined || rawValue === undefined) {
     console.error("missing required field: id, project, field, value");
     return { code: 1 };
   }
 
   const vaultRoot = await getVaultRoot();
+  const value = mode === "set" && rawValue === "-" ? await Bun.stdin.text() : rawValue;
   try {
     if (mode === "append") {
       await appendField({ type: "decision", vaultRoot, project, id, field, value });

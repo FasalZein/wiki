@@ -10,12 +10,21 @@ export function parseCommand(args: string[], stringFlags: string[]): ParsedComma
     args,
     allowPositionals: true,
     strict: true,
+    tokens: true,
     options: Object.fromEntries(stringFlags.map((flag) => [flag, { type: "string" }])),
   });
   return {
-    positionals: parsed.positionals,
+    positionals: parsed.positionals.length > 0 ? parsed.positionals : trailingPositionals(parsed.tokens),
     values: parsed.values,
   };
+}
+
+function trailingPositionals(tokens: Exclude<ReturnType<typeof parseArgs>["tokens"], undefined>): string[] {
+  const marker = tokens.findIndex((token) => token.kind === "option-terminator");
+  if (marker === -1) {
+    return [];
+  }
+  return tokens.slice(marker + 1).flatMap((token) => (token.kind === "positional" ? [token.value] : []));
 }
 
 export function stringValue(values: Record<string, string | boolean | string[]>, name: string): string | undefined {

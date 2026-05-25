@@ -127,6 +127,24 @@ describe("decision CLI", () => {
     expect(result.stderr).toContain("title");
     expect(result.stderr).toContain("not a list field");
   });
+
+  test("decision set reads a multiline value from stdin when value is dash", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    await runWiki(createArgs(), vaultRoot);
+
+    const result = await runWiki(
+      ["decision", "set", "DECISION-0001", "--project", "wiki-v2", "--field", "decision", "-"],
+      vaultRoot,
+      "First line\nSecond line",
+    );
+
+    expect(result.exitCode).toBe(0);
+    const show = await runWiki(
+      ["decision", "show", "DECISION-0001", "--project", "wiki-v2", "--field", "decision"],
+      vaultRoot,
+    );
+    expect(show.stdout).toBe("First line\nSecond line\n");
+  });
 });
 
 function createArgs(): string[] {
@@ -152,13 +170,18 @@ type CommandResult = {
   stderr: string;
 };
 
-async function runWiki(args: string[], vaultRoot: string): Promise<CommandResult> {
+async function runWiki(args: string[], vaultRoot: string, stdin?: string): Promise<CommandResult> {
   const proc = Bun.spawn(["bun", "src/cli.ts", ...args], {
     cwd: import.meta.dir.replace(/\/tests$/, ""),
     env: { ...process.env, KNOWLEDGE_VAULT_ROOT: vaultRoot },
+    stdin: stdin === undefined ? undefined : "pipe",
     stdout: "pipe",
     stderr: "pipe",
   });
+  if (stdin !== undefined && proc.stdin !== undefined) {
+    proc.stdin.write(stdin);
+    proc.stdin.end();
+  }
   const [stdout, stderr, exitCode] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),

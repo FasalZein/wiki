@@ -1,10 +1,23 @@
 bun test v1.4.0-canary.1 (184d0371a)
 
 tests/cli-decision.test.ts:
-(pass) decision CLI > decision append rejects non-list fields [63.74ms]
+136 |       ["decision", "set", "DECISION-0001", "--project", "wiki-v2", "--field", "decision", "-"],
+137 |       vaultRoot,
+138 |       "First line\nSecond line",
+139 |     );
+140 | 
+141 |     expect(result.exitCode).toBe(0);
+                                  ^
+error: expect(received).toBe(expected)
 
- 1 pass
- 8 filtered out
- 0 fail
- 3 expect() calls
-Ran 1 test across 1 file. [73.00ms]
+Expected: 0
+Received: 1
+
+      at <anonymous> (/Users/tothemoon/Dev/code-forge/wiki/tests/cli-decision.test.ts:141:29)
+(fail) decision CLI > decision set reads a multiline value from stdin when value is dash [63.51ms]
+
+ 0 pass
+ 9 filtered out
+ 1 fail
+ 1 expect() calls
+Ran 1 test across 1 file. [72.00ms]
