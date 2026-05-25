@@ -42,6 +42,16 @@ describe("search CLI", () => {
       `collection list\ncollection add wiki-v2 ${fixture.projectPath} **/*.md\nquery vault --json --collection wiki-v2\n`,
     );
   });
+
+  test("search exits 0 with empty stdout when QMD returns no results", async () => {
+    const fixture = await createSearchFixture("wiki-v2");
+
+    const result = await runWiki(["search", "missing", "--project", "wiki-v2"], fixture);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("");
+  });
 });
 
 type SearchFixture = {
