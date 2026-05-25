@@ -18,12 +18,7 @@ describe("artifact store", () => {
       type: "decision",
       vaultRoot,
       project: "wiki-v2",
-      fields: {
-        title: "Use SQLite",
-        context: "Need a durable local index.",
-        decision: "Use SQLite for local persistence.",
-        consequences: "Keep migrations small and explicit.",
-      },
+      fields: decisionFields(),
     });
 
     expect(artifact.id).toBe("DECISION-0001");
@@ -37,7 +32,32 @@ describe("artifact store", () => {
     expect(file).toContain("# Use SQLite");
     expect(file).toContain("Use SQLite for local persistence.");
   });
+
+  test("creates the next unused decision id when files already exist", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    const decisionsPath = join(vaultRoot, "projects", "wiki-v2", "decisions");
+    await writeFile(join(decisionsPath, "DECISION-0001.md"), "existing");
+    await writeFile(join(decisionsPath, "DECISION-0003.md"), "existing");
+
+    const artifact = await createArtifact({
+      type: "decision",
+      vaultRoot,
+      project: "wiki-v2",
+      fields: decisionFields(),
+    });
+
+    expect(artifact.id).toBe("DECISION-0002");
+  });
 });
+
+function decisionFields(): Record<string, unknown> {
+  return {
+    title: "Use SQLite",
+    context: "Need a durable local index.",
+    decision: "Use SQLite for local persistence.",
+    consequences: "Keep migrations small and explicit.",
+  };
+}
 
 async function createFixtureVault(project: string): Promise<string> {
   const vaultRoot = await mkdtemp(join(tmpdir(), "wiki-vault-"));
