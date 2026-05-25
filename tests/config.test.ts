@@ -5,7 +5,7 @@ import { join, relative, resolve } from "node:path";
 
 import { getConfig } from "../src/config/config";
 import { detectHarness } from "../src/config/harness";
-import { resolveCurrentProject } from "../src/config/project";
+import { assertProjectStructure, resolveCurrentProject } from "../src/config/project";
 import { getVaultRoot } from "../src/config/vault";
 
 const originalEnv = { ...process.env };
@@ -179,5 +179,19 @@ describe("vault config", () => {
 
     expect(await resolveCurrentProject(join(vaultRoot, "projects"))).toBeNull();
     expect(await resolveCurrentProject(outsidePath)).toBeNull();
+  });
+
+  test("assertProjectStructure verifies required project folders and _project.md", async () => {
+    const projectPath = await mkdtemp(join(tmpdir(), "wiki-project-"));
+    tempPaths.push(projectPath);
+
+    await expect(assertProjectStructure(projectPath)).rejects.toThrow("Project structure missing _project.md");
+
+    await writeFile(join(projectPath, "_project.md"), "# Project\n");
+    for (const folder of ["prds", "slices", "decisions", "handovers"]) {
+      await mkdir(join(projectPath, folder));
+    }
+
+    await expect(assertProjectStructure(projectPath)).resolves.toBeUndefined();
   });
 });

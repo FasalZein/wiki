@@ -319,3 +319,34 @@ tests/config.test.ts:
  0 fail
  32 expect() calls
 Ran 18 tests across 2 files. [37.00ms]
+### GREEN 12: assertProjectStructure required layout
+bun test v1.4.0-canary.1 (184d0371a)
+
+tests/schema.test.ts:
+(pass) template schemas > loads every shipped template with declared field constraints [3.39ms]
+(pass) template schemas > validates fully populated input and returns the normalized record [0.24ms]
+(pass) template schemas > rejects input missing a required field with the field name [0.13ms]
+(pass) template schemas > rejects a type mismatch with the field name and expected type [0.11ms]
+(pass) template schemas > rejects enum values outside the allowed set with the allowed values [0.09ms]
+(pass) template schemas > rejects a list below its minimum count with the field name and minimum [0.10ms]
+(pass) template schemas > rejects a string below its minimum length with the field name and minimum [0.10ms]
+(pass) template schemas > rejects pattern mismatches with the field name and pattern [0.08ms]
+
+tests/config.test.ts:
+(pass) vault config > getVaultRoot resolves the vault path from KNOWLEDGE_VAULT_ROOT first [0.85ms]
+(pass) vault config > getVaultRoot falls back to config file vault.root when env var is unset [1.72ms]
+(pass) vault config > getVaultRoot fails clearly when no vault root is configured [1.03ms]
+(pass) vault config > getVaultRoot expands tilde to the user's home directory [0.80ms]
+(pass) vault config > getVaultRoot returns an absolute path and rejects nonexistent roots [0.80ms]
+(pass) vault config > getConfig reads TOML and returns a typed WikiConfig object [0.98ms]
+(pass) vault config > getConfig returns defaults when the config file does not exist [0.40ms]
+(pass) vault config > detectHarness returns the harness named by explicit env vars [0.04ms]
+(pass) vault config > getConfig includes the harness detected at read time [0.51ms]
+(pass) vault config > resolveCurrentProject returns the project name when cwd is inside a project folder [0.81ms]
+(pass) vault config > resolveCurrentProject returns null outside a project folder [0.77ms]
+(pass) vault config > assertProjectStructure verifies required project folders and _project.md [1.30ms]
+
+ 20 pass
+ 0 fail
+ 36 expect() calls
+Ran 20 tests across 2 files. [40.00ms]
