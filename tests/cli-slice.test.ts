@@ -84,6 +84,19 @@ describe("slice CLI", () => {
     expect(result.stdout).toBe("");
   });
 
+  test("slice create exits 1 and names a schema-invalid title", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    await seedPrd(vaultRoot);
+    const args = createArgs();
+    args[args.indexOf("Build slice authoring")] = "Tiny";
+
+    const result = await runWiki(args, vaultRoot);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("title");
+    expect(result.stdout).toBe("");
+  });
+
   test("slice show prints the rendered body", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
     await seedPrd(vaultRoot);
