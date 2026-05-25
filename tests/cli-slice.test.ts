@@ -74,6 +74,21 @@ describe("slice CLI", () => {
     expect(after).toContain("title: Updated slice title");
     expect(after.slice(after.indexOf("# Build slice authoring"))).toBe(before.slice(before.indexOf("# Build slice authoring")));
   });
+
+  test("slice set status accepts a valid closed value without state enforcement", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    await seedPrd(vaultRoot);
+    await runWiki(createArgs(), vaultRoot);
+
+    const result = await runWiki(
+      ["slice", "set", "SLICE-0001", "--project", "wiki-v2", "--field", "status", "closed"],
+      vaultRoot,
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toContain("updated SLICE-0001");
+    expect(await readSlice(vaultRoot, "SLICE-0001")).toContain("status: closed");
+  });
 });
 
 function createArgs(): string[] {
