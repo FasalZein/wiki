@@ -1,10 +1,10 @@
 bun test v1.4.0-canary.1 (184d0371a)
 
 tests/cli-decision.test.ts:
-(pass) decision CLI > decision append adds a value to a list field [66.98ms]
+(pass) decision CLI > decision append rejects non-list fields [65.28ms]
 
  1 pass
- 7 filtered out
+ 8 filtered out
  0 fail
  3 expect() calls
 Ran 1 test across 1 file. [74.00ms]

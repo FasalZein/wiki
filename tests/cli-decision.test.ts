@@ -113,6 +113,20 @@ describe("decision CLI", () => {
     const after = await readFile(join(vaultRoot, "projects", "wiki-v2", "decisions", "DECISION-0001.md"), "utf8");
     expect(after).toContain("context_terms:\n  - Vault");
   });
+
+  test("decision append rejects non-list fields", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    await runWiki(createArgs(), vaultRoot);
+
+    const result = await runWiki(
+      ["decision", "append", "DECISION-0001", "--project", "wiki-v2", "--field", "title", "extra"],
+      vaultRoot,
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("title");
+    expect(result.stderr).toContain("not a list field");
+  });
 });
 
 function createArgs(): string[] {

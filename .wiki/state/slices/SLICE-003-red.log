@@ -1,23 +1,10 @@
 bun test v1.4.0-canary.1 (184d0371a)
 
 tests/cli-decision.test.ts:
-106 |     const result = await runWiki(
-107 |       ["decision", "append", "DECISION-0001", "--project", "wiki-v2", "--field", "context_terms", "Vault"],
-108 |       vaultRoot,
-109 |     );
-110 | 
-111 |     expect(result.exitCode).toBe(0);
-                                  ^
-error: expect(received).toBe(expected)
+(pass) decision CLI > decision append rejects non-list fields [63.74ms]
 
-Expected: 0
-Received: 1
-
-      at <anonymous> (/Users/tothemoon/Dev/code-forge/wiki/tests/cli-decision.test.ts:111:29)
-(fail) decision CLI > decision append adds a value to a list field [61.88ms]
-
- 0 pass
- 7 filtered out
- 1 fail
- 1 expect() calls
-Ran 1 test across 1 file. [71.00ms]
+ 1 pass
+ 8 filtered out
+ 0 fail
+ 3 expect() calls
+Ran 1 test across 1 file. [73.00ms]
