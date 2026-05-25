@@ -1,4 +1,5 @@
-import { stat } from "node:fs/promises";
+import matter from "gray-matter";
+import { readFile, stat } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 
 import { getVaultRoot } from "./vault";
@@ -13,11 +14,39 @@ export async function resolveCurrentProject(cwd = process.cwd()): Promise<string
   return projectName === undefined || projectName.length === 0 ? null : projectName;
 }
 
+export type ProjectConfig = {
+  repo: string;
+  test_command: string;
+};
+
+export class ProjectConfigError extends Error {
+  constructor() {
+    super("_project.md: missing 'repo' or 'test_command'");
+  }
+}
+
 export async function assertProjectStructure(projectPath: string): Promise<void> {
   await assertFile(join(projectPath, "_project.md"), "_project.md");
   for (const folder of ["prds", "slices", "decisions", "handovers"]) {
     await assertDirectory(join(projectPath, folder), `${folder}/`);
   }
+}
+
+export async function loadProjectConfig(projectPath: string): Promise<ProjectConfig> {
+  let content: string;
+  try {
+    content = await readFile(join(projectPath, "_project.md"), "utf8");
+  } catch (error) {
+    if (isFileNotFound(error)) {
+      throw new ProjectConfigError();
+    }
+    throw error;
+  }
+  const data = matter(content).data;
+  if (!isNonEmptyString(data.repo) || !isNonEmptyString(data.test_command)) {
+    throw new ProjectConfigError();
+  }
+  return { repo: data.repo, test_command: data.test_command };
 }
 
 async function assertFile(path: string, label: string): Promise<void> {
@@ -46,6 +75,10 @@ async function assertDirectory(path: string, label: string): Promise<void> {
     }
     throw error;
   }
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 function isFileNotFound(error: unknown): boolean {

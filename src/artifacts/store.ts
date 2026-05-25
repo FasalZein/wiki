@@ -28,6 +28,10 @@ export type SetFieldInput = ReadArtifactInput & {
   value: unknown;
 };
 
+export type SetFieldsInput = ReadArtifactInput & {
+  fields: Record<string, unknown>;
+};
+
 export type AppendFieldInput = SetFieldInput;
 
 export type Artifact = {
@@ -73,11 +77,23 @@ export async function readArtifact(input: ReadArtifactInput): Promise<Artifact> 
 }
 
 export async function setField(input: SetFieldInput): Promise<Artifact> {
+  return setFields({
+    type: input.type,
+    vaultRoot: input.vaultRoot,
+    project: input.project,
+    id: input.id,
+    fields: { [input.field]: input.value },
+  });
+}
+
+export async function setFields(input: SetFieldsInput): Promise<Artifact> {
   const existing = await readArtifact(input);
-  await assertKnownField(input.type, existing, input.field);
+  for (const field of Object.keys(input.fields)) {
+    await assertKnownField(input.type, existing, field);
+  }
   return writeFields(input, existing, {
     ...existing.fields,
-    [input.field]: input.value,
+    ...input.fields,
   });
 }
 
