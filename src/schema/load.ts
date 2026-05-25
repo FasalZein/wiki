@@ -69,10 +69,6 @@ function parseConstraints(raw: Record<string, unknown>): Constraints {
     constraints.item_type = raw.item_type;
   }
   if (typeof raw.description === "string") constraints.description = raw.description;
-  if (typeof raw.default === "string") constraints.default = raw.default;
-  if (Array.isArray(raw.default) && raw.default.every((value): value is string => typeof value === "string")) {
-    constraints.default = raw.default;
-  }
   return constraints;
 }
 

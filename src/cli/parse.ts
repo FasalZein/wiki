@@ -1,8 +1,10 @@
 import { parseArgs } from "node:util";
 
+export type ParsedValues = Record<string, string | boolean | string[] | undefined>;
+
 export type ParsedCommand = {
   positionals: string[];
-  values: Record<string, string | boolean | string[]>;
+  values: ParsedValues;
 };
 
 export function parseCommand(args: string[], stringFlags: string[]): ParsedCommand {
@@ -27,7 +29,7 @@ function trailingPositionals(tokens: Exclude<ReturnType<typeof parseArgs>["token
   return tokens.slice(marker + 1).flatMap((token) => (token.kind === "positional" ? [token.value] : []));
 }
 
-export function stringValue(values: Record<string, string | boolean | string[]>, name: string): string | undefined {
+export function stringValue(values: ParsedValues, name: string): string | undefined {
   const value = values[name];
   return typeof value === "string" ? value : undefined;
 }

@@ -22,16 +22,19 @@ export function renderArtifact(template: string, values: NormalizedRecord): stri
   return `${matter.stringify(body.trimStart(), values)}\n`;
 }
 
-export function applyDefaults(schema: Schema, input: Record<string, unknown>): NormalizedRecord {
+export function applyDefaults(schema: Schema, template: string, input: Record<string, unknown>): NormalizedRecord {
   const values: NormalizedRecord = { ...input };
   const today = new Date().toISOString().slice(0, 10);
+
+  const templateDefaults = readTemplateDefaults(template);
 
   for (const field of schema.fields) {
     if (values[field.name] !== undefined) {
       continue;
     }
-    if (field.constraints.default !== undefined) {
-      values[field.name] = field.constraints.default;
+    const templateDefault = templateDefaults[field.name];
+    if (templateDefault !== undefined) {
+      values[field.name] = templateDefault;
     } else if (field.name === "created" || field.name === "updated") {
       values[field.name] = today;
     } else if (field.type === "list" || field.type === "link_list") {
@@ -42,6 +45,25 @@ export function applyDefaults(schema: Schema, input: Record<string, unknown>): N
   return values;
 }
 
+function readTemplateDefaults(template: string): Record<string, unknown> {
+  const parsed = matter(normalizeInlineMaps(template));
+  const rawSchema = parsed.data.schema;
+  if (!isRecord(rawSchema)) {
+    return {};
+  }
+  const defaults: Record<string, unknown> = {};
+  for (const [fieldName, rawField] of Object.entries(rawSchema)) {
+    if (isRecord(rawField) && rawField.default !== undefined) {
+      defaults[fieldName] = rawField.default;
+    }
+  }
+  return defaults;
+}
+
 function normalizeInlineMaps(template: string): string {
-  return template.replace(/^(\s*[A-Za-z0-9_]+):(\{)/gm, "$1: $2");
+  return template.replace(/^(\s*[A-Za-z0-9_]+):(\s*\{)/gm, "$1: $2");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

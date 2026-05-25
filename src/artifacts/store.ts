@@ -98,8 +98,10 @@ export async function appendField(input: AppendFieldInput): Promise<Artifact> {
 
 export async function createArtifact(input: CreateArtifactInput): Promise<Artifact> {
   const schema = await loadTemplate(input.type);
+  const templateFile = Bun.file(new URL(`../../templates/${input.type}.md`, import.meta.url));
+  const template = await templateFile.text();
   const id = await nextId(input.type, input.vaultRoot, input.project);
-  const fields = applyDefaults(schema, {
+  const fields = applyDefaults(schema, template, {
     ...input.fields,
     id,
     project: input.project,
@@ -109,8 +111,7 @@ export async function createArtifact(input: CreateArtifactInput): Promise<Artifa
     throw new ArtifactValidationError(result.errors);
   }
 
-  const templateFile = Bun.file(new URL(`../../templates/${input.type}.md`, import.meta.url));
-  const content = renderArtifact(await templateFile.text(), result.value);
+  const content = renderArtifact(template, result.value);
   const path = artifactPath(input.type, input.vaultRoot, input.project, id);
   await atomicWrite(path, content);
 

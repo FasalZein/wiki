@@ -115,15 +115,20 @@ async function createDecision(args: string[]): Promise<CliResult> {
   const context = stringValue(parsed.values, "context");
   const decision = stringValue(parsed.values, "decision");
   const consequences = stringValue(parsed.values, "consequences");
-  const missing = [
-    ["project", project],
-    ["title", title],
-    ["context", context],
-    ["decision", decision],
-    ["consequences", consequences],
-  ].flatMap(([name, value]) => (value === undefined ? [name] : []));
+  const required = { project, title, context, decision, consequences };
+  const missing = Object.entries(required).flatMap(([name, value]) => (value === undefined ? [name] : []));
   if (missing.length > 0) {
     console.error(`missing required field: ${missing.join(", ")}`);
+    return { code: 1 };
+  }
+
+  if (
+    project === undefined ||
+    title === undefined ||
+    context === undefined ||
+    decision === undefined ||
+    consequences === undefined
+  ) {
     return { code: 1 };
   }
 

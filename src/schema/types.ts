@@ -18,7 +18,6 @@ export type Constraints = {
   target?: string;
   item_type?: FieldType;
   description?: string;
-  default?: string | string[];
 };
 
 export type FieldDef = {
