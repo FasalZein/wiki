@@ -44,6 +44,18 @@ describe("slice CLI", () => {
     expect(result.stdout).toContain("[[PRD-0001]]");
     expect(result.stderr).toBe("");
   });
+
+  test("slice show --field prints only that field", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    await seedPrd(vaultRoot);
+    await runWiki(createArgs(), vaultRoot);
+
+    const result = await runWiki(["slice", "show", "SLICE-0001", "--project", "wiki-v2", "--field", "title"], vaultRoot);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("Build slice authoring\n");
+    expect(result.stderr).toBe("");
+  });
 });
 
 function createArgs(): string[] {
