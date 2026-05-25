@@ -1,0 +1,307 @@
+bun test v1.4.0-canary.1 (184d0371a)
+
+tests/cli-handover.test.ts:
+13 |   test("handover create with required flags writes an open handover", async () => {
+14 |     const vaultRoot = await createFixtureVault("wiki-v2");
+15 | 
+16 |     const result = await runWiki(["handover", "create", "--project", "wiki-v2", "--phase", "plan"], vaultRoot);
+17 | 
+18 |     expect(result.exitCode).toBe(0);
+                                 ^
+error: expect(received).toBe(expected)
+
+Expected: 0
+Received: 1
+
+      at <anonymous> (/private/tmp/wiki-slice007-red/tests/cli-handover.test.ts:18:29)
+(fail) handover CLI > handover create with required flags writes an open handover [41.55ms]
+29 |     const vaultRoot = await createFixtureVault("wiki-v2");
+30 | 
+31 |     const result = await runWiki(["handover", "create", "--project", "wiki-v2"], vaultRoot);
+32 | 
+33 |     expect(result.exitCode).toBe(1);
+34 |     expect(result.stderr).toContain("phase");
+                               ^
+error: expect(received).toContain(expected)
+
+Expected to contain: "phase"
+Received: "unknown verb: handover\n"
+
+      at <anonymous> (/private/tmp/wiki-slice007-red/tests/cli-handover.test.ts:34:27)
+(fail) handover CLI > handover create missing --phase exits 1 [25.37ms]
+39 |     const vaultRoot = await createFixtureVault("wiki-v2");
+40 | 
+41 |     const result = await runWiki(["handover", "create", "--phase", "plan"], vaultRoot);
+42 | 
+43 |     expect(result.exitCode).toBe(1);
+44 |     expect(result.stderr).toContain("project");
+                               ^
+error: expect(received).toContain(expected)
+
+Expected to contain: "project"
+Received: "unknown verb: handover\n"
+
+      at <anonymous> (/private/tmp/wiki-slice007-red/tests/cli-handover.test.ts:44:27)
+(fail) handover CLI > handover create missing --project exits 1 [24.05ms]
+62 |         "SLICE-0002",
+63 |       ],
+64 |       vaultRoot,
+65 |     );
+66 | 
+67 |     expect(result.exitCode).toBe(0);
+                                 ^
+error: expect(received).toBe(expected)
+
+Expected: 0
+Received: 1
+
+      at <anonymous> (/private/tmp/wiki-slice007-red/tests/cli-handover.test.ts:67:29)
+(fail) handover CLI > handover create stores repeated active slices [25.88ms]
+76 |       ["handover", "create", "--project", "wiki-v2", "--phase", "plan", "--produced", "-"],
+77 |       vaultRoot,
+78 |       "Built one thing\nVerified it",
+79 |     );
+80 | 
+81 |     expect(result.exitCode).toBe(0);
+                                 ^
+error: expect(received).toBe(expected)
+
+Expected: 0
+Received: 1
+
+      at <anonymous> (/private/tmp/wiki-slice007-red/tests/cli-handover.test.ts:81:29)
+(fail) handover CLI > handover create reads produced prose from stdin [25.30ms]
+87 |     const vaultRoot = await createFixtureVault("wiki-v2");
+88 |     await runWiki(["handover", "create", "--project", "wiki-v2", "--phase", "plan"], vaultRoot);
+89 | 
+90 |     const result = await runWiki(["handover", "show", "HANDOVER-0001", "--project", "wiki-v2"], vaultRoot);
+91 | 
+92 |     expect(result.exitCode).toBe(0);
+                                 ^
+error: expect(received).toBe(expected)
+
+Expected: 0
+Received: 1
+
+      at <anonymous> (/private/tmp/wiki-slice007-red/tests/cli-handover.test.ts:92:29)
+(fail) handover CLI > handover show prints the rendered body [48.02ms]
+102 |     const result = await runWiki(
+103 |       ["handover", "show", "HANDOVER-0001", "--project", "wiki-v2", "--field", "phase"],
+104 |       vaultRoot,
+105 |     );
+106 | 
+107 |     expect(result.exitCode).toBe(0);
+                                  ^
+error: expect(received).toBe(expected)
+
+Expected: 0
+Received: 1
+
+      at <anonymous> (/private/tmp/wiki-slice007-red/tests/cli-handover.test.ts:107:29)
+(fail) handover CLI > handover show --field prints one field [49.41ms]
+113 |     const vaultRoot = await createFixtureVault("wiki-v2");
+114 | 
+115 |     const result = await runWiki(["handover", "show", "HANDOVER-9999", "--project", "wiki-v2"], vaultRoot);
+116 | 
+117 |     expect(result.exitCode).toBe(1);
+118 |     expect(result.stderr).toContain("not found");
+                                ^
+error: expect(received).toContain(expected)
+
+Expected to contain: "not found"
+Received: "unknown verb: handover\n"
+
+      at <anonymous> (/private/tmp/wiki-slice007-red/tests/cli-handover.test.ts:118:27)
+(fail) handover CLI > handover show missing id exits 1 [24.83ms]
+120 |   });
+121 | 
+122 |   test("handover set updates a field and preserves the body", async () => {
+123 |     const vaultRoot = await createFixtureVault("wiki-v2");
+124 |     await runWiki(["handover", "create", "--project", "wiki-v2", "--phase", "plan"], vaultRoot);
+125 |     const before = await readHandover(vaultRoot, "HANDOVER-0001");
+                               ^
+ENOENT: no such file or directory, open '/var/folders/s4/q7gwyx7x7w7d1z8x5vg5cspr0000gn/T/wiki-vault-hxz1vu/projects/wiki-v2/handovers/HANDOVER-0001.md'
+    path: "/var/folders/s4/q7gwyx7x7w7d1z8x5vg5cspr0000gn/T/wiki-vault-hxz1vu/projects/wiki-v2/handovers/HANDOVER-0001.md",
+ syscall: "open",
+   errno: -2,
+    code: "ENOENT"
+
+      at async <anonymous> (/private/tmp/wiki-slice007-red/tests/cli-handover.test.ts:125:26)
+(fail) handover CLI > handover set updates a field and preserves the body [26.02ms]
+142 |     const result = await runWiki(
+143 |       ["handover", "append", "HANDOVER-0001", "--project", "wiki-v2", "--field", "suggested_skills", "/wiki"],
+144 |       vaultRoot,
+145 |     );
+146 | 
+147 |     expect(result.exitCode).toBe(0);
+                                  ^
+error: expect(received).toBe(expected)
+
+Expected: 0
+Received: 1
+
+      at <anonymous> (/private/tmp/wiki-slice007-red/tests/cli-handover.test.ts:147:29)
+(fail) handover CLI > handover append adds to a list field [47.57ms]
+156 |       ["handover", "append", "HANDOVER-0001", "--project", "wiki-v2", "--field", "phase", "review"],
+157 |       vaultRoot,
+158 |     );
+159 | 
+160 |     expect(result.exitCode).toBe(1);
+161 |     expect(result.stderr).toContain("phase");
+                                ^
+error: expect(received).toContain(expected)
+
+Expected to contain: "phase"
+Received: "unknown verb: handover\n"
+
+      at <anonymous> (/private/tmp/wiki-slice007-red/tests/cli-handover.test.ts:161:27)
+(fail) handover CLI > handover append rejects non-list fields [48.90ms]
+165 |   test("handover write aliases create", async () => {
+166 |     const vaultRoot = await createFixtureVault("wiki-v2");
+167 | 
+168 |     const result = await runWiki(["handover", "write", "--project", "wiki-v2", "--phase", "handover"], vaultRoot);
+169 | 
+170 |     expect(result.exitCode).toBe(0);
+                                  ^
+error: expect(received).toBe(expected)
+
+Expected: 0
+Received: 1
+
+      at <anonymous> (/private/tmp/wiki-slice007-red/tests/cli-handover.test.ts:170:29)
+(fail) handover CLI > handover write aliases create [24.56ms]
+
+tests/cli-term.test.ts:
+13 |   test("term set creates architecture folder and domain-language.md", async () => {
+14 |     const vaultRoot = await createFixtureVault("wiki-v2");
+15 | 
+16 |     const result = await runWiki(["term", "set", "Vault", "The locked Obsidian root.", "--project", "wiki-v2"], vaultRoot);
+17 | 
+18 |     expect(result.exitCode).toBe(0);
+                                 ^
+error: expect(received).toBe(expected)
+
+Expected: 0
+Received: 1
+
+      at <anonymous> (/private/tmp/wiki-slice007-red/tests/cli-term.test.ts:18:29)
+(fail) term CLI > term set creates architecture folder and domain-language.md [24.98ms]
+27 |     await runWiki(["term", "set", "Vault", "v1", "--project", "wiki-v2"], vaultRoot);
+28 |     await runWiki(["term", "set", "Project", "A folder under `projects/`.", "--project", "wiki-v2"], vaultRoot);
+29 | 
+30 |     const result = await runWiki(["term", "set", "Vault", "v2", "--project", "wiki-v2"], vaultRoot);
+31 | 
+32 |     expect(result.exitCode).toBe(0);
+                                 ^
+error: expect(received).toBe(expected)
+
+Expected: 0
+Received: 1
+
+      at <anonymous> (/private/tmp/wiki-slice007-red/tests/cli-term.test.ts:32:29)
+(fail) term CLI > term set updates an existing section and preserves other terms [70.56ms]
+41 |     const vaultRoot = await createFixtureVault("wiki-v2");
+42 |     await runWiki(["term", "set", "Vault", "The locked Obsidian root.", "--project", "wiki-v2"], vaultRoot);
+43 | 
+44 |     const result = await runWiki(["term", "set", "Project", "A folder under `projects/`.", "--project", "wiki-v2"], vaultRoot);
+45 | 
+46 |     expect(result.exitCode).toBe(0);
+                                 ^
+error: expect(received).toBe(expected)
+
+Expected: 0
+Received: 1
+
+      at <anonymous> (/private/tmp/wiki-slice007-red/tests/cli-term.test.ts:46:29)
+(fail) term CLI > term set keeps sections in alphabetical order [48.45ms]
+51 |   test("term set reads a multiline body from stdin", async () => {
+52 |     const vaultRoot = await createFixtureVault("wiki-v2");
+53 | 
+54 |     const result = await runWiki(["term", "set", "Vault", "-", "--project", "wiki-v2"], vaultRoot, "Line one\nLine two");
+55 | 
+56 |     expect(result.exitCode).toBe(0);
+                                 ^
+error: expect(received).toBe(expected)
+
+Expected: 0
+Received: 1
+
+      at <anonymous> (/private/tmp/wiki-slice007-red/tests/cli-term.test.ts:56:29)
+(fail) term CLI > term set reads a multiline body from stdin [24.95ms]
+61 |     const vaultRoot = await createFixtureVault("wiki-v2");
+62 |     await runWiki(["term", "set", "Vault", "The locked Obsidian root.", "--project", "wiki-v2"], vaultRoot);
+63 | 
+64 |     const result = await runWiki(["term", "show", "Vault", "--project", "wiki-v2"], vaultRoot);
+65 | 
+66 |     expect(result.exitCode).toBe(0);
+                                 ^
+error: expect(received).toBe(expected)
+
+Expected: 0
+Received: 1
+
+      at <anonymous> (/private/tmp/wiki-slice007-red/tests/cli-term.test.ts:66:29)
+(fail) term CLI > term show prints a term body [49.13ms]
+72 |     const vaultRoot = await createFixtureVault("wiki-v2");
+73 | 
+74 |     const result = await runWiki(["term", "show", "Unknown", "--project", "wiki-v2"], vaultRoot);
+75 | 
+76 |     expect(result.exitCode).toBe(1);
+77 |     expect(result.stderr).toContain("term not found: Unknown");
+                               ^
+error: expect(received).toContain(expected)
+
+Expected to contain: "term not found: Unknown"
+Received: "unknown verb: term\n"
+
+      at <anonymous> (/private/tmp/wiki-slice007-red/tests/cli-term.test.ts:77:27)
+(fail) term CLI > term show unknown exits 1 [24.64ms]
+82 |     await runWiki(["term", "set", "Vault", "The locked Obsidian root.", "--project", "wiki-v2"], vaultRoot);
+83 |     await runWiki(["term", "set", "Project", "A folder under `projects/`.", "--project", "wiki-v2"], vaultRoot);
+84 | 
+85 |     const result = await runWiki(["term", "list", "--project", "wiki-v2"], vaultRoot);
+86 | 
+87 |     expect(result.exitCode).toBe(0);
+                                 ^
+error: expect(received).toBe(expected)
+
+Expected: 0
+Received: 1
+
+      at <anonymous> (/private/tmp/wiki-slice007-red/tests/cli-term.test.ts:87:29)
+(fail) term CLI > term list prints names alphabetically [70.98ms]
+92 |   test("term list on missing file exits 0 with empty stdout", async () => {
+93 |     const vaultRoot = await createFixtureVault("wiki-v2");
+94 | 
+95 |     const result = await runWiki(["term", "list", "--project", "wiki-v2"], vaultRoot);
+96 | 
+97 |     expect(result.exitCode).toBe(0);
+                                 ^
+error: expect(received).toBe(expected)
+
+Expected: 0
+Received: 1
+
+      at <anonymous> (/private/tmp/wiki-slice007-red/tests/cli-term.test.ts:97:29)
+(fail) term CLI > term list on missing file exits 0 with empty stdout [25.05ms]
+155 | async function readTerms(vaultRoot: string): Promise<string> {
+156 |   return readFile(join(vaultRoot, "projects", "wiki-v2", "architecture", "domain-language.md"), "utf8");
+157 | }
+158 | 
+159 | async function expectNoTempFiles(vaultRoot: string): Promise<void> {
+160 |   const entries = await readdir(join(vaultRoot, "projects", "wiki-v2", "architecture"));
+                              ^
+ENOENT: no such file or directory, scandir '/var/folders/s4/q7gwyx7x7w7d1z8x5vg5cspr0000gn/T/wiki-vault-gTBgez/projects/wiki-v2/architecture'
+    path: "/var/folders/s4/q7gwyx7x7w7d1z8x5vg5cspr0000gn/T/wiki-vault-gTBgez/projects/wiki-v2/architecture",
+ syscall: "scandir",
+   errno: -2,
+    code: "ENOENT"
+
+      at async expectNoTempFiles (/private/tmp/wiki-slice007-red/tests/cli-term.test.ts:160:25)
+      at async <anonymous> (/private/tmp/wiki-slice007-red/tests/cli-term.test.ts:105:11)
+(fail) term CLI > term set leaves a fully valid file and no tmp residue after each write [24.98ms]
+
+ 0 pass
+ 21 fail
+ 24 expect() calls
+Ran 21 tests across 2 files. [783.00ms]
