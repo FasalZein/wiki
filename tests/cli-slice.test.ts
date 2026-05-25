@@ -138,6 +138,21 @@ describe("slice CLI", () => {
     expect(result.stderr).toContain("updated SLICE-0001");
     expect(await readSlice(vaultRoot, "SLICE-0001")).toContain("todo:\n  - Write tests");
   });
+
+  test("slice append rejects non-list fields", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    await seedPrd(vaultRoot);
+    await runWiki(createArgs(), vaultRoot);
+
+    const result = await runWiki(
+      ["slice", "append", "SLICE-0001", "--project", "wiki-v2", "--field", "title", "extra"],
+      vaultRoot,
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("title");
+    expect(result.stderr).toContain("not a list field");
+  });
 });
 
 function createArgs(): string[] {
