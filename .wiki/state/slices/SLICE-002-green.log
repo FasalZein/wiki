@@ -170,3 +170,68 @@ tests/config.test.ts:
  0 fail
  22 expect() calls
 Ran 14 tests across 2 files. [35.00ms]
+### GREEN 7: getConfig default when missing
+bun test v1.4.0-canary.1 (184d0371a)
+
+tests/schema.test.ts:
+(pass) template schemas > loads every shipped template with declared field constraints [3.35ms]
+(pass) template schemas > validates fully populated input and returns the normalized record [0.23ms]
+(pass) template schemas > rejects input missing a required field with the field name [0.12ms]
+(pass) template schemas > rejects a type mismatch with the field name and expected type [0.10ms]
+(pass) template schemas > rejects enum values outside the allowed set with the allowed values [0.10ms]
+(pass) template schemas > rejects a list below its minimum count with the field name and minimum [0.08ms]
+(pass) template schemas > rejects a string below its minimum length with the field name and minimum [0.07ms]
+(pass) template schemas > rejects pattern mismatches with the field name and pattern [0.09ms]
+
+tests/config.test.ts:
+(pass) vault config > getVaultRoot resolves the vault path from KNOWLEDGE_VAULT_ROOT first [2.57ms]
+(pass) vault config > getVaultRoot falls back to config file vault.root when env var is unset [1.69ms]
+44 |     const home = await mkdtemp(join(tmpdir(), "wiki-home-"));
+45 |     tempPaths.push(home);
+46 |     delete process.env.KNOWLEDGE_VAULT_ROOT;
+47 |     process.env.HOME = home;
+48 | 
+49 |     await expect(getVaultRoot()).rejects.toThrow(
+                                              ^
+error: expect(received).toThrow(expected)
+
+Expected substring: "Vault root not configured: set KNOWLEDGE_VAULT_ROOT or ~/.config/wiki/config.toml vault.root"
+Received message: "Vault root does not exist: /var/folders/s4/q7gwyx7x7w7d1z8x5vg5cspr0000gn/T/wiki-home-vOgKes/Knowledge"
+
+      at <anonymous> (/Users/tothemoon/Dev/code-forge/wiki/tests/config.test.ts:49:42)
+(fail) vault config > getVaultRoot fails clearly when no vault root is configured [0.83ms]
+(pass) vault config > getVaultRoot expands tilde to the user's home directory [0.63ms]
+(pass) vault config > getVaultRoot returns an absolute path and rejects nonexistent roots [0.81ms]
+(pass) vault config > getConfig reads TOML and returns a typed WikiConfig object [0.98ms]
+(pass) vault config > getConfig returns defaults when the config file does not exist [0.74ms]
+
+ 14 pass
+ 1 fail
+ 23 expect() calls
+Ran 15 tests across 2 files. [43.00ms]
+### GREEN 7: getConfig default when missing
+bun test v1.4.0-canary.1 (184d0371a)
+
+tests/schema.test.ts:
+(pass) template schemas > loads every shipped template with declared field constraints [3.60ms]
+(pass) template schemas > validates fully populated input and returns the normalized record [0.18ms]
+(pass) template schemas > rejects input missing a required field with the field name [0.15ms]
+(pass) template schemas > rejects a type mismatch with the field name and expected type [0.18ms]
+(pass) template schemas > rejects enum values outside the allowed set with the allowed values [0.13ms]
+(pass) template schemas > rejects a list below its minimum count with the field name and minimum [0.11ms]
+(pass) template schemas > rejects a string below its minimum length with the field name and minimum [0.08ms]
+(pass) template schemas > rejects pattern mismatches with the field name and pattern [0.08ms]
+
+tests/config.test.ts:
+(pass) vault config > getVaultRoot resolves the vault path from KNOWLEDGE_VAULT_ROOT first [0.53ms]
+(pass) vault config > getVaultRoot falls back to config file vault.root when env var is unset [1.75ms]
+(pass) vault config > getVaultRoot fails clearly when no vault root is configured [1.00ms]
+(pass) vault config > getVaultRoot expands tilde to the user's home directory [0.51ms]
+(pass) vault config > getVaultRoot returns an absolute path and rejects nonexistent roots [0.73ms]
+(pass) vault config > getConfig reads TOML and returns a typed WikiConfig object [0.86ms]
+(pass) vault config > getConfig returns defaults when the config file does not exist [0.55ms]
+
+ 15 pass
+ 0 fail
+ 23 expect() calls
+Ran 15 tests across 2 files. [36.00ms]

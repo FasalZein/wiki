@@ -34,7 +34,7 @@ async function readConfiguredRoot(): Promise<string> {
   try {
     return (await getConfig()).vault.root;
   } catch (error) {
-    if (isFileNotFound(error)) {
+    if (isFileNotFound(error) || isMissingVaultRoot(error)) {
       throw unconfiguredError();
     }
     throw error;
@@ -65,4 +65,8 @@ function homeDirectory(): string {
 
 function isFileNotFound(error: unknown): boolean {
   return error instanceof Error && "code" in error && error.code === "ENOENT";
+}
+
+function isMissingVaultRoot(error: unknown): boolean {
+  return error instanceof Error && error.message === "Config is missing vault.root";
 }

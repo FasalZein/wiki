@@ -256,3 +256,44 @@ error: expect(received).toEqual(expected)
  1 fail
  22 expect() calls
 Ran 14 tests across 2 files. [35.00ms]
+### RED 7: getConfig default when missing
+bun test v1.4.0-canary.1 (184d0371a)
+
+tests/schema.test.ts:
+(pass) template schemas > loads every shipped template with declared field constraints [3.16ms]
+(pass) template schemas > validates fully populated input and returns the normalized record [0.24ms]
+(pass) template schemas > rejects input missing a required field with the field name [0.12ms]
+(pass) template schemas > rejects a type mismatch with the field name and expected type [0.10ms]
+(pass) template schemas > rejects enum values outside the allowed set with the allowed values [0.20ms]
+(pass) template schemas > rejects a list below its minimum count with the field name and minimum [0.15ms]
+(pass) template schemas > rejects a string below its minimum length with the field name and minimum [0.08ms]
+(pass) template schemas > rejects pattern mismatches with the field name and pattern [0.08ms]
+
+tests/config.test.ts:
+(pass) vault config > getVaultRoot resolves the vault path from KNOWLEDGE_VAULT_ROOT first [0.79ms]
+(pass) vault config > getVaultRoot falls back to config file vault.root when env var is unset [1.67ms]
+(pass) vault config > getVaultRoot fails clearly when no vault root is configured [0.62ms]
+(pass) vault config > getVaultRoot expands tilde to the user's home directory [0.52ms]
+(pass) vault config > getVaultRoot returns an absolute path and rejects nonexistent roots [0.86ms]
+(pass) vault config > getConfig reads TOML and returns a typed WikiConfig object [0.96ms]
+4 | 
+5 | import type { WikiConfig } from "./types";
+6 | 
+7 | export async function getConfig(): Promise<WikiConfig> {
+8 |   const configPath = join(homeDirectory(), ".config", "wiki", "config.toml");
+9 |   const parsed = parse(await readFile(configPath, "utf8"));
+                                 ^
+ENOENT: no such file or directory, open '/var/folders/s4/q7gwyx7x7w7d1z8x5vg5cspr0000gn/T/wiki-home-ANJVqF/.config/wiki/config.toml'
+    path: "/var/folders/s4/q7gwyx7x7w7d1z8x5vg5cspr0000gn/T/wiki-home-ANJVqF/.config/wiki/config.toml",
+ syscall: "open",
+   errno: -2,
+    code: "ENOENT"
+
+      at async getConfig (/Users/tothemoon/Dev/code-forge/wiki/src/config/config.ts:9:30)
+      at async <anonymous> (/Users/tothemoon/Dev/code-forge/wiki/tests/config.test.ts:107:18)
+(fail) vault config > getConfig returns defaults when the config file does not exist [0.58ms]
+
+ 14 pass
+ 1 fail
+ 22 expect() calls
+Ran 15 tests across 2 files. [39.00ms]

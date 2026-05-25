@@ -4,9 +4,26 @@ import { parse } from "smol-toml";
 
 import type { WikiConfig } from "./types";
 
+const defaultResearchSources = [
+  "~/.pi/artifacts/research",
+  "~/.codex/artifacts/research",
+  "~/.claude/artifacts/research",
+  "~/Research",
+];
+
 export async function getConfig(): Promise<WikiConfig> {
   const configPath = join(homeDirectory(), ".config", "wiki", "config.toml");
-  const parsed = parse(await readFile(configPath, "utf8"));
+  let contents: string;
+  try {
+    contents = await readFile(configPath, "utf8");
+  } catch (error) {
+    if (isFileNotFound(error)) {
+      return defaultConfig();
+    }
+    throw error;
+  }
+
+  const parsed = parse(contents);
   if (!isRecord(parsed.vault) || typeof parsed.vault.root !== "string") {
     throw new Error("Config is missing vault.root");
   }
@@ -16,6 +33,14 @@ export async function getConfig(): Promise<WikiConfig> {
   return {
     vault: { root: parsed.vault.root },
     research: { sources },
+    harness: { detected: "none" },
+  };
+}
+
+function defaultConfig(): WikiConfig {
+  return {
+    vault: { root: process.env.KNOWLEDGE_VAULT_ROOT ?? `${homeDirectory()}/Knowledge` },
+    research: { sources: defaultResearchSources },
     harness: { detected: "none" },
   };
 }
@@ -34,4 +59,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item): item is string => typeof item === "string");
+}
+
+function isFileNotFound(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
 }

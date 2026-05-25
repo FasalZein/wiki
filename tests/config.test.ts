@@ -45,6 +45,9 @@ describe("vault config", () => {
     tempPaths.push(home);
     delete process.env.KNOWLEDGE_VAULT_ROOT;
     process.env.HOME = home;
+    const configDir = join(home, ".config", "wiki");
+    await mkdir(configDir, { recursive: true });
+    await writeFile(join(configDir, "config.toml"), "[research]\nsources = []\n");
 
     await expect(getVaultRoot()).rejects.toThrow(
       "Vault root not configured: set KNOWLEDGE_VAULT_ROOT or ~/.config/wiki/config.toml vault.root",
@@ -94,6 +97,26 @@ describe("vault config", () => {
     expect(await getConfig()).toEqual({
       vault: { root: "/vault" },
       research: { sources: ["~/Research", "~/.pi/artifacts/research"] },
+      harness: { detected: "none" },
+    });
+  });
+
+  test("getConfig returns defaults when the config file does not exist", async () => {
+    const home = await mkdtemp(join(tmpdir(), "wiki-home-"));
+    tempPaths.push(home);
+    process.env.HOME = home;
+    process.env.KNOWLEDGE_VAULT_ROOT = "/custom-vault";
+
+    expect(await getConfig()).toEqual({
+      vault: { root: "/custom-vault" },
+      research: {
+        sources: [
+          "~/.pi/artifacts/research",
+          "~/.codex/artifacts/research",
+          "~/.claude/artifacts/research",
+          "~/Research",
+        ],
+      },
       harness: { detected: "none" },
     });
   });
