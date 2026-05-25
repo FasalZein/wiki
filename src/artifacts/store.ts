@@ -23,6 +23,11 @@ export type ReadArtifactInput = {
   id: string;
 };
 
+export type SetFieldInput = ReadArtifactInput & {
+  field: string;
+  value: unknown;
+};
+
 export type Artifact = {
   id: string;
   path: string;
@@ -48,6 +53,24 @@ export async function readArtifact(input: ReadArtifactInput): Promise<Artifact> 
     fields: parsed.data,
     body: parsed.content.trimStart(),
   };
+}
+
+export async function setField(input: SetFieldInput): Promise<Artifact> {
+  const schema = await loadTemplate(input.type);
+  const existing = await readArtifact(input);
+  const fields = {
+    ...existing.fields,
+    [input.field]: input.value,
+    updated: new Date().toISOString().slice(0, 10),
+  };
+  const result = validate(schema, fields);
+  if (!result.ok) {
+    throw new ArtifactValidationError(result.errors);
+  }
+
+  const content = `${matter.stringify(existing.body, result.value)}\n`;
+  await atomicWrite(existing.path, content);
+  return { ...existing, fields: result.value };
 }
 
 export async function createArtifact(input: CreateArtifactInput): Promise<Artifact> {

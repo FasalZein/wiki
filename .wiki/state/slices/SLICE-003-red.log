@@ -4,11 +4,11 @@ tests/artifacts.test.ts:
 
 # Unhandled error between tests
 -------------------------------
-SyntaxError: Export named 'readArtifact' not found in module '/Users/tothemoon/Dev/code-forge/wiki/src/artifacts/store.ts'.
+SyntaxError: Export named 'setField' not found in module '/Users/tothemoon/Dev/code-forge/wiki/src/artifacts/store.ts'.
 -------------------------------
 
 
  0 pass
  1 fail
  1 error
-Ran 1 test across 1 file. [17.00ms]
+Ran 1 test across 1 file. [16.00ms]
