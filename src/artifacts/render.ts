@@ -35,7 +35,7 @@ export function applyDefaults(schema: Schema, template: string, input: Record<st
     const templateDefault = templateDefaults[field.name];
     if (templateDefault !== undefined) {
       values[field.name] = templateDefault;
-    } else if (field.name === "created" || field.name === "updated") {
+    } else if (field.name === "created" || field.name === "updated" || field.name === "session_date") {
       values[field.name] = today;
     } else if (field.type === "list" || field.type === "link_list") {
       values[field.name] = [];

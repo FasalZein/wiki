@@ -183,7 +183,7 @@ function isFileNotFound(error: unknown): boolean {
   return error instanceof Error && "code" in error && error.code === "ENOENT";
 }
 
-async function atomicWrite(path: string, content: string): Promise<void> {
+export async function atomicWrite(path: string, content: string): Promise<void> {
   const tempPath = `${path}.tmp-${process.pid}`;
   await writeFile(tempPath, content);
   await rename(tempPath, path);

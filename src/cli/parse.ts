@@ -7,13 +7,14 @@ export type ParsedCommand = {
   values: ParsedValues;
 };
 
-export function parseCommand(args: string[], stringFlags: string[]): ParsedCommand {
+export function parseCommand(args: string[], stringFlags: string[], multipleFlags: string[] = []): ParsedCommand {
+  const multiple = new Set(multipleFlags);
   const parsed = parseArgs({
     args,
     allowPositionals: true,
     strict: true,
     tokens: true,
-    options: Object.fromEntries(stringFlags.map((flag) => [flag, { type: "string" }])),
+    options: Object.fromEntries(stringFlags.map((flag) => [flag, { type: "string", multiple: multiple.has(flag) }])),
   });
   return {
     positionals: parsed.positionals.length > 0 ? parsed.positionals : trailingPositionals(parsed.tokens),
