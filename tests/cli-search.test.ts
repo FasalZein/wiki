@@ -52,6 +52,18 @@ describe("search CLI", () => {
     expect(result.stdout).toBe("");
     expect(result.stderr).toBe("");
   });
+
+  test("search registers the project collection only once across repeated calls", async () => {
+    const fixture = await createSearchFixture("wiki-v2");
+
+    expect((await runWiki(["search", "first", "--project", "wiki-v2"], fixture)).exitCode).toBe(0);
+    expect((await runWiki(["search", "second", "--project", "wiki-v2"], fixture)).exitCode).toBe(0);
+
+    expect(await readFile(fixture.stateFile, "utf8")).toBe(
+      `collection list\ncollection add wiki-v2 ${fixture.projectPath} **/*.md\nquery first --json --collection wiki-v2\n` +
+        "collection list\nquery second --json --collection wiki-v2\n",
+    );
+  });
 });
 
 type SearchFixture = {
