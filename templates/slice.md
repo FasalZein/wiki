@@ -1,0 +1,66 @@
+---
+template: slice
+version: 1
+schema:
+  id:              { type: string,    required: true,  pattern: "SLICE-\\d{3,}" }
+  title:           { type: string,    required: true,  min: 5, max: 80 }
+  project:         { type: string,    required: true }
+  parent_prd:      { type: link,      required: true, target: prd }
+  status:          { type: enum,      required: true, values: [planned, red, green, closed, blocked], default: planned }
+  type:            { type: enum,      required: true, values: [HITL, AFK], default: AFK, description: "HITL = needs human interaction; AFK = agent-completable" }
+  blocked_by:      { type: link_list, target: slice, default: [] }
+  user_stories:    { type: list,      default: [], description: "References to PRD user-story IDs covered by this slice" }
+  acceptance:      { type: list,      required: true, min: 1, description: "Checkboxes; one per criterion" }
+  todo:            { type: list,      default: [], description: "Structured items with id/text/done; CLI gates close on all done" }
+  red_log_ref:     { type: file_ref,  description: "CLI-state path to captured failing-test output; set by `wiki slice red`" }
+  green_log_ref:   { type: file_ref,  description: "CLI-state path to captured passing-test output; set by `wiki slice green`" }
+  review_verdict:  { type: enum,      values: [pass, pass-with-notes, reject], description: "Set by `wiki slice close` via review-phase skill" }
+  tdd_exempt:      { type: boolean,   default: false }
+  tdd_exempt_reason: { type: string,  min: 20, description: "Required when tdd_exempt=true; explains why this slice ships without new tests" }
+  supersedes:      { type: link,      target: slice }
+  superseded_by:   { type: link,      target: slice }
+  related:         { type: link_list, target: slice, default: [] }
+  force_new_reason:{ type: string,    min: 30, description: "Required if dedup gate (ADR-0010) was overridden" }
+  created:         { type: date,      auto: true }
+  updated:         { type: date,      auto: true }
+---
+# {{title}}
+
+> {{id}} · {{project}} · {{status}} · {{type}}
+
+## Parent
+
+[[{{parent_prd}}]]
+
+## What to build
+
+{{what_to_build}}
+
+> A concise description of this vertical slice. Describe the end-to-end behavior, not layer-by-layer implementation.
+> No file paths. No code snippets except: a prototype snippet that encodes a decision more precisely than prose can. Trim to the decision-rich parts.
+
+## Acceptance criteria
+
+{{#each acceptance}}- [ ] {{this}}
+{{/each}}
+
+## Todo
+
+{{#each todo}}- [{{#if done}}x{{else}} {{/if}}] {{text}}
+{{/each}}
+
+> Slice close (`wiki slice close`) is gated on every item above being done.
+
+## Blocked by
+
+{{#each blocked_by}}- [[{{this}}]]
+{{else}}None — can start immediately.
+{{/each}}
+
+## Evidence
+
+- **Red log:** {{red_log_ref}}
+- **Green log:** {{green_log_ref}}
+- **Review verdict:** {{review_verdict}}
+
+> Set automatically by the slice state machine. See ADR-0005.

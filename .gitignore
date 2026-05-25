@@ -1,0 +1,12 @@
+node_modules/
+bun.lockb
+dist/
+.DS_Store
+*.log
+
+# CLI state during development
+.wiki/
+
+# Editor
+.vscode/
+.idea/
