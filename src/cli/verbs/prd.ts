@@ -129,15 +129,8 @@ async function createPrd(args: string[]): Promise<CliResult> {
     return { code: 1 };
   }
 
-  const vaultRoot = await getVaultRoot();
-  await assertProjectStructure(join(vaultRoot, "projects", project));
   try {
-    const artifact = await createArtifact({
-      type: "prd",
-      vaultRoot,
-      project,
-      fields: { title },
-    });
+    const artifact = await createPrdProgrammatic({ title, project });
     console.log(artifact.id);
     console.error(`created ${artifact.id}`);
     return { code: 0 };
@@ -148,6 +141,17 @@ async function createPrd(args: string[]): Promise<CliResult> {
     }
     throw error;
   }
+}
+
+export async function createPrdProgrammatic(input: { title: string; project: string }) {
+  const vaultRoot = await getVaultRoot();
+  await assertProjectStructure(join(vaultRoot, "projects", input.project));
+  return createArtifact({
+    type: "prd",
+    vaultRoot,
+    project: input.project,
+    fields: { title: input.title },
+  });
 }
 
 async function transitionPrd(

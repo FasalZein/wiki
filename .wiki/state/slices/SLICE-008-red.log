@@ -1,0 +1,35 @@
+bun test v1.4.0-canary.1 (184d0371a)
+
+tests/cli-plan.test.ts:
+(pass) plan CLI > plan create writes a CLI-state plan file and reports the id [35.80ms]
+(pass) plan CLI > plan create exits 1 when title is missing [27.86ms]
+(pass) plan CLI > plan create exits 1 when project is missing [28.47ms]
+(pass) plan CLI > plan create exits 10 when repo cannot be resolved [28.52ms]
+(pass) plan CLI > plan show prints pretty JSON [55.96ms]
+(pass) plan CLI > plan show --field prints a field value [55.27ms]
+(pass) plan CLI > plan show exits 1 for a missing id [28.43ms]
+(pass) plan CLI > plan set updates one field and preserves other fields [55.78ms]
+(pass) plan CLI > plan set reads stdin for string and list fields [83.59ms]
+(pass) plan CLI > plan append adds to a list field [55.67ms]
+(pass) plan CLI > plan append rejects non-list fields [55.16ms]
+156 |     expect(result.stdout).toBe("PRD-0001\n");
+157 |     expect(result.stderr).toContain("created PRD-0001 from PLAN-0001");
+158 |     expect(existsSync(join(fixture.repoRoot, ".wiki", "state", "plans", "PLAN-0001.json"))).toBe(false);
+159 |     const prd = await readPrd(fixture.vaultRoot, "PRD-0001");
+160 |     expect(prd).toContain("title: Core wiki CLI");
+161 |     expect(prd).toContain("Problem one\n\nProblem two");
+                      ^
+error: expect(received).toContain(expected)
+
+Expected to contain: "Problem one\n\nProblem two"
+Received: "---\ntitle: Core wiki CLI\nid: PRD-0001\nproject: wiki-v2\nstatus: draft\ntriage_label: needs-triage\ndomain_terms: []\nslices: []\nrelated: []\ncreated: '2026-05-25'\nupdated: '2026-05-25'\nproblem_statement: |-\n  Problem one\n\n  Problem two\nsolution: Solution one\nuser_stories: '1. As a user, I want plans.'\n---\n# Core wiki CLI\n\n PRD-0001 · wiki-v2 · draft\n\n## Problem Statement\n\n\n\n The problem the user is facing, from the user's perspective. Avoid jumping to solution language.\n\n## Solution\n\n\n\n The solution to the problem, from the user's perspective. Outcome-focused, not implementation-focused.\n\n## User Stories\n\n\n\n A long, numbered list. Format: `1. As a , I want a , so that .`\n Cover all aspects of the feature. Extensive is better than terse.\n\n## Implementation Decisions\n\n\n\n The modules to build/modify, their interfaces, architectural decisions, schema changes, API contracts, specific interactions.\n No file paths. No code snippets except: a prototype snippet that encodes a decision more precisely than prose can (state machine, reducer, schema, type shape). Trim to the decision-rich parts.\n\n## Testing Decisions\n\n\n\n What makes a good test for this work (test behavior through public interfaces, not implementation details).\n Which modules will be tested. Prior art for the tests (similar test patterns in the codebase).\n\n## Out of Scope\n\n\n\n What is deliberately excluded from this PRD.\n\n## Further Notes\n\n\n\n## Slices\n\n{{#each slices}}- [[]]\n_None yet. Run `wiki slice create --prd PRD-0001` to add._{{/each}}\n\n"
+
+      at <anonymous> (/Users/tothemoon/Dev/code-forge/wiki/tests/cli-plan.test.ts:161:17)
+(fail) plan CLI > plan promote creates a PRD from drafts and deletes the plan [141.41ms]
+(pass) plan CLI > plan promote exits 1 for a missing title and keeps the plan [81.45ms]
+(pass) plan CLI > plan promote keeps the plan if PRD creation fails [56.52ms]
+
+ 13 pass
+ 1 fail
+ 47 expect() calls
+Ran 14 tests across 1 file. [801.00ms]
