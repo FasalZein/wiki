@@ -74,3 +74,14 @@ tests/cli-slice.test.ts:
  0 fail
  4 expect() calls
 Ran 1 test across 1 file. [103.00ms]
+--- slice append todo GREEN ---
+bun test v1.4.0-canary.1 (184d0371a)
+
+tests/cli-slice.test.ts:
+(pass) slice CLI > slice append adds a value to the todo list [92.79ms]
+
+ 1 pass
+ 7 filtered out
+ 0 fail
+ 4 expect() calls
+Ran 1 test across 1 file. [100.00ms]
