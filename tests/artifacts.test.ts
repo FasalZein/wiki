@@ -68,6 +68,27 @@ describe("artifact store", () => {
     expect(file).toContain("status: draft");
   });
 
+  test("creates SLICE-0001 in an empty slices folder", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    const artifact = await createArtifact({
+      type: "slice",
+      vaultRoot,
+      project: "wiki-v2",
+      fields: { title: "Build slice authoring", parent_prd: "PRD-0001", acceptance: [] },
+    });
+
+    expect(artifact.id).toBe("SLICE-0001");
+    expect(artifact.path).toBe(join(vaultRoot, "projects", "wiki-v2", "slices", "SLICE-0001.md"));
+
+    const file = await readFile(artifact.path, "utf8");
+    expect(file).toContain("id: SLICE-0001");
+    expect(file).toContain("title: Build slice authoring");
+    expect(file).toContain("project: wiki-v2");
+    expect(file).toContain("status: planned");
+    expect(file).toContain("type: AFK");
+    expect(file).toContain("parent_prd: PRD-0001");
+  });
+
   test("reads a decision artifact with frontmatter fields and rendered body", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
     await createArtifact({ type: "decision", vaultRoot, project: "wiki-v2", fields: decisionFields() });

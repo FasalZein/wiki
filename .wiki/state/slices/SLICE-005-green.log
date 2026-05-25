@@ -162,3 +162,14 @@ tests/cli-slice.test.ts:
  0 fail
  3 expect() calls
 Ran 1 test across 1 file. [37.00ms]
+--- store create slice GREEN ---
+bun test v1.4.0-canary.1 (184d0371a)
+
+tests/artifacts.test.ts:
+(pass) artifact store > creates SLICE-0001 in an empty slices folder [6.67ms]
+
+ 1 pass
+ 7 filtered out
+ 0 fail
+ 8 expect() calls
+Ran 1 test across 1 file. [28.00ms]
