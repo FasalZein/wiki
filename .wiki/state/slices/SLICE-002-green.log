@@ -290,3 +290,32 @@ tests/config.test.ts:
  0 fail
  31 expect() calls
 Ran 17 tests across 2 files. [42.00ms]
+### GREEN 10: resolveCurrentProject inside project
+bun test v1.4.0-canary.1 (184d0371a)
+
+tests/schema.test.ts:
+(pass) template schemas > loads every shipped template with declared field constraints [4.18ms]
+(pass) template schemas > validates fully populated input and returns the normalized record [0.24ms]
+(pass) template schemas > rejects input missing a required field with the field name [0.12ms]
+(pass) template schemas > rejects a type mismatch with the field name and expected type [0.10ms]
+(pass) template schemas > rejects enum values outside the allowed set with the allowed values [0.09ms]
+(pass) template schemas > rejects a list below its minimum count with the field name and minimum [0.08ms]
+(pass) template schemas > rejects a string below its minimum length with the field name and minimum [0.08ms]
+(pass) template schemas > rejects pattern mismatches with the field name and pattern [0.09ms]
+
+tests/config.test.ts:
+(pass) vault config > getVaultRoot resolves the vault path from KNOWLEDGE_VAULT_ROOT first [0.87ms]
+(pass) vault config > getVaultRoot falls back to config file vault.root when env var is unset [1.92ms]
+(pass) vault config > getVaultRoot fails clearly when no vault root is configured [1.17ms]
+(pass) vault config > getVaultRoot expands tilde to the user's home directory [0.48ms]
+(pass) vault config > getVaultRoot returns an absolute path and rejects nonexistent roots [0.83ms]
+(pass) vault config > getConfig reads TOML and returns a typed WikiConfig object [1.12ms]
+(pass) vault config > getConfig returns defaults when the config file does not exist [0.50ms]
+(pass) vault config > detectHarness returns the harness named by explicit env vars [0.04ms]
+(pass) vault config > getConfig includes the harness detected at read time [0.39ms]
+(pass) vault config > resolveCurrentProject returns the project name when cwd is inside a project folder [0.80ms]
+
+ 18 pass
+ 0 fail
+ 32 expect() calls
+Ran 18 tests across 2 files. [37.00ms]

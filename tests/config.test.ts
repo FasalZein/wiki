@@ -5,6 +5,7 @@ import { join, relative, resolve } from "node:path";
 
 import { getConfig } from "../src/config/config";
 import { detectHarness } from "../src/config/harness";
+import { resolveCurrentProject } from "../src/config/project";
 import { getVaultRoot } from "../src/config/vault";
 
 const originalEnv = { ...process.env };
@@ -157,5 +158,15 @@ describe("vault config", () => {
     process.env.OPENAI_CODEX = "1";
 
     expect((await getConfig()).harness.detected).toBe("codex");
+  });
+
+  test("resolveCurrentProject returns the project name when cwd is inside a project folder", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "wiki-vault-"));
+    tempPaths.push(vaultRoot);
+    const nestedPath = join(vaultRoot, "projects", "wiki-v2", "slices");
+    await mkdir(nestedPath, { recursive: true });
+    process.env.KNOWLEDGE_VAULT_ROOT = vaultRoot;
+
+    expect(await resolveCurrentProject(nestedPath)).toBe("wiki-v2");
   });
 });
