@@ -149,4 +149,13 @@ describe("vault config", () => {
     delete process.env.OPENAI_CODEX;
     expect(detectHarness()).toBe("none");
   });
+
+  test("getConfig includes the harness detected at read time", async () => {
+    const home = await mkdtemp(join(tmpdir(), "wiki-home-"));
+    tempPaths.push(home);
+    process.env.HOME = home;
+    process.env.OPENAI_CODEX = "1";
+
+    expect((await getConfig()).harness.detected).toBe("codex");
+  });
 });
