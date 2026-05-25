@@ -57,3 +57,27 @@ tests/cli-slice.test.ts:
  0 fail
  4 expect() calls
 Ran 1 test across 1 file. [100.00ms]
+--- slice set field RED ---
+bun test v1.4.0-canary.1 (184d0371a)
+
+tests/cli-slice.test.ts:
+66 |     const result = await runWiki(
+67 |       ["slice", "set", "SLICE-0001", "--project", "wiki-v2", "--field", "title", "Updated slice title"],
+68 |       vaultRoot,
+69 |     );
+70 | 
+71 |     expect(result.exitCode).toBe(0);
+                                 ^
+error: expect(received).toBe(expected)
+
+Expected: 0
+Received: 1
+
+      at <anonymous> (/Users/tothemoon/Dev/code-forge/wiki/tests/cli-slice.test.ts:71:29)
+(fail) slice CLI > slice set updates one field and preserves the body [90.77ms]
+
+ 0 pass
+ 3 filtered out
+ 1 fail
+ 2 expect() calls
+Ran 1 test across 1 file. [100.00ms]

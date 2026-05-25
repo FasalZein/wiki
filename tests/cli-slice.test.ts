@@ -56,6 +56,24 @@ describe("slice CLI", () => {
     expect(result.stdout).toBe("Build slice authoring\n");
     expect(result.stderr).toBe("");
   });
+
+  test("slice set updates one field and preserves the body", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    await seedPrd(vaultRoot);
+    await runWiki(createArgs(), vaultRoot);
+    const before = await readSlice(vaultRoot, "SLICE-0001");
+
+    const result = await runWiki(
+      ["slice", "set", "SLICE-0001", "--project", "wiki-v2", "--field", "title", "Updated slice title"],
+      vaultRoot,
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toContain("updated SLICE-0001");
+    const after = await readSlice(vaultRoot, "SLICE-0001");
+    expect(after).toContain("title: Updated slice title");
+    expect(after.slice(after.indexOf("# Build slice authoring"))).toBe(before.slice(before.indexOf("# Build slice authoring")));
+  });
 });
 
 function createArgs(): string[] {
