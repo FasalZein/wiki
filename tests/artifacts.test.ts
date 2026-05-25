@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { createArtifact, readArtifact, setField } from "../src/artifacts/store";
+import { appendField, createArtifact, readArtifact, setField } from "../src/artifacts/store";
 
 const tempPaths: string[] = [];
 
@@ -77,6 +77,24 @@ describe("artifact store", () => {
     expect(after.fields.status).toBe("proposed");
     expect(after.body).toBe(before.body);
     expect(await readFile(after.path, "utf8")).toContain("status: proposed");
+  });
+
+  test("appends to a list frontmatter field in order and preserves the body", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    await createArtifact({ type: "decision", vaultRoot, project: "wiki-v2", fields: decisionFields() });
+    const before = await readArtifact({ type: "decision", vaultRoot, project: "wiki-v2", id: "DECISION-0001" });
+
+    const after = await appendField({
+      type: "decision",
+      vaultRoot,
+      project: "wiki-v2",
+      id: "DECISION-0001",
+      field: "context_terms",
+      value: "Vault",
+    });
+
+    expect(after.fields.context_terms).toEqual(["Vault"]);
+    expect(after.body).toBe(before.body);
   });
 });
 

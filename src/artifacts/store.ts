@@ -28,6 +28,8 @@ export type SetFieldInput = ReadArtifactInput & {
   value: unknown;
 };
 
+export type AppendFieldInput = SetFieldInput;
+
 export type Artifact = {
   id: string;
   path: string;
@@ -56,21 +58,26 @@ export async function readArtifact(input: ReadArtifactInput): Promise<Artifact> 
 }
 
 export async function setField(input: SetFieldInput): Promise<Artifact> {
-  const schema = await loadTemplate(input.type);
   const existing = await readArtifact(input);
-  const fields = {
+  return writeFields(input, existing, {
     ...existing.fields,
     [input.field]: input.value,
-    updated: new Date().toISOString().slice(0, 10),
-  };
-  const result = validate(schema, fields);
-  if (!result.ok) {
-    throw new ArtifactValidationError(result.errors);
-  }
+  });
+}
 
-  const content = `${matter.stringify(existing.body, result.value)}\n`;
-  await atomicWrite(existing.path, content);
-  return { ...existing, fields: result.value };
+export async function appendField(input: AppendFieldInput): Promise<Artifact> {
+  const schema = await loadTemplate(input.type);
+  const field = schema.fields.find((candidate) => candidate.name === input.field);
+  if (field === undefined || (field.type !== "list" && field.type !== "link_list")) {
+    throw new ArtifactValidationError([{ field: input.field, reason: "not a list field", expected: "list" }]);
+  }
+  const existing = await readArtifact(input);
+  const current = existing.fields[input.field];
+  const list = Array.isArray(current) ? current : [];
+  return writeFields(input, existing, {
+    ...existing.fields,
+    [input.field]: [...list, input.value],
+  });
 }
 
 export async function createArtifact(input: CreateArtifactInput): Promise<Artifact> {
@@ -97,6 +104,21 @@ export async function createArtifact(input: CreateArtifactInput): Promise<Artifa
     fields: result.value,
     body: content,
   };
+}
+
+async function writeFields(input: ReadArtifactInput, existing: Artifact, fields: NormalizedRecord): Promise<Artifact> {
+  const schema = await loadTemplate(input.type);
+  const result = validate(schema, {
+    ...fields,
+    updated: new Date().toISOString().slice(0, 10),
+  });
+  if (!result.ok) {
+    throw new ArtifactValidationError(result.errors);
+  }
+
+  const content = `${matter.stringify(existing.body, result.value)}\n`;
+  await atomicWrite(existing.path, content);
+  return { ...existing, fields: result.value };
 }
 
 function artifactPath(type: TemplateType, vaultRoot: string, project: string, id: string): string {
