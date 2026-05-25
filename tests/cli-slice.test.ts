@@ -45,6 +45,20 @@ describe("slice CLI", () => {
     expect(result.stdout).toBe("");
   });
 
+  test("slice create exits 1 and names a missing project", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    await seedPrd(vaultRoot);
+
+    const result = await runWiki(
+      createArgs().filter((arg) => arg !== "--project" && arg !== "wiki-v2"),
+      vaultRoot,
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("project");
+    expect(result.stdout).toBe("");
+  });
+
   test("slice show prints the rendered body", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
     await seedPrd(vaultRoot);
