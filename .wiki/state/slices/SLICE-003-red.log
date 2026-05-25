@@ -1,23 +1,23 @@
 bun test v1.4.0-canary.1 (184d0371a)
 
 tests/cli-decision.test.ts:
-75 |   test("decision show exits 1 and names a missing id", async () => {
-76 |     const vaultRoot = await createFixtureVault("wiki-v2");
-77 | 
-78 |     const result = await runWiki(["decision", "show", "DECISION-9999", "--project", "wiki-v2"], vaultRoot);
-79 | 
-80 |     expect(result.exitCode).toBe(1);
+90 |     const result = await runWiki(
+91 |       ["decision", "set", "DECISION-0001", "--project", "wiki-v2", "--field", "status", "proposed"],
+92 |       vaultRoot,
+93 |     );
+94 | 
+95 |     expect(result.exitCode).toBe(0);
                                  ^
 error: expect(received).toBe(expected)
 
-Expected: 1
-Received: 10
+Expected: 0
+Received: 1
 
-      at <anonymous> (/Users/tothemoon/Dev/code-forge/wiki/tests/cli-decision.test.ts:80:29)
-(fail) decision CLI > decision show exits 1 and names a missing id [33.72ms]
+      at <anonymous> (/Users/tothemoon/Dev/code-forge/wiki/tests/cli-decision.test.ts:95:29)
+(fail) decision CLI > decision set updates one field and preserves the body [58.77ms]
 
  0 pass
- 5 filtered out
+ 6 filtered out
  1 fail
  1 expect() calls
-Ran 1 test across 1 file. [45.00ms]
+Ran 1 test across 1 file. [67.00ms]

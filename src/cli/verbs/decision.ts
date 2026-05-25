@@ -1,6 +1,6 @@
 import { join } from "node:path";
 
-import { ArtifactNotFoundError, ArtifactValidationError, createArtifact, readArtifact } from "../../artifacts/store";
+import { ArtifactNotFoundError, ArtifactValidationError, createArtifact, readArtifact, setField } from "../../artifacts/store";
 import { assertProjectStructure } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import { parseCommand, stringValue } from "../parse";
@@ -14,8 +14,36 @@ export async function handleDecision(args: string[]): Promise<CliResult> {
   if (subverb === "show") {
     return showDecision(rest);
   }
+  if (subverb === "set") {
+    return setDecision(rest);
+  }
   console.error(`unknown decision subverb: ${subverb ?? ""}`.trim());
   return { code: 1 };
+}
+
+async function setDecision(args: string[]): Promise<CliResult> {
+  const parsed = parseCommand(args, ["project", "field"]);
+  const id = parsed.positionals[0];
+  const value = parsed.positionals[1];
+  const project = stringValue(parsed.values, "project");
+  const field = stringValue(parsed.values, "field");
+  if (id === undefined || project === undefined || field === undefined || value === undefined) {
+    console.error("missing required field: id, project, field, value");
+    return { code: 1 };
+  }
+
+  const vaultRoot = await getVaultRoot();
+  try {
+    await setField({ type: "decision", vaultRoot, project, id, field, value });
+    console.error(`updated ${id}`);
+    return { code: 0 };
+  } catch (error) {
+    if (error instanceof ArtifactNotFoundError || error instanceof ArtifactValidationError) {
+      console.error(error.message);
+      return { code: 1 };
+    }
+    throw error;
+  }
 }
 
 async function showDecision(args: string[]): Promise<CliResult> {

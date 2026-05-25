@@ -139,7 +139,7 @@ async function writeFields(input: ReadArtifactInput, existing: Artifact, fields:
     throw new ArtifactValidationError(result.errors);
   }
 
-  const content = `${matter.stringify(existing.body, result.value)}\n`;
+  const content = matter.stringify(existing.body, result.value);
   await atomicWrite(existing.path, content);
   return { ...existing, fields: result.value };
 }

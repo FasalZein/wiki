@@ -1,10 +1,10 @@
 bun test v1.4.0-canary.1 (184d0371a)
 
 tests/cli-decision.test.ts:
-(pass) decision CLI > decision show exits 1 and names a missing id [32.44ms]
+(pass) decision CLI > decision set updates one field and preserves the body [63.97ms]
 
  1 pass
- 5 filtered out
+ 6 filtered out
  0 fail
- 3 expect() calls
-Ran 1 test across 1 file. [42.00ms]
+ 4 expect() calls
+Ran 1 test across 1 file. [72.00ms]
