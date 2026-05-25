@@ -73,6 +73,17 @@ describe("slice CLI", () => {
     expect(result.stdout).toBe("");
   });
 
+  test("slice create exits 1 and names a non-existent parent PRD", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+
+    const result = await runWiki(createArgs(), vaultRoot);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("parent PRD not found");
+    expect(result.stderr).toContain("PRD-0001");
+    expect(result.stdout).toBe("");
+  });
+
   test("slice show prints the rendered body", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
     await seedPrd(vaultRoot);

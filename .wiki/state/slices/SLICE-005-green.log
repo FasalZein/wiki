@@ -129,3 +129,14 @@ tests/cli-slice.test.ts:
  0 fail
  4 expect() calls
 Ran 1 test across 1 file. [67.00ms]
+--- slice create non-existent parent PRD GREEN ---
+bun test v1.4.0-canary.1 (184d0371a)
+
+tests/cli-slice.test.ts:
+(pass) slice CLI > slice create exits 1 and names a non-existent parent PRD [31.23ms]
+
+ 1 pass
+ 12 filtered out
+ 0 fail
+ 4 expect() calls
+Ran 1 test across 1 file. [38.00ms]
