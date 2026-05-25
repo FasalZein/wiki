@@ -21,3 +21,27 @@ Received: 1
  1 fail
  2 expect() calls
 Ran 1 test across 1 file. [74.00ms]
+--- slice show body RED ---
+bun test v1.4.0-canary.1 (184d0371a)
+
+tests/cli-slice.test.ts:
+36 |     await seedPrd(vaultRoot);
+37 |     await runWiki(createArgs(), vaultRoot);
+38 | 
+39 |     const result = await runWiki(["slice", "show", "SLICE-0001", "--project", "wiki-v2"], vaultRoot);
+40 | 
+41 |     expect(result.exitCode).toBe(0);
+                                 ^
+error: expect(received).toBe(expected)
+
+Expected: 0
+Received: 1
+
+      at <anonymous> (/Users/tothemoon/Dev/code-forge/wiki/tests/cli-slice.test.ts:41:29)
+(fail) slice CLI > slice show prints the rendered body [92.27ms]
+
+ 0 pass
+ 1 filtered out
+ 1 fail
+ 2 expect() calls
+Ran 1 test across 1 file. [100.00ms]

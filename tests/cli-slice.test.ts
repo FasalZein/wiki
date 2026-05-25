@@ -30,6 +30,20 @@ describe("slice CLI", () => {
     expect(file).toContain("acceptance: []");
     expect(file).toContain("# Build slice authoring");
   });
+
+  test("slice show prints the rendered body", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    await seedPrd(vaultRoot);
+    await runWiki(createArgs(), vaultRoot);
+
+    const result = await runWiki(["slice", "show", "SLICE-0001", "--project", "wiki-v2"], vaultRoot);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("# Build slice authoring");
+    expect(result.stdout).toContain("## What to build");
+    expect(result.stdout).toContain("[[PRD-0001]]");
+    expect(result.stderr).toBe("");
+  });
 });
 
 function createArgs(): string[] {
