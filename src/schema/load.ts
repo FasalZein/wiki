@@ -69,6 +69,10 @@ function parseConstraints(raw: Record<string, unknown>): Constraints {
     constraints.item_type = raw.item_type;
   }
   if (typeof raw.description === "string") constraints.description = raw.description;
+  if (typeof raw.default === "string") constraints.default = raw.default;
+  if (Array.isArray(raw.default) && raw.default.every((value): value is string => typeof value === "string")) {
+    constraints.default = raw.default;
+  }
   return constraints;
 }
 
@@ -77,7 +81,7 @@ function isFieldType(value: unknown): value is FieldType {
 }
 
 function normalizeInlineMaps(template: string): string {
-  return template.replace(/^(\s*[A-Za-z0-9_]+):(\{)/gm, "$1: $2");
+  return template.replace(/^(\s*[A-Za-z0-9_]+):(\s*\{)/gm, "$1: $2");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
