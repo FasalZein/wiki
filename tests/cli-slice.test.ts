@@ -123,6 +123,16 @@ describe("slice CLI", () => {
     expect(result.stderr).toBe("");
   });
 
+  test("slice show exits 1 and names a missing id", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+
+    const result = await runWiki(["slice", "show", "SLICE-9999", "--project", "wiki-v2"], vaultRoot);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("not found");
+    expect(result.stderr).toContain("SLICE-9999");
+  });
+
   test("slice set updates one field and preserves the body", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
     await seedPrd(vaultRoot);
