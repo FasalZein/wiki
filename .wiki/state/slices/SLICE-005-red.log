@@ -93,3 +93,15 @@ tests/cli-slice.test.ts:
  0 fail
  4 expect() calls
 Ran 1 test across 1 file. [99.00ms]
+--- slice set stdin RED ---
+No true red: stdin dash handling was implemented with the generic slice set behavior.
+bun test v1.4.0-canary.1 (184d0371a)
+
+tests/cli-slice.test.ts:
+(pass) slice CLI > slice set reads a multiline placeholder value from stdin when value is dash [121.56ms]
+
+ 1 pass
+ 5 filtered out
+ 0 fail
+ 3 expect() calls
+Ran 1 test across 1 file. [130.00ms]

@@ -89,6 +89,25 @@ describe("slice CLI", () => {
     expect(result.stderr).toContain("updated SLICE-0001");
     expect(await readSlice(vaultRoot, "SLICE-0001")).toContain("status: closed");
   });
+
+  test("slice set reads a multiline placeholder value from stdin when value is dash", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    await seedPrd(vaultRoot);
+    await runWiki(createArgs(), vaultRoot);
+
+    const result = await runWiki(
+      ["slice", "set", "SLICE-0001", "--project", "wiki-v2", "--field", "what_to_build", "-"],
+      vaultRoot,
+      "First line\nSecond line",
+    );
+
+    expect(result.exitCode).toBe(0);
+    const show = await runWiki(
+      ["slice", "show", "SLICE-0001", "--project", "wiki-v2", "--field", "what_to_build"],
+      vaultRoot,
+    );
+    expect(show.stdout).toBe("First line\nSecond line\n");
+  });
 });
 
 function createArgs(): string[] {
