@@ -46,9 +46,24 @@ export class ArtifactValidationError extends Error {
   }
 }
 
+export class ArtifactNotFoundError extends Error {
+  constructor(id: string) {
+    super(`artifact not found: ${id}`);
+  }
+}
+
 export async function readArtifact(input: ReadArtifactInput): Promise<Artifact> {
   const path = artifactPath(input.type, input.vaultRoot, input.project, input.id);
-  const parsed = matter(await readFile(path, "utf8"));
+  let content: string;
+  try {
+    content = await readFile(path, "utf8");
+  } catch (error) {
+    if (isFileNotFound(error)) {
+      throw new ArtifactNotFoundError(input.id);
+    }
+    throw error;
+  }
+  const parsed = matter(content);
   return {
     id: input.id,
     path,
@@ -131,6 +146,10 @@ async function writeFields(input: ReadArtifactInput, existing: Artifact, fields:
 
 function artifactPath(type: TemplateType, vaultRoot: string, project: string, id: string): string {
   return join(artifactDirectory(type, vaultRoot, project), `${id}.md`);
+}
+
+function isFileNotFound(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
 }
 
 async function atomicWrite(path: string, content: string): Promise<void> {

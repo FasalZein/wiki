@@ -1,6 +1,6 @@
 import { join } from "node:path";
 
-import { ArtifactValidationError, createArtifact, readArtifact } from "../../artifacts/store";
+import { ArtifactNotFoundError, ArtifactValidationError, createArtifact, readArtifact } from "../../artifacts/store";
 import { assertProjectStructure } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import { parseCommand, stringValue } from "../parse";
@@ -28,15 +28,23 @@ async function showDecision(args: string[]): Promise<CliResult> {
   }
 
   const vaultRoot = await getVaultRoot();
-  const artifact = await readArtifact({ type: "decision", vaultRoot, project, id });
-  const field = stringValue(parsed.values, "field");
-  if (field !== undefined) {
-    const value = artifact.fields[field];
-    process.stdout.write(`${formatFieldValue(value)}\n`);
+  try {
+    const artifact = await readArtifact({ type: "decision", vaultRoot, project, id });
+    const field = stringValue(parsed.values, "field");
+    if (field !== undefined) {
+      const value = artifact.fields[field];
+      process.stdout.write(`${formatFieldValue(value)}\n`);
+      return { code: 0 };
+    }
+    process.stdout.write(artifact.body);
     return { code: 0 };
+  } catch (error) {
+    if (error instanceof ArtifactNotFoundError) {
+      console.error(error.message);
+      return { code: 1 };
+    }
+    throw error;
   }
-  process.stdout.write(artifact.body);
-  return { code: 0 };
 }
 
 function formatFieldValue(value: unknown): string {

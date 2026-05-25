@@ -71,6 +71,16 @@ describe("decision CLI", () => {
     expect(result.stdout).toBe("Use SQLite\n");
     expect(result.stderr).toBe("");
   });
+
+  test("decision show exits 1 and names a missing id", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+
+    const result = await runWiki(["decision", "show", "DECISION-9999", "--project", "wiki-v2"], vaultRoot);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("not found");
+    expect(result.stderr).toContain("DECISION-9999");
+  });
 });
 
 function createArgs(): string[] {

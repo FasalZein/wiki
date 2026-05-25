@@ -1,48 +1,23 @@
 bun test v1.4.0-canary.1 (184d0371a)
 
 tests/cli-decision.test.ts:
-66 |       ["decision", "show", "DECISION-0001", "--project", "wiki-v2", "--field", "title"],
-67 |       vaultRoot,
-68 |     );
-69 | 
-70 |     expect(result.exitCode).toBe(0);
-71 |     expect(result.stdout).toBe("Use SQLite\n");
-                               ^
+75 |   test("decision show exits 1 and names a missing id", async () => {
+76 |     const vaultRoot = await createFixtureVault("wiki-v2");
+77 | 
+78 |     const result = await runWiki(["decision", "show", "DECISION-9999", "--project", "wiki-v2"], vaultRoot);
+79 | 
+80 |     expect(result.exitCode).toBe(1);
+                                 ^
 error: expect(received).toBe(expected)
 
-- "Use SQLite
-+ "# Use SQLite
-+ 
-+  DECISION-0001 · accepted · 2026-05-25
-+ 
-+ ## Context
-+ 
-+ Need a durable local index.
-+ 
-+  What forces are at play. What problem this decision answers. Cite domain terms, prior decisions, and constraints. Stay short — context, not history.
-+ 
-+ ## Decision
-+ 
-+ Use SQLite for local persistence.
-+ 
-+  The choice taken. State it plainly, in one paragraph or a short list. No hedging.
-+ 
-+ ## Consequences
-+ 
-+ Keep migrations small and explicit.
-+ 
-+  What follows from this decision — both the good and the awkward. List rejected alternatives at the end if any were considered.
-+ 
-  "
+Expected: 1
+Received: 10
 
-- Expected  - 1
-+ Received  + 22
-
-      at <anonymous> (/Users/tothemoon/Dev/code-forge/wiki/tests/cli-decision.test.ts:71:27)
-(fail) decision CLI > decision show --field prints only that field [60.49ms]
+      at <anonymous> (/Users/tothemoon/Dev/code-forge/wiki/tests/cli-decision.test.ts:80:29)
+(fail) decision CLI > decision show exits 1 and names a missing id [33.72ms]
 
  0 pass
- 4 filtered out
+ 5 filtered out
  1 fail
- 2 expect() calls
-Ran 1 test across 1 file. [68.00ms]
+ 1 expect() calls
+Ran 1 test across 1 file. [45.00ms]
