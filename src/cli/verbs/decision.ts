@@ -1,6 +1,13 @@
 import { join } from "node:path";
 
-import { ArtifactNotFoundError, ArtifactValidationError, createArtifact, readArtifact, setField } from "../../artifacts/store";
+import {
+  appendField,
+  ArtifactNotFoundError,
+  ArtifactValidationError,
+  createArtifact,
+  readArtifact,
+  setField,
+} from "../../artifacts/store";
 import { assertProjectStructure } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import { parseCommand, stringValue } from "../parse";
@@ -17,11 +24,22 @@ export async function handleDecision(args: string[]): Promise<CliResult> {
   if (subverb === "set") {
     return setDecision(rest);
   }
+  if (subverb === "append") {
+    return appendDecision(rest);
+  }
   console.error(`unknown decision subverb: ${subverb ?? ""}`.trim());
   return { code: 1 };
 }
 
+async function appendDecision(args: string[]): Promise<CliResult> {
+  return updateDecisionField(args, "append");
+}
+
 async function setDecision(args: string[]): Promise<CliResult> {
+  return updateDecisionField(args, "set");
+}
+
+async function updateDecisionField(args: string[], mode: "set" | "append"): Promise<CliResult> {
   const parsed = parseCommand(args, ["project", "field"]);
   const id = parsed.positionals[0];
   const value = parsed.positionals[1];
@@ -34,7 +52,11 @@ async function setDecision(args: string[]): Promise<CliResult> {
 
   const vaultRoot = await getVaultRoot();
   try {
-    await setField({ type: "decision", vaultRoot, project, id, field, value });
+    if (mode === "append") {
+      await appendField({ type: "decision", vaultRoot, project, id, field, value });
+    } else {
+      await setField({ type: "decision", vaultRoot, project, id, field, value });
+    }
     console.error(`updated ${id}`);
     return { code: 0 };
   } catch (error) {

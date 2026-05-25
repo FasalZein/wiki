@@ -1,23 +1,23 @@
 bun test v1.4.0-canary.1 (184d0371a)
 
 tests/cli-decision.test.ts:
-90 |     const result = await runWiki(
-91 |       ["decision", "set", "DECISION-0001", "--project", "wiki-v2", "--field", "status", "proposed"],
-92 |       vaultRoot,
-93 |     );
-94 | 
-95 |     expect(result.exitCode).toBe(0);
-                                 ^
+106 |     const result = await runWiki(
+107 |       ["decision", "append", "DECISION-0001", "--project", "wiki-v2", "--field", "context_terms", "Vault"],
+108 |       vaultRoot,
+109 |     );
+110 | 
+111 |     expect(result.exitCode).toBe(0);
+                                  ^
 error: expect(received).toBe(expected)
 
 Expected: 0
 Received: 1
 
-      at <anonymous> (/Users/tothemoon/Dev/code-forge/wiki/tests/cli-decision.test.ts:95:29)
-(fail) decision CLI > decision set updates one field and preserves the body [58.77ms]
+      at <anonymous> (/Users/tothemoon/Dev/code-forge/wiki/tests/cli-decision.test.ts:111:29)
+(fail) decision CLI > decision append adds a value to a list field [61.88ms]
 
  0 pass
- 6 filtered out
+ 7 filtered out
  1 fail
  1 expect() calls
-Ran 1 test across 1 file. [67.00ms]
+Ran 1 test across 1 file. [71.00ms]

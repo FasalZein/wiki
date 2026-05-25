@@ -1,10 +1,10 @@
 bun test v1.4.0-canary.1 (184d0371a)
 
 tests/cli-decision.test.ts:
-(pass) decision CLI > decision set updates one field and preserves the body [63.97ms]
+(pass) decision CLI > decision append adds a value to a list field [66.98ms]
 
  1 pass
- 6 filtered out
+ 7 filtered out
  0 fail
- 4 expect() calls
-Ran 1 test across 1 file. [72.00ms]
+ 3 expect() calls
+Ran 1 test across 1 file. [74.00ms]

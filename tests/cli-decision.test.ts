@@ -98,6 +98,21 @@ describe("decision CLI", () => {
     expect(after).toContain("status: proposed");
     expect(after.slice(after.indexOf("# Use SQLite"))).toBe(before.slice(before.indexOf("# Use SQLite")));
   });
+
+  test("decision append adds a value to a list field", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    await runWiki(createArgs(), vaultRoot);
+
+    const result = await runWiki(
+      ["decision", "append", "DECISION-0001", "--project", "wiki-v2", "--field", "context_terms", "Vault"],
+      vaultRoot,
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toContain("updated DECISION-0001");
+    const after = await readFile(join(vaultRoot, "projects", "wiki-v2", "decisions", "DECISION-0001.md"), "utf8");
+    expect(after).toContain("context_terms:\n  - Vault");
+  });
 });
 
 function createArgs(): string[] {
