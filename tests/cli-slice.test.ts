@@ -31,6 +31,20 @@ describe("slice CLI", () => {
     expect(file).toContain("# Build slice authoring");
   });
 
+  test("slice create exits 1 and names a missing title", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    await seedPrd(vaultRoot);
+
+    const result = await runWiki(
+      createArgs().filter((arg) => arg !== "--title" && arg !== "Build slice authoring"),
+      vaultRoot,
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("title");
+    expect(result.stdout).toBe("");
+  });
+
   test("slice show prints the rendered body", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
     await seedPrd(vaultRoot);
