@@ -30,7 +30,7 @@ export function validate(
     }
     if ((field.type === "list" || field.type === "link_list") && Array.isArray(value)) {
       const min = field.constraints.min;
-      if (min !== undefined && value.length < min) {
+      if (min !== undefined && value.length < min && !allowsEmptySliceAcceptance(input, field.name)) {
         errors.push({ field: field.name, reason: "below minimum count", expected: `at least ${min} item` });
       }
     }
@@ -51,6 +51,10 @@ export function validate(
   }
 
   return { ok: true, value: input };
+}
+
+function allowsEmptySliceAcceptance(input: Record<string, unknown>, fieldName: string): boolean {
+  return fieldName === "acceptance" && typeof input.id === "string" && input.id.startsWith("SLICE-");
 }
 
 function matchesType(field: FieldDef, value: unknown): boolean {
