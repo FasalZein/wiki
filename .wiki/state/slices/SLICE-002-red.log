@@ -202,3 +202,57 @@ Received message: "ENOENT: no such file or directory, stat '/private/var/folders
  1 fail
  21 expect() calls
 Ran 13 tests across 2 files. [35.00ms]
+### RED 6: getConfig reads typed TOML
+bun test v1.4.0-canary.1 (184d0371a)
+
+tests/schema.test.ts:
+(pass) template schemas > loads every shipped template with declared field constraints [3.20ms]
+(pass) template schemas > validates fully populated input and returns the normalized record [0.22ms]
+(pass) template schemas > rejects input missing a required field with the field name [0.13ms]
+(pass) template schemas > rejects a type mismatch with the field name and expected type [0.12ms]
+(pass) template schemas > rejects enum values outside the allowed set with the allowed values [0.10ms]
+(pass) template schemas > rejects a list below its minimum count with the field name and minimum [0.08ms]
+(pass) template schemas > rejects a string below its minimum length with the field name and minimum [0.07ms]
+(pass) template schemas > rejects pattern mismatches with the field name and pattern [0.07ms]
+
+tests/config.test.ts:
+(pass) vault config > getVaultRoot resolves the vault path from KNOWLEDGE_VAULT_ROOT first [0.91ms]
+(pass) vault config > getVaultRoot falls back to config file vault.root when env var is unset [1.93ms]
+(pass) vault config > getVaultRoot fails clearly when no vault root is configured [0.30ms]
+(pass) vault config > getVaultRoot expands tilde to the user's home directory [0.62ms]
+(pass) vault config > getVaultRoot returns an absolute path and rejects nonexistent roots [0.73ms]
+89 |     await writeFile(
+90 |       join(configDir, "config.toml"),
+91 |       '[vault]\nroot = "/vault"\n\n[research]\nsources = ["~/Research", "~/.pi/artifacts/research"]\n',
+92 |     );
+93 | 
+94 |     expect(await getConfig()).toEqual({
+                                   ^
+error: expect(received).toEqual(expected)
+
+  {
+    "harness": {
+      "detected": "none",
+    },
+    "research": {
+-     "sources": [
+-       "~/Research",
+-       "~/.pi/artifacts/research",
+-     ],
++     "sources": [],
+    },
+    "vault": {
+      "root": "/vault",
+    },
+  }
+
+- Expected  - 4
++ Received  + 1
+
+      at <anonymous> (/Users/tothemoon/Dev/code-forge/wiki/tests/config.test.ts:94:31)
+(fail) vault config > getConfig reads TOML and returns a typed WikiConfig object [1.20ms]
+
+ 13 pass
+ 1 fail
+ 22 expect() calls
+Ran 14 tests across 2 files. [35.00ms]

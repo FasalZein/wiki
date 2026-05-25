@@ -108,3 +108,65 @@ tests/config.test.ts:
  0 fail
  21 expect() calls
 Ran 13 tests across 2 files. [32.00ms]
+### GREEN 6: getConfig reads typed TOML
+bun test v1.4.0-canary.1 (184d0371a)
+
+tests/schema.test.ts:
+(pass) template schemas > loads every shipped template with declared field constraints [3.10ms]
+(pass) template schemas > validates fully populated input and returns the normalized record [0.22ms]
+(pass) template schemas > rejects input missing a required field with the field name [0.12ms]
+(pass) template schemas > rejects a type mismatch with the field name and expected type [0.11ms]
+(pass) template schemas > rejects enum values outside the allowed set with the allowed values [0.09ms]
+(pass) template schemas > rejects a list below its minimum count with the field name and minimum [0.14ms]
+(pass) template schemas > rejects a string below its minimum length with the field name and minimum [0.09ms]
+(pass) template schemas > rejects pattern mismatches with the field name and pattern [0.10ms]
+
+tests/config.test.ts:
+(pass) vault config > getVaultRoot resolves the vault path from KNOWLEDGE_VAULT_ROOT first [1.16ms]
+10 |   if (!isRecord(parsed.vault) || typeof parsed.vault.root !== "string") {
+11 |     throw new Error("Config is missing vault.root");
+12 |   }
+13 | 
+14 |   if (!isRecord(parsed.research) || !isStringArray(parsed.research.sources)) {
+15 |     throw new Error("Config is missing research.sources");
+                   ^
+error: Config is missing research.sources
+      at getConfig (/Users/tothemoon/Dev/code-forge/wiki/src/config/config.ts:15:15)
+      at async readConfiguredRoot (/Users/tothemoon/Dev/code-forge/wiki/src/config/vault.ts:35:19)
+      at async getVaultRoot (/Users/tothemoon/Dev/code-forge/wiki/src/config/vault.ts:7:32)
+      at async <anonymous> (/Users/tothemoon/Dev/code-forge/wiki/tests/config.test.ts:40:18)
+(fail) vault config > getVaultRoot falls back to config file vault.root when env var is unset [2.27ms]
+(pass) vault config > getVaultRoot fails clearly when no vault root is configured [0.62ms]
+(pass) vault config > getVaultRoot expands tilde to the user's home directory [0.68ms]
+(pass) vault config > getVaultRoot returns an absolute path and rejects nonexistent roots [0.87ms]
+(pass) vault config > getConfig reads TOML and returns a typed WikiConfig object [0.98ms]
+
+ 13 pass
+ 1 fail
+ 21 expect() calls
+Ran 14 tests across 2 files. [36.00ms]
+### GREEN 6b: getConfig reads typed TOML without breaking vault fallback
+bun test v1.4.0-canary.1 (184d0371a)
+
+tests/schema.test.ts:
+(pass) template schemas > loads every shipped template with declared field constraints [3.13ms]
+(pass) template schemas > validates fully populated input and returns the normalized record [0.20ms]
+(pass) template schemas > rejects input missing a required field with the field name [0.10ms]
+(pass) template schemas > rejects a type mismatch with the field name and expected type [0.10ms]
+(pass) template schemas > rejects enum values outside the allowed set with the allowed values [0.08ms]
+(pass) template schemas > rejects a list below its minimum count with the field name and minimum [0.09ms]
+(pass) template schemas > rejects a string below its minimum length with the field name and minimum [0.07ms]
+(pass) template schemas > rejects pattern mismatches with the field name and pattern [0.07ms]
+
+tests/config.test.ts:
+(pass) vault config > getVaultRoot resolves the vault path from KNOWLEDGE_VAULT_ROOT first [0.61ms]
+(pass) vault config > getVaultRoot falls back to config file vault.root when env var is unset [1.57ms]
+(pass) vault config > getVaultRoot fails clearly when no vault root is configured [0.64ms]
+(pass) vault config > getVaultRoot expands tilde to the user's home directory [0.52ms]
+(pass) vault config > getVaultRoot returns an absolute path and rejects nonexistent roots [0.73ms]
+(pass) vault config > getConfig reads TOML and returns a typed WikiConfig object [0.73ms]
+
+ 14 pass
+ 0 fail
+ 22 expect() calls
+Ran 14 tests across 2 files. [35.00ms]

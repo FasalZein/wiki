@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 
+import { getConfig } from "../src/config/config";
 import { getVaultRoot } from "../src/config/vault";
 
 const originalEnv = { ...process.env };
@@ -77,5 +78,23 @@ describe("vault config", () => {
     } finally {
       process.chdir(previousCwd);
     }
+  });
+
+  test("getConfig reads TOML and returns a typed WikiConfig object", async () => {
+    const home = await mkdtemp(join(tmpdir(), "wiki-home-"));
+    tempPaths.push(home);
+    process.env.HOME = home;
+    const configDir = join(home, ".config", "wiki");
+    await mkdir(configDir, { recursive: true });
+    await writeFile(
+      join(configDir, "config.toml"),
+      '[vault]\nroot = "/vault"\n\n[research]\nsources = ["~/Research", "~/.pi/artifacts/research"]\n',
+    );
+
+    expect(await getConfig()).toEqual({
+      vault: { root: "/vault" },
+      research: { sources: ["~/Research", "~/.pi/artifacts/research"] },
+      harness: { detected: "none" },
+    });
   });
 });
