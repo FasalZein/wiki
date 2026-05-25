@@ -1,6 +1,6 @@
 import { join } from "node:path";
 
-import { createArtifact } from "../../artifacts/store";
+import { ArtifactValidationError, createArtifact } from "../../artifacts/store";
 import { assertProjectStructure } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import { parseCommand, stringValue } from "../parse";
@@ -36,13 +36,21 @@ async function createDecision(args: string[]): Promise<CliResult> {
 
   const vaultRoot = await getVaultRoot();
   await assertProjectStructure(join(vaultRoot, "projects", project));
-  const artifact = await createArtifact({
-    type: "decision",
-    vaultRoot,
-    project,
-    fields: { title, context, decision, consequences },
-  });
-  console.log(artifact.id);
-  console.error(`created ${artifact.id}`);
-  return { code: 0 };
+  try {
+    const artifact = await createArtifact({
+      type: "decision",
+      vaultRoot,
+      project,
+      fields: { title, context, decision, consequences },
+    });
+    console.log(artifact.id);
+    console.error(`created ${artifact.id}`);
+    return { code: 0 };
+  } catch (error) {
+    if (error instanceof ArtifactValidationError) {
+      console.error(error.message);
+      return { code: 1 };
+    }
+    throw error;
+  }
 }

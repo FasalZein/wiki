@@ -1,10 +1,10 @@
 bun test v1.4.0-canary.1 (184d0371a)
 
 tests/cli-decision.test.ts:
-(pass) decision CLI > decision create exits 1 and names a missing required field [31.73ms]
+(pass) decision CLI > decision create exits 1 and names a schema-invalid field [31.36ms]
 
  1 pass
- 1 filtered out
+ 2 filtered out
  0 fail
  3 expect() calls
-Ran 1 test across 1 file. [43.00ms]
+Ran 1 test across 1 file. [40.00ms]

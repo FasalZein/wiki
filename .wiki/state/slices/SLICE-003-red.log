@@ -1,23 +1,23 @@
 bun test v1.4.0-canary.1 (184d0371a)
 
 tests/cli-decision.test.ts:
-(pass) decision CLI > decision create writes a new decision file and reports the id [30.33ms]
-28 |     const vaultRoot = await createFixtureVault("wiki-v2");
-29 | 
-30 |     const result = await runWiki(createArgs().filter((arg) => arg !== "--title" && arg !== "Use SQLite"), vaultRoot);
-31 | 
-32 |     expect(result.exitCode).toBe(1);
-33 |     expect(result.stderr).toContain("title");
-                               ^
-error: expect(received).toContain(expected)
+39 |     const args = createArgs();
+40 |     args[args.indexOf("Use SQLite")] = "Tiny";
+41 | 
+42 |     const result = await runWiki(args, vaultRoot);
+43 | 
+44 |     expect(result.exitCode).toBe(1);
+                                 ^
+error: expect(received).toBe(expected)
 
-Expected to contain: "title"
-Received: "missing required field\n"
+Expected: 1
+Received: 10
 
-      at <anonymous> (/Users/tothemoon/Dev/code-forge/wiki/tests/cli-decision.test.ts:33:27)
-(fail) decision CLI > decision create exits 1 and names a missing required field [25.73ms]
+      at <anonymous> (/Users/tothemoon/Dev/code-forge/wiki/tests/cli-decision.test.ts:44:29)
+(fail) decision CLI > decision create exits 1 and names a schema-invalid field [34.50ms]
 
- 1 pass
+ 0 pass
+ 2 filtered out
  1 fail
- 7 expect() calls
-Ran 2 tests across 1 file. [63.00ms]
+ 1 expect() calls
+Ran 1 test across 1 file. [45.00ms]

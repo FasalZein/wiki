@@ -33,6 +33,18 @@ describe("decision CLI", () => {
     expect(result.stderr).toContain("title");
     expect(result.stdout).toBe("");
   });
+
+  test("decision create exits 1 and names a schema-invalid field", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    const args = createArgs();
+    args[args.indexOf("Use SQLite")] = "Tiny";
+
+    const result = await runWiki(args, vaultRoot);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("title");
+    expect(result.stdout).toBe("");
+  });
 });
 
 function createArgs(): string[] {
