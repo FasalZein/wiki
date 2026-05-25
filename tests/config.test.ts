@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -22,6 +22,19 @@ describe("vault config", () => {
     const vaultRoot = await mkdtemp(join(tmpdir(), "wiki-vault-"));
     tempPaths.push(vaultRoot);
     process.env.KNOWLEDGE_VAULT_ROOT = vaultRoot;
+
+    expect(await getVaultRoot()).toBe(vaultRoot);
+  });
+
+  test("getVaultRoot falls back to config file vault.root when env var is unset", async () => {
+    const home = await mkdtemp(join(tmpdir(), "wiki-home-"));
+    const vaultRoot = await mkdtemp(join(tmpdir(), "wiki-vault-"));
+    tempPaths.push(home, vaultRoot);
+    delete process.env.KNOWLEDGE_VAULT_ROOT;
+    process.env.HOME = home;
+    const configDir = join(home, ".config", "wiki");
+    await mkdir(configDir, { recursive: true });
+    await writeFile(join(configDir, "config.toml"), `[vault]\nroot = "${vaultRoot}"\n`);
 
     expect(await getVaultRoot()).toBe(vaultRoot);
   });
