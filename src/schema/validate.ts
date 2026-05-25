@@ -14,6 +14,19 @@ export function validate(
     }
     if (value !== undefined && !matchesType(field, value)) {
       errors.push({ field: field.name, reason: "type mismatch", expected: expectedType(field) });
+      continue;
+    }
+    if (
+      field.type === "enum" &&
+      typeof value === "string" &&
+      field.constraints.values !== undefined &&
+      !field.constraints.values.includes(value)
+    ) {
+      errors.push({
+        field: field.name,
+        reason: "invalid enum value",
+        expected: `one of: ${field.constraints.values.join(", ")}`,
+      });
     }
   }
 

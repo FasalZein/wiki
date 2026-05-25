@@ -86,4 +86,26 @@ describe("template schemas", () => {
       errors: [{ field: "acceptance", reason: "type mismatch", expected: "list" }],
     });
   });
+
+  test("rejects enum values outside the allowed set with the allowed values", async () => {
+    const schema = await loadTemplate("decision");
+
+    expect(
+      validate(schema, {
+        id: "DECISION-0001",
+        title: "Template schemas carry validation rules",
+        project: "wiki-v2",
+        status: "maybe",
+      }),
+    ).toEqual({
+      ok: false,
+      errors: [
+        {
+          field: "status",
+          reason: "invalid enum value",
+          expected: "one of: proposed, accepted, superseded, rejected",
+        },
+      ],
+    });
+  });
 });
