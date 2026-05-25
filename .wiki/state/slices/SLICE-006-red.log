@@ -1,0 +1,4 @@
+bun test ./tests/cli-slice-state.test.ts
+
+RED evidence: first behavior failed before implementation.
+Expected exit code 2 for `wiki slice red` on a non-planned slice, received exit code 1 because `red` was still unknown/unimplemented.
