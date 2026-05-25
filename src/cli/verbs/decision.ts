@@ -29,8 +29,24 @@ async function showDecision(args: string[]): Promise<CliResult> {
 
   const vaultRoot = await getVaultRoot();
   const artifact = await readArtifact({ type: "decision", vaultRoot, project, id });
+  const field = stringValue(parsed.values, "field");
+  if (field !== undefined) {
+    const value = artifact.fields[field];
+    process.stdout.write(`${formatFieldValue(value)}\n`);
+    return { code: 0 };
+  }
   process.stdout.write(artifact.body);
   return { code: 0 };
+}
+
+function formatFieldValue(value: unknown): string {
+  if (Array.isArray(value)) {
+    return value.join("\n");
+  }
+  if (value === undefined) {
+    return "";
+  }
+  return String(value);
 }
 
 async function createDecision(args: string[]): Promise<CliResult> {
