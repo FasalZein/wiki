@@ -1,22 +1,23 @@
 bun test v1.4.0-canary.1 (184d0371a)
 
 tests/cli-decision.test.ts:
-29 |         "wiki-v2",
-30 |       ],
-31 |       vaultRoot,
-32 |     );
-33 | 
-34 |     expect(result.exitCode).toBe(0);
-                                 ^
-error: expect(received).toBe(expected)
+(pass) decision CLI > decision create writes a new decision file and reports the id [30.33ms]
+28 |     const vaultRoot = await createFixtureVault("wiki-v2");
+29 | 
+30 |     const result = await runWiki(createArgs().filter((arg) => arg !== "--title" && arg !== "Use SQLite"), vaultRoot);
+31 | 
+32 |     expect(result.exitCode).toBe(1);
+33 |     expect(result.stderr).toContain("title");
+                               ^
+error: expect(received).toContain(expected)
 
-Expected: 0
-Received: 1
+Expected to contain: "title"
+Received: "missing required field\n"
 
-      at <anonymous> (/Users/tothemoon/Dev/code-forge/wiki/tests/cli-decision.test.ts:34:29)
-(fail) decision CLI > decision create writes a new decision file and reports the id [12.85ms]
+      at <anonymous> (/Users/tothemoon/Dev/code-forge/wiki/tests/cli-decision.test.ts:33:27)
+(fail) decision CLI > decision create exits 1 and names a missing required field [25.73ms]
 
- 0 pass
+ 1 pass
  1 fail
- 1 expect() calls
-Ran 1 test across 1 file. [21.00ms]
+ 7 expect() calls
+Ran 2 tests across 1 file. [63.00ms]

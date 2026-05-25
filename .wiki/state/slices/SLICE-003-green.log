@@ -1,9 +1,10 @@
 bun test v1.4.0-canary.1 (184d0371a)
 
 tests/cli-decision.test.ts:
-(pass) decision CLI > decision create writes a new decision file and reports the id [36.95ms]
+(pass) decision CLI > decision create exits 1 and names a missing required field [31.73ms]
 
  1 pass
+ 1 filtered out
  0 fail
- 5 expect() calls
-Ran 1 test across 1 file. [46.00ms]
+ 3 expect() calls
+Ran 1 test across 1 file. [43.00ms]

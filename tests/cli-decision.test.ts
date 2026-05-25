@@ -13,23 +13,7 @@ describe("decision CLI", () => {
   test("decision create writes a new decision file and reports the id", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
 
-    const result = await runWiki(
-      [
-        "decision",
-        "create",
-        "--title",
-        "Use SQLite",
-        "--context",
-        "Need a durable local index.",
-        "--decision",
-        "Use SQLite for local persistence.",
-        "--consequences",
-        "Keep migrations small and explicit.",
-        "--project",
-        "wiki-v2",
-      ],
-      vaultRoot,
-    );
+    const result = await runWiki(createArgs(), vaultRoot);
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("DECISION-0001\n");
@@ -39,7 +23,34 @@ describe("decision CLI", () => {
     expect(file).toContain("id: DECISION-0001");
     expect(file).toContain("# Use SQLite");
   });
+
+  test("decision create exits 1 and names a missing required field", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+
+    const result = await runWiki(createArgs().filter((arg) => arg !== "--title" && arg !== "Use SQLite"), vaultRoot);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("title");
+    expect(result.stdout).toBe("");
+  });
 });
+
+function createArgs(): string[] {
+  return [
+    "decision",
+    "create",
+    "--title",
+    "Use SQLite",
+    "--context",
+    "Need a durable local index.",
+    "--decision",
+    "Use SQLite for local persistence.",
+    "--consequences",
+    "Keep migrations small and explicit.",
+    "--project",
+    "wiki-v2",
+  ];
+}
 
 type CommandResult = {
   exitCode: number;
