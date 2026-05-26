@@ -9,9 +9,11 @@
  */
 import { join, relative, sep } from "node:path";
 
-import { ensureCollection, QmdError, runQuery, type QmdResult } from "../../integrations/qmd";
+import { ensureCollection, QmdError, runStructuredQuery, updateCollection, type QmdResult } from "../../integrations/qmd";
 import { assertProjectStructure, loadProjectConfig } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
+import { classifyIntent } from "../../search/intent";
+import { buildStructuredQuery } from "../../search/query-builder";
 import { booleanValue, parseCommand, stringValue } from "../parse";
 import type { CliResult } from "../dispatch";
 
@@ -19,7 +21,7 @@ const allowedTypes = ["prd", "slice", "decision", "handover"] as const;
 type SearchType = (typeof allowedTypes)[number];
 
 export async function handleSearch(args: string[]): Promise<CliResult> {
-  const parsed = parseCommand(args, ["project", "type"], [], ["include-research"]);
+  const parsed = parseCommand(args, ["project", "type"], [], ["include-research", "explain", "no-refresh"]);
   const query = parsed.positionals[0]?.trim();
   if (query === undefined || query.length === 0) {
     console.error("missing required field: query");
@@ -35,6 +37,8 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
     console.error("invalid type: expected prd, slice, decision, or handover");
     return { code: 1 };
   }
+  const explain = booleanValue(parsed.values, "explain");
+  const noRefresh = booleanValue(parsed.values, "no-refresh");
 
   const vaultRoot = await getVaultRoot();
   const projectPath = join(vaultRoot, "projects", project);
@@ -48,7 +52,22 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
       await ensureCollection(qmdCommand, "research", config.research_path);
       collections.push("research");
     }
-    const results = filterByType(await runQuery(qmdCommand, query, collections), projectPath, type);
+
+    // Auto-refresh collections before querying (unless --no-refresh)
+    if (!noRefresh) {
+      for (const collection of collections) {
+        await updateCollection(qmdCommand, collection, false);
+      }
+    }
+
+    // Build structured query document instead of passing raw text
+    const intent = classifyIntent(query);
+    const queryDocument = buildStructuredQuery(query, { intent, project });
+    const results = filterByType(
+      await runStructuredQuery(qmdCommand, queryDocument, collections, { explain }),
+      projectPath,
+      type,
+    );
     writeResults(results);
     return { code: 0 };
   } catch (error) {

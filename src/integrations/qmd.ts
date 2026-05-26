@@ -60,6 +60,26 @@ export async function runQuery(qmdCommand: string, query: string, collections: s
   return parseQmdResults(stdout);
 }
 
+export async function runStructuredQuery(
+  qmdCommand: string,
+  queryDocument: string,
+  collections: string[],
+  options?: { explain?: boolean },
+): Promise<QmdResult[]> {
+  const args = [
+    "query",
+    queryDocument,
+    "--json",
+    ...(options?.explain === true ? ["--explain"] : []),
+    ...collections.flatMap((collection) => ["--collection", collection]),
+  ];
+  const stdout = await runQmd(qmdCommand, args);
+  if (stdout.trim().length === 0) {
+    return [];
+  }
+  return parseQmdResults(stdout);
+}
+
 async function runQmd(command: string, args: string[]): Promise<string> {
   let proc: Bun.Subprocess<"ignore", "pipe", "pipe">;
   try {

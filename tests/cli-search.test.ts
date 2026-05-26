@@ -38,9 +38,12 @@ describe("search CLI", () => {
         `${join(fixture.projectPath, "slices", "SLICE-001.md")}\t0.72\tSecond result\n`,
     );
     expect(result.stderr).toBe("");
-    expect(await readFile(fixture.stateFile, "utf8")).toBe(
-      `collection list\ncollection add wiki-v2 ${fixture.projectPath} **/*.md\nquery vault --json --collection wiki-v2\n`,
-    );
+    const log = await readFile(fixture.stateFile, "utf8");
+    expect(log).toContain("collection list");
+    expect(log).toContain(`collection add wiki-v2 ${fixture.projectPath} **/*.md`);
+    expect(log).toContain("update -c wiki-v2");
+    expect(log).toContain("query");
+    expect(log).toContain("lex: vault");
   });
 
   test("search exits 0 with empty stdout when QMD returns no results", async () => {
@@ -59,10 +62,15 @@ describe("search CLI", () => {
     expect((await runWiki(["search", "first", "--project", "wiki-v2"], fixture)).exitCode).toBe(0);
     expect((await runWiki(["search", "second", "--project", "wiki-v2"], fixture)).exitCode).toBe(0);
 
-    expect(await readFile(fixture.stateFile, "utf8")).toBe(
-      `collection list\ncollection add wiki-v2 ${fixture.projectPath} **/*.md\nquery first --json --collection wiki-v2\n` +
-        "collection list\nquery second --json --collection wiki-v2\n",
-    );
+    const log = await readFile(fixture.stateFile, "utf8");
+    // First call registers the collection, second call does not
+    const addLines = log.split("\n").filter((line) => line.startsWith("collection add"));
+    expect(addLines).toHaveLength(1);
+    // Both calls run update (auto-refresh) and query
+    const updateLines = log.split("\n").filter((line) => line.startsWith("update"));
+    expect(updateLines).toHaveLength(2);
+    expect(log).toContain("lex: first");
+    expect(log).toContain("lex: second");
   });
 
   test("search include-research registers and queries both collections", async () => {
@@ -71,11 +79,15 @@ describe("search CLI", () => {
     const result = await runWiki(["search", "vault", "--project", "wiki-v2", "--include-research"], fixture);
 
     expect(result.exitCode).toBe(0);
-    expect(await readFile(fixture.stateFile, "utf8")).toBe(
-      `collection list\ncollection add wiki-v2 ${fixture.projectPath} **/*.md\n` +
-        `collection list\ncollection add research ${fixture.researchPath} **/*.md\n` +
-        "query vault --json --collection wiki-v2 --collection research\n",
-    );
+    const log = await readFile(fixture.stateFile, "utf8");
+    expect(log).toContain(`collection add wiki-v2 ${fixture.projectPath} **/*.md`);
+    expect(log).toContain(`collection add research ${fixture.researchPath} **/*.md`);
+    // Both collections get auto-refreshed
+    expect(log).toContain("update -c wiki-v2");
+    expect(log).toContain("update -c research");
+    // Query includes both collections
+    expect(log).toContain("--collection wiki-v2");
+    expect(log).toContain("--collection research");
   });
 
   test("search type filter keeps only matching artifact folders", async () => {
