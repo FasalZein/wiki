@@ -65,7 +65,25 @@ case "$CMD" in
         code=*) code="${arg#code=}" ;;
       esac
     done
-    echo "=> 42"
+    # Handle vault.create/modify calls from obsidianCreate
+    if echo "$code" | grep -q 'app.vault.create\|app.vault.modify'; then
+      # Extract path between const p=" and ";
+      vpath=$(echo "$code" | grep -o 'const p="[^"]*"' | sed 's/const p="//;s/"//')
+      # Extract content between const c=` and `;
+      vcontent=$(echo "$code" | sed 's/.*const c=`//;s/`;const e=.*//')
+      # Unescape
+      vcontent=$(printf '%s' "$vcontent" | sed 's/\\`/`/g;s/\\\$/$/g;s/\\\\/\\/g')
+      if [ -n "$KNOWLEDGE_VAULT_ROOT" ] && [ -n "$vpath" ]; then
+        dest="${KNOWLEDGE_VAULT_ROOT}/${vpath}"
+        mkdir -p "$(dirname "$dest")"
+        printf '%s' "$vcontent" > "$dest"
+      fi
+      echo "=> ${vpath}"
+    elif echo "$code" | grep -q 'app.vault.setConfig'; then
+      echo "=> undefined"
+    else
+      echo "=> 42"
+    fi
     ;;
   plugin:install)
     echo "Installed"

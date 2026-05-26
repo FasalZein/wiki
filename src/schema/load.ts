@@ -1,6 +1,16 @@
+import { existsSync } from "node:fs";
 import matter from "gray-matter";
+import { resolve } from "node:path";
 
 import type { Constraints, FieldDef, FieldType, Schema } from "./types";
+
+export function resolveTemplatePath(filename: string): string {
+  // Try relative to source first (dev mode), then relative to dist (bundled)
+  const fromSrc = resolve(import.meta.dir, "..", "..", "templates", filename);
+  if (existsSync(fromSrc)) return fromSrc;
+  const fromDist = resolve(import.meta.dir, "..", "templates", filename);
+  return fromDist;
+}
 
 export type TemplateType = "prd" | "slice" | "decision" | "handover";
 
@@ -18,7 +28,7 @@ const fieldTypes: ReadonlySet<string> = new Set<FieldType>([
 ]);
 
 export async function loadTemplate(type: TemplateType): Promise<Schema> {
-  const file = Bun.file(new URL(`../../templates/${type}.md`, import.meta.url));
+  const file = Bun.file(resolveTemplatePath(`${type}.md`));
   const parsed = matter(normalizeInlineMaps(await file.text()));
 
   if (typeof parsed.data.template !== "string") {

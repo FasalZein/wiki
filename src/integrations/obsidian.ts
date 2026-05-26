@@ -82,11 +82,12 @@ export async function obsidianCreate(
   folder: string,
   opts?: { silent?: boolean; overwrite?: boolean },
 ): Promise<string> {
-  const args = ["create", `name=${name}`, `content=${content}`, `folder=${folder}`];
-  if (opts?.silent) args.push("silent");
-  if (opts?.overwrite) args.push("overwrite");
-  const output = await runObsidian(args);
-  return output.startsWith("Created: ") ? output.slice(9) : output;
+  const vaultPath = `${folder}/${name}.md`;
+  const escaped = content.replace(/\\/g, "\\\\").replace(/`/g, "\\`").replace(/\$/g, "\\$");
+  const overwrite = opts?.overwrite ?? false;
+  const code = `(async()=>{const p="${vaultPath}";const c=\`${escaped}\`;const e=app.vault.getAbstractFileByPath(p);if(e&&${overwrite}){await app.vault.modify(e,c)}else{await app.vault.create(p,c)}return p})()`;
+  const output = await obsidianEval(code);
+  return output;
 }
 
 export async function obsidianRead(path: string): Promise<string> {

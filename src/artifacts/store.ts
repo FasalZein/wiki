@@ -4,7 +4,7 @@ import { basename, dirname, join, relative } from "node:path";
 
 import { obsidianCreate } from "../integrations/obsidian";
 
-import { loadTemplate, type TemplateType } from "../schema/load";
+import { loadTemplate, resolveTemplatePath, type TemplateType } from "../schema/load";
 import { validate } from "../schema/validate";
 import type { NormalizedRecord, ValidationError } from "../schema/types";
 import { nextId } from "./id";
@@ -116,7 +116,7 @@ export async function appendField(input: AppendFieldInput): Promise<Artifact> {
 
 export async function createArtifact(input: CreateArtifactInput): Promise<Artifact> {
   const schema = await loadTemplate(input.type);
-  const templateFile = Bun.file(new URL(`../../templates/${input.type}.md`, import.meta.url));
+  const templateFile = Bun.file(resolveTemplatePath(`${input.type}.md`));
   const template = await templateFile.text();
   const id = await nextId(input.type, input.vaultRoot, input.project);
   const fields = applyDefaults(schema, template, {
@@ -143,7 +143,7 @@ export async function createArtifact(input: CreateArtifactInput): Promise<Artifa
 
 async function assertKnownField(type: TemplateType, existing: Artifact, fieldName: string): Promise<void> {
   const schema = await loadTemplate(type);
-  const templateFile = Bun.file(new URL(`../../templates/${type}.md`, import.meta.url));
+  const templateFile = Bun.file(resolveTemplatePath(`${type}.md`));
   const template = await templateFile.text();
   if (
     !schema.fields.some((field) => field.name === fieldName) &&

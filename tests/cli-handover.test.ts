@@ -35,14 +35,12 @@ describe("handover CLI", () => {
     expect(result.stdout).toBe("");
   });
 
-  test("handover create missing --project exits 1", async () => {
+  test("handover create without --project uses session project", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
 
     const result = await runWiki(["handover", "create", "--phase", "plan"], vaultRoot);
 
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("project");
-    expect(result.stdout).toBe("");
+    expect(result.exitCode).toBe(0);
   });
 
   test("handover create stores repeated active slices", async () => {
