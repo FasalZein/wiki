@@ -145,7 +145,7 @@ describe("syncVault", () => {
         join(vault, ".obsidian", "plugins", p.id, "manifest.json"),
         "utf8",
       );
-      expect(content).toBe(manifestContents[p.id]);
+      expect(content).toBe(manifestContents[p.id]!);
     }
     const lockAfterSecond = await readLockfile(vault);
     expect(lockAfterSecond).toEqual(lockAfterFirst);
