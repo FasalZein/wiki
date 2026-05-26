@@ -1,5 +1,6 @@
 import { handleDecision } from "./verbs/decision";
 import { handleHandover } from "./verbs/handover";
+import { handleLock } from "./verbs/lock";
 import { handlePhase } from "./verbs/phase";
 import { handlePlan } from "./verbs/plan";
 import { handlePrd } from "./verbs/prd";
@@ -21,6 +22,9 @@ export async function dispatch(args: string[]): Promise<CliResult> {
   }
   if (verb === "handover") {
     return handleHandover(rest);
+  }
+  if (verb === "lock") {
+    return handleLock(rest);
   }
   if (verb === "phase") {
     return handlePhase(rest);
