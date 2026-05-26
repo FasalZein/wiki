@@ -12,14 +12,14 @@ import { join, relative, sep } from "node:path";
 import { ensureCollection, QmdError, runQuery, type QmdResult } from "../../integrations/qmd";
 import { assertProjectStructure, loadProjectConfig } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
-import { parseCommand, stringValue } from "../parse";
+import { booleanValue, parseCommand, stringValue } from "../parse";
 import type { CliResult } from "../dispatch";
 
 const allowedTypes = ["prd", "slice", "decision", "handover"] as const;
 type SearchType = (typeof allowedTypes)[number];
 
 export async function handleSearch(args: string[]): Promise<CliResult> {
-  const parsed = parseCommand(args, ["project", "type"]);
+  const parsed = parseCommand(args, ["project", "type"], [], ["include-research"]);
   const query = parsed.positionals[0]?.trim();
   if (query === undefined || query.length === 0) {
     console.error("missing required field: query");
@@ -43,7 +43,12 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
     const config = await loadProjectConfig(projectPath);
     const qmdCommand = process.env.QMD_COMMAND ?? config.qmd_command;
     await ensureCollection(qmdCommand, project, projectPath);
-    const results = filterByType(await runQuery(qmdCommand, query, [project]), projectPath, type);
+    const collections = [project];
+    if (booleanValue(parsed.values, "include-research")) {
+      await ensureCollection(qmdCommand, "research", config.research_path);
+      collections.push("research");
+    }
+    const results = filterByType(await runQuery(qmdCommand, query, collections), projectPath, type);
     writeResults(results);
     return { code: 0 };
   } catch (error) {

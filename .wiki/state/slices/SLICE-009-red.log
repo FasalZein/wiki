@@ -1,0 +1,25 @@
+bun test v1.4.0-canary.1 (184d0371a)
+
+tests/cli-search.test.ts:
+68 |   test("search include-research registers and queries both collections", async () => {
+69 |     const fixture = await createSearchFixture("wiki-v2");
+70 | 
+71 |     const result = await runWiki(["search", "vault", "--project", "wiki-v2", "--include-research"], fixture);
+72 | 
+73 |     expect(result.exitCode).toBe(0);
+                                 ^
+error: expect(received).toBe(expected)
+
+Expected: 0
+Received: 10
+
+      at <anonymous> (/Users/tothemoon/Dev/code-forge/wiki/tests/cli-search.test.ts:73:29)
+(fail) search CLI > search include-research registers and queries both collections [67.96ms]
+(pass) search CLI > search type filter keeps only matching artifact folders [853.12ms]
+(pass) search CLI > search exits 10 and surfaces qmd stderr when qmd fails [198.38ms]
+
+ 2 pass
+ 4 filtered out
+ 1 fail
+ 6 expect() calls
+Ran 3 tests across 1 file. [1195.00ms]

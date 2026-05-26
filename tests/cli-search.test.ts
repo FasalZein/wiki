@@ -64,14 +64,58 @@ describe("search CLI", () => {
         "collection list\nquery second --json --collection wiki-v2\n",
     );
   });
+
+  test("search include-research registers and queries both collections", async () => {
+    const fixture = await createSearchFixture("wiki-v2");
+
+    const result = await runWiki(["search", "vault", "--project", "wiki-v2", "--include-research"], fixture);
+
+    expect(result.exitCode).toBe(0);
+    expect(await readFile(fixture.stateFile, "utf8")).toBe(
+      `collection list\ncollection add wiki-v2 ${fixture.projectPath} **/*.md\n` +
+        `collection list\ncollection add research ${fixture.researchPath} **/*.md\n` +
+        "query vault --json --collection wiki-v2 --collection research\n",
+    );
+  });
+
+  test("search type filter keeps only matching artifact folders", async () => {
+    const fixture = await createSearchFixture("wiki-v2");
+    await writeFile(
+      fixture.resultsFile,
+      JSON.stringify([
+        { path: join(fixture.projectPath, "prds", "PRD-001.md"), score: 0.9, snippet: "PRD" },
+        { path: join(fixture.projectPath, "slices", "SLICE-001.md"), score: 0.8, snippet: "Slice" },
+      ]),
+    );
+
+    const result = await runWiki(["search", "vault", "--project", "wiki-v2", "--type", "slice"], fixture);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe(`${join(fixture.projectPath, "slices", "SLICE-001.md")}\t0.8\tSlice\n`);
+  });
+
+  test("search exits 10 and surfaces qmd stderr when qmd fails", async () => {
+    const fixture = await createSearchFixture("wiki-v2", { failQuery: true });
+
+    const result = await runWiki(["search", "vault", "--project", "wiki-v2"], fixture);
+
+    expect(result.exitCode).toBe(10);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("fake qmd failed");
+  });
 });
 
 type SearchFixture = {
   vaultRoot: string;
   projectPath: string;
+  researchPath: string;
   stateFile: string;
   resultsFile: string;
   env: Record<string, string>;
+};
+
+type SearchFixtureOptions = {
+  failQuery?: boolean;
 };
 
 type CommandResult = {
@@ -95,7 +139,7 @@ async function runWiki(args: string[], fixture: SearchFixture): Promise<CommandR
   return { exitCode, stdout, stderr };
 }
 
-async function createSearchFixture(project: string): Promise<SearchFixture> {
+async function createSearchFixture(project: string, options: SearchFixtureOptions = {}): Promise<SearchFixture> {
   const root = await mkdtemp(join(tmpdir(), "wiki-search-"));
   tempPaths.push(root);
   const vaultRoot = join(root, "vault");
@@ -104,7 +148,12 @@ async function createSearchFixture(project: string): Promise<SearchFixture> {
   await mkdir(join(projectPath, "slices"));
   await mkdir(join(projectPath, "decisions"));
   await mkdir(join(projectPath, "handovers"));
-  await writeFile(join(projectPath, "_project.md"), "---\nrepo: /tmp/repo\ntest_command: bun test\n---\n");
+  const researchPath = join(root, "research");
+  await mkdir(researchPath);
+  await writeFile(
+    join(projectPath, "_project.md"),
+    `---\nrepo: /tmp/repo\ntest_command: bun test\nresearch_path: ${researchPath}\n---\n`,
+  );
 
   const stateFile = join(root, "qmd-state.log");
   const registeredFile = join(root, "qmd-registered.txt");
@@ -130,6 +179,10 @@ case "\${1:-}" in
     esac
     ;;
   query)
+    if [ "\${FAIL_QUERY:-}" = "1" ]; then
+      echo "fake qmd failed" >&2
+      exit 7
+    fi
     cat "$RESULTS_FILE"
     ;;
 esac
@@ -140,6 +193,7 @@ esac
   return {
     vaultRoot,
     projectPath,
+    researchPath,
     stateFile,
     resultsFile,
     env: {
@@ -147,6 +201,7 @@ esac
       STATE_FILE: stateFile,
       REGISTERED_FILE: registeredFile,
       RESULTS_FILE: resultsFile,
+      FAIL_QUERY: options.failQuery === true ? "1" : "0",
     },
   };
 }

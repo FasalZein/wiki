@@ -7,14 +7,23 @@ export type ParsedCommand = {
   values: ParsedValues;
 };
 
-export function parseCommand(args: string[], stringFlags: string[], multipleFlags: string[] = []): ParsedCommand {
+export function parseCommand(
+  args: string[],
+  stringFlags: string[],
+  multipleFlags: string[] = [],
+  booleanFlags: string[] = [],
+): ParsedCommand {
   const multiple = new Set(multipleFlags);
+  const stringOptions = Object.fromEntries(
+    stringFlags.map((flag) => [flag, { type: "string", multiple: multiple.has(flag) }]),
+  );
+  const booleanOptions = Object.fromEntries(booleanFlags.map((flag) => [flag, { type: "boolean" }]));
   const parsed = parseArgs({
     args,
     allowPositionals: true,
     strict: true,
     tokens: true,
-    options: Object.fromEntries(stringFlags.map((flag) => [flag, { type: "string", multiple: multiple.has(flag) }])),
+    options: { ...stringOptions, ...booleanOptions },
   });
   return {
     positionals: parsed.positionals.length > 0 ? parsed.positionals : trailingPositionals(parsed.tokens),
@@ -33,4 +42,8 @@ function trailingPositionals(tokens: Exclude<ReturnType<typeof parseArgs>["token
 export function stringValue(values: ParsedValues, name: string): string | undefined {
   const value = values[name];
   return typeof value === "string" ? value : undefined;
+}
+
+export function booleanValue(values: ParsedValues, name: string): boolean {
+  return values[name] === true;
 }
