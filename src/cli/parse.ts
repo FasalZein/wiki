@@ -1,4 +1,4 @@
-import { parseArgs } from "node:util";
+import { parseArgs, type ParseArgsConfig } from "node:util";
 
 export type ParsedValues = Record<string, string | boolean | string[] | undefined>;
 
@@ -14,21 +14,36 @@ export function parseCommand(
   booleanFlags: string[] = [],
 ): ParsedCommand {
   const multiple = new Set(multipleFlags);
-  const stringOptions = Object.fromEntries(
-    stringFlags.map((flag) => [flag, { type: "string", multiple: multiple.has(flag) }]),
-  );
-  const booleanOptions = Object.fromEntries(booleanFlags.map((flag) => [flag, { type: "boolean" }]));
+  const options: NonNullable<ParseArgsConfig["options"]> = {};
+  for (const flag of stringFlags) {
+    options[flag] = { type: "string", multiple: multiple.has(flag) };
+  }
+  for (const flag of booleanFlags) {
+    options[flag] = { type: "boolean" };
+  }
   const parsed = parseArgs({
     args,
     allowPositionals: true,
     strict: true,
     tokens: true,
-    options: { ...stringOptions, ...booleanOptions },
+    options,
   });
   return {
-    positionals: parsed.positionals.length > 0 ? parsed.positionals : trailingPositionals(parsed.tokens),
-    values: parsed.values,
+    positionals: parsed.positionals.length > 0 ? parsed.positionals : trailingPositionals(parsed.tokens ?? []),
+    values: normalizeValues(parsed.values),
   };
+}
+
+function normalizeValues(values: ReturnType<typeof parseArgs>["values"]): ParsedValues {
+  const normalized: ParsedValues = {};
+  for (const [key, value] of Object.entries(values)) {
+    if (Array.isArray(value)) {
+      normalized[key] = value.flatMap((item) => (typeof item === "string" ? [item] : []));
+    } else {
+      normalized[key] = value;
+    }
+  }
+  return normalized;
 }
 
 function trailingPositionals(tokens: Exclude<ReturnType<typeof parseArgs>["tokens"], undefined>): string[] {
