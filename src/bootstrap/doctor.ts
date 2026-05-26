@@ -1,0 +1,204 @@
+import { access, readdir, readFile } from "node:fs/promises";
+import { join } from "node:path";
+
+import { loadPluginManifest, requiredPlugins, loadDefaultConfig } from "./manifest";
+import { readLockfile } from "./plugins";
+
+export type DriftIssue = {
+  type:
+    | "missing-plugin"
+    | "version-mismatch"
+    | "config-drift"
+    | "missing-template"
+    | "community-plugins-mismatch";
+  plugin?: string;
+  template?: string;
+  expected?: string;
+  actual?: string;
+  message: string;
+};
+
+export type DoctorResult = {
+  issues: DriftIssue[];
+  clean: boolean; // true when issues.length === 0
+};
+
+async function exists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function runDoctor(
+  vaultPath: string,
+  repoRoot: string,
+): Promise<DoctorResult> {
+  const issues: DriftIssue[] = [];
+
+  const manifest = await loadPluginManifest();
+  const required = requiredPlugins(manifest);
+  const lockfile = await readLockfile(vaultPath);
+
+  // 1. Missing required plugins
+  const installedRequired: string[] = [];
+  for (const entry of required) {
+    const manifestPath = join(
+      vaultPath,
+      ".obsidian",
+      "plugins",
+      entry.id,
+      "manifest.json",
+    );
+    if (!(await exists(manifestPath))) {
+      issues.push({
+        type: "missing-plugin",
+        plugin: entry.id,
+        message: `required plugin "${entry.id}" is not installed`,
+      });
+    } else {
+      installedRequired.push(entry.id);
+    }
+  }
+
+  // 2. Version mismatch (only for installed required plugins)
+  for (const entry of required) {
+    if (!installedRequired.includes(entry.id)) continue;
+
+    const lockEntry = lockfile.plugins[entry.id];
+    if (!lockEntry) continue;
+
+    const manifestPath = join(
+      vaultPath,
+      ".obsidian",
+      "plugins",
+      entry.id,
+      "manifest.json",
+    );
+    const raw = await readFile(manifestPath, "utf8");
+    const diskManifest = JSON.parse(raw) as { version: string };
+
+    if (diskManifest.version !== lockEntry.version) {
+      issues.push({
+        type: "version-mismatch",
+        plugin: entry.id,
+        expected: lockEntry.version,
+        actual: diskManifest.version,
+        message: `plugin "${entry.id}" version mismatch: lockfile expects ${lockEntry.version}, installed is ${diskManifest.version}`,
+      });
+    }
+  }
+
+  // 3. Config drift (only for installed required plugins)
+  for (const entry of required) {
+    if (!installedRequired.includes(entry.id)) continue;
+
+    const dataPath = join(
+      vaultPath,
+      ".obsidian",
+      "plugins",
+      entry.id,
+      "data.json",
+    );
+    if (!(await exists(dataPath))) continue;
+
+    const dataRaw = await readFile(dataPath, "utf8");
+    const dataObj = JSON.parse(dataRaw);
+    const dataNormalized = JSON.stringify(dataObj);
+
+    // Blessed config takes precedence over CLI default
+    const blessedPath = join(
+      vaultPath,
+      ".wiki",
+      "blessed-config",
+      `${entry.id}.json`,
+    );
+
+    let expectedObj: Record<string, unknown>;
+    if (await exists(blessedPath)) {
+      const blessedRaw = await readFile(blessedPath, "utf8");
+      expectedObj = JSON.parse(blessedRaw);
+    } else {
+      expectedObj = await loadDefaultConfig(entry);
+    }
+
+    const expectedNormalized = JSON.stringify(expectedObj);
+
+    if (dataNormalized !== expectedNormalized) {
+      issues.push({
+        type: "config-drift",
+        plugin: entry.id,
+        message: `plugin "${entry.id}" config has drifted from ${await exists(blessedPath) ? "blessed" : "default"} config`,
+      });
+    }
+  }
+
+  // 4. Missing templates
+  const repoTemplatesDir = join(repoRoot, "templates");
+  if (await exists(repoTemplatesDir)) {
+    const entries = await readdir(repoTemplatesDir);
+    const mdFiles = entries.filter((f) => f.endsWith(".md"));
+
+    for (const file of mdFiles) {
+      const vaultTemplatePath = join(vaultPath, "_templates", file);
+      if (!(await exists(vaultTemplatePath))) {
+        issues.push({
+          type: "missing-template",
+          template: file,
+          message: `template "${file}" is missing from vault _templates/`,
+        });
+      }
+    }
+  }
+
+  // 5. community-plugins.json mismatch
+  const cpPath = join(vaultPath, ".obsidian", "community-plugins.json");
+  if (await exists(cpPath)) {
+    const cpRaw = await readFile(cpPath, "utf8");
+    const cpList: string[] = JSON.parse(cpRaw);
+
+    // Get actual installed plugin dirs
+    const pluginsDir = join(vaultPath, ".obsidian", "plugins");
+    let installedDirs: string[] = [];
+    if (await exists(pluginsDir)) {
+      const allEntries = await readdir(pluginsDir);
+      // Only count dirs that have a manifest.json (actual plugins)
+      const checks = await Promise.all(
+        allEntries.map(async (d) => ({
+          name: d,
+          isPlugin: await exists(join(pluginsDir, d, "manifest.json")),
+        })),
+      );
+      installedDirs = checks.filter((c) => c.isPlugin).map((c) => c.name);
+    }
+
+    const cpSet = new Set(cpList);
+    const installedSet = new Set(installedDirs);
+
+    if (
+      cpSet.size !== installedSet.size ||
+      [...cpSet].some((id) => !installedSet.has(id)) ||
+      [...installedSet].some((id) => !cpSet.has(id))
+    ) {
+      const inListNotDisk = [...cpSet].filter((id) => !installedSet.has(id));
+      const onDiskNotList = [...installedSet].filter((id) => !cpSet.has(id));
+
+      const parts: string[] = [];
+      if (inListNotDisk.length > 0) {
+        parts.push(`listed but not installed: ${inListNotDisk.join(", ")}`);
+      }
+      if (onDiskNotList.length > 0) {
+        parts.push(`installed but not listed: ${onDiskNotList.join(", ")}`);
+      }
+
+      issues.push({
+        type: "community-plugins-mismatch",
+        message: `community-plugins.json does not match installed plugins — ${parts.join("; ")}`,
+      });
+    }
+  }
+
+  return { issues, clean: issues.length === 0 };
+}
