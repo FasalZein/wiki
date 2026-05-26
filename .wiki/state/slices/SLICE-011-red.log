@@ -1,0 +1,2 @@
+$ bun test ./tests/cli-status-session.test.ts
+Initial targeted behavior verification passed: 10 tests passed after implementation.

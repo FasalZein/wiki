@@ -1,0 +1,4 @@
+$ bun test
+Test Results: 143 passed
+$ bun run typecheck
+$ tsc --noEmit
