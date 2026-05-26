@@ -1,6 +1,14 @@
 import { mkdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import {
+  DedupBlockedError,
+  fieldsForDedupOverride,
+  formatDedupBlocked,
+  parseDedupOverride,
+  QmdError,
+  runDedupGate,
+} from "../../artifacts/dedup";
 import { decideTransition } from "../../artifacts/transitions";
 import {
   appendField,
@@ -47,7 +55,7 @@ export async function handleSlice(args: string[]): Promise<CliResult> {
 }
 
 async function createSlice(args: string[]): Promise<CliResult> {
-  const parsed = parseCommand(args, ["title", "project", "parent-prd"]);
+  const parsed = parseCommand(args, ["title", "project", "parent-prd", "force-new", "related-to", "supersedes"]);
   const project = stringValue(parsed.values, "project");
   const title = stringValue(parsed.values, "title");
   const parentPrd = stringValue(parsed.values, "parent-prd");
@@ -62,30 +70,59 @@ async function createSlice(args: string[]): Promise<CliResult> {
     return { code: 1 };
   }
 
+  const override = parseDedupOverride({
+    forceNew: stringValue(parsed.values, "force-new"),
+    relatedTo: stringValue(parsed.values, "related-to"),
+    supersedes: stringValue(parsed.values, "supersedes"),
+  });
+  if (typeof override === "string") {
+    console.error(override);
+    return { code: 1 };
+  }
+
   const vaultRoot = await getVaultRoot();
-  await assertProjectStructure(join(vaultRoot, "projects", project));
-  const parentPrdPath = join(vaultRoot, "projects", project, "prds", `${parentPrd}.md`);
+  const projectPath = join(vaultRoot, "projects", project);
+  await assertProjectStructure(projectPath);
+  const parentPrdPath = join(projectPath, "prds", `${parentPrd}.md`);
   if (!(await fileExists(parentPrdPath))) {
     console.error(`parent PRD not found: ${parentPrd}`);
     return { code: 1 };
   }
 
   try {
+    if (override.kind === "supersedes") {
+      await readArtifact({ type: "slice", vaultRoot, project, id: override.id });
+    }
+    const config = await loadProjectConfig(projectPath);
+    await runDedupGate({ type: "slice", project, projectPath, config, query: `${title} ${parentPrd}`, override });
     const artifact = await createArtifact({
       type: "slice",
       vaultRoot,
       project,
-      fields: { title, parent_prd: parentPrd, acceptance: [] },
+      fields: { title, parent_prd: parentPrd, acceptance: [], ...fieldsForDedupOverride(override) },
     });
+    if (override.kind === "supersedes") {
+      await setFields({
+        type: "slice",
+        vaultRoot,
+        project,
+        id: override.id,
+        fields: { superseded_by: artifact.id },
+      });
+    }
     console.log(artifact.id);
     console.error(`created ${artifact.id}`);
     return { code: 0 };
   } catch (error) {
-    if (error instanceof ArtifactValidationError) {
-      console.error(error.message);
+    if (error instanceof DedupBlockedError) {
+      console.error(formatDedupBlocked(error));
       return { code: 1 };
     }
-    throw error;
+    if (error instanceof QmdError || error instanceof ProjectConfigError) {
+      console.error(error.message);
+      return { code: 10 };
+    }
+    return handleSliceError(error);
   }
 }
 
@@ -158,7 +195,7 @@ async function runTestTransition(args: string[], verb: "red" | "green"): Promise
       return { code: beforeRun.exitCode };
     }
 
-    const config = await loadProjectConfig(join(vaultRoot, "projects", project));
+    const config = await loadProjectConfig(join(vaultRoot, "projects", project), { requireLifecycle: true });
     const logPath = join(config.repo, ".wiki", "state", "slices", `${id}-${verb}.log`);
     const exitCode = await captureTestRun(config.repo, config.test_command, logPath);
     const afterRun = decideFromArtifact(artifact, verb, exitCode);

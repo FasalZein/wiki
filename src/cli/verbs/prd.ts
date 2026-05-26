@@ -1,14 +1,24 @@
 import { join } from "node:path";
 
 import {
+  DedupBlockedError,
+  fieldsForDedupOverride,
+  formatDedupBlocked,
+  parseDedupOverride,
+  QmdError,
+  runDedupGate,
+  type DedupOverride,
+} from "../../artifacts/dedup";
+import {
   appendField,
   ArtifactNotFoundError,
   ArtifactValidationError,
   createArtifact,
   readArtifact,
   setField,
+  setFields,
 } from "../../artifacts/store";
-import { assertProjectStructure } from "../../config/project";
+import { assertProjectStructure, loadProjectConfig, ProjectConfigError } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import { parseCommand, stringValue } from "../parse";
 import type { CliResult } from "../dispatch";
@@ -115,7 +125,7 @@ function formatFieldValue(value: unknown): string {
 }
 
 async function createPrd(args: string[]): Promise<CliResult> {
-  const parsed = parseCommand(args, ["title", "project"]);
+  const parsed = parseCommand(args, ["title", "project", "force-new", "related-to", "supersedes"]);
   const project = stringValue(parsed.values, "project");
   const title = stringValue(parsed.values, "title");
   const required = { project, title };
@@ -129,13 +139,31 @@ async function createPrd(args: string[]): Promise<CliResult> {
     return { code: 1 };
   }
 
+  const override = parseDedupOverride({
+    forceNew: stringValue(parsed.values, "force-new"),
+    relatedTo: stringValue(parsed.values, "related-to"),
+    supersedes: stringValue(parsed.values, "supersedes"),
+  });
+  if (typeof override === "string") {
+    console.error(override);
+    return { code: 1 };
+  }
+
   try {
-    const artifact = await createPrdProgrammatic({ title, project });
+    const artifact = await createPrdProgrammatic({ title, project, dedupOverride: override });
     console.log(artifact.id);
     console.error(`created ${artifact.id}`);
     return { code: 0 };
   } catch (error) {
-    if (error instanceof ArtifactValidationError) {
+    if (error instanceof DedupBlockedError) {
+      console.error(formatDedupBlocked(error));
+      return { code: 1 };
+    }
+    if (error instanceof QmdError || error instanceof ProjectConfigError) {
+      console.error(error.message);
+      return { code: 10 };
+    }
+    if (error instanceof ArtifactValidationError || error instanceof ArtifactNotFoundError) {
       console.error(error.message);
       return { code: 1 };
     }
@@ -143,15 +171,34 @@ async function createPrd(args: string[]): Promise<CliResult> {
   }
 }
 
-export async function createPrdProgrammatic(input: { title: string; project: string }) {
+export async function createPrdProgrammatic(input: { title: string; project: string; dedupOverride?: DedupOverride }) {
   const vaultRoot = await getVaultRoot();
-  await assertProjectStructure(join(vaultRoot, "projects", input.project));
-  return createArtifact({
+  const projectPath = join(vaultRoot, "projects", input.project);
+  await assertProjectStructure(projectPath);
+  const override = input.dedupOverride ?? { kind: "none" };
+  if (input.dedupOverride !== undefined) {
+    if (override.kind === "supersedes") {
+      await readArtifact({ type: "prd", vaultRoot, project: input.project, id: override.id });
+    }
+    const config = await loadProjectConfig(projectPath);
+    await runDedupGate({ type: "prd", project: input.project, projectPath, config, query: input.title, override });
+  }
+  const artifact = await createArtifact({
     type: "prd",
     vaultRoot,
     project: input.project,
-    fields: { title: input.title },
+    fields: { title: input.title, ...fieldsForDedupOverride(override) },
   });
+  if (override.kind === "supersedes") {
+    await setFields({
+      type: "prd",
+      vaultRoot,
+      project: input.project,
+      id: override.id,
+      fields: { status: "superseded", superseded_by: artifact.id },
+    });
+  }
+  return artifact;
 }
 
 async function transitionPrd(

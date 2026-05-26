@@ -1,0 +1,121 @@
+bun test v1.4.0-canary.1 (184d0371a)
+
+tests/cli-dedup.test.ts:
+15 | 
+16 |     const result = await runWiki(decisionArgs(), fixture);
+17 | 
+18 |     expect(result.exitCode).toBe(0);
+19 |     expect(result.stdout).toBe("DECISION-0001\n");
+20 |     expect(await readFile(fixture.stateFile, "utf8")).toContain(
+                                                           ^
+error: expect(received).toContain(expected)
+
+Expected to contain: "query Use SQLite Need a durable local index. Use SQLite for local persistence. --json --collection wiki-v2\n"
+Received: ""
+
+      at <anonymous> (/Users/tothemoon/Dev/code-forge/wiki/tests/cli-dedup.test.ts:20:55)
+(fail) pre-write dedup gate > decision create proceeds when QMD returns no high-score match [52.78ms]
+29 |       JSON.stringify([{ path: join(fixture.projectPath, "prds", "PRD-0007.md"), score: 0.7, snippet: "Same feature" }]),
+30 |     );
+31 | 
+32 |     const result = await runWiki(["prd", "create", "--title", "Core wiki CLI", "--project", "wiki-v2"], fixture);
+33 | 
+34 |     expect(result.exitCode).toBe(1);
+                                 ^
+error: expect(received).toBe(expected)
+
+Expected: 1
+Received: 0
+
+      at <anonymous> (/Users/tothemoon/Dev/code-forge/wiki/tests/cli-dedup.test.ts:34:29)
+(fail) pre-write dedup gate > prd create blocks on a match at the weak threshold and writes nothing [46.73ms]
+249 |   };
+250 | }
+251 | 
+252 | async function seedPrd(fixture: DedupFixture): Promise<void> {
+253 |   const result = await runWiki(["prd", "create", "--title", "Core wiki CLI", "--project", "wiki-v2", "--force-new", "Seeding parent PRD for the slice dedup test"], fixture);
+254 |   expect(result.exitCode).toBe(0);
+                                ^
+error: expect(received).toBe(expected)
+
+Expected: 0
+Received: 10
+
+      at seedPrd (/Users/tothemoon/Dev/code-forge/wiki/tests/cli-dedup.test.ts:254:27)
+      at async <anonymous> (/Users/tothemoon/Dev/code-forge/wiki/tests/cli-dedup.test.ts:44:11)
+(fail) pre-write dedup gate > slice create honors a custom weak threshold [40.14ms]
+72 |         "This is intentionally different from the existing PRD",
+73 |       ],
+74 |       fixture,
+75 |     );
+76 | 
+77 |     expect(result.exitCode).toBe(0);
+                                 ^
+error: expect(received).toBe(expected)
+
+Expected: 0
+Received: 10
+
+      at <anonymous> (/Users/tothemoon/Dev/code-forge/wiki/tests/cli-dedup.test.ts:77:29)
+(fail) pre-write dedup gate > force-new bypasses the gate and records the reason [39.23ms]
+86 |     const result = await runWiki(
+87 |       ["decision", "create", ...decisionArgs().slice(2), "--force-new", "too short"],
+88 |       fixture,
+89 |     );
+90 | 
+91 |     expect(result.exitCode).toBe(1);
+                                 ^
+error: expect(received).toBe(expected)
+
+Expected: 1
+Received: 10
+
+      at <anonymous> (/Users/tothemoon/Dev/code-forge/wiki/tests/cli-dedup.test.ts:91:29)
+(fail) pre-write dedup gate > short force-new reason exits 1 and writes nothing [40.33ms]
+ 96 |   test("related-to bypasses the gate and records the link", async () => {
+ 97 |     const fixture = await createDedupFixture("wiki-v2");
+ 98 | 
+ 99 |     const result = await runWiki(["prd", "create", "--title", "Core wiki CLI", "--project", "wiki-v2", "--related-to", "PRD-0007"], fixture);
+100 | 
+101 |     expect(result.exitCode).toBe(0);
+                                  ^
+error: expect(received).toBe(expected)
+
+Expected: 0
+Received: 10
+
+      at <anonymous> (/Users/tothemoon/Dev/code-forge/wiki/tests/cli-dedup.test.ts:101:29)
+(fail) pre-write dedup gate > related-to bypasses the gate and records the link [39.20ms]
+106 |     const fixture = await createDedupFixture("wiki-v2");
+107 |     await runWiki(["prd", "create", "--title", "Old wiki CLI", "--project", "wiki-v2", "--force-new", "Seeding old PRD without checking duplicates"], fixture);
+108 | 
+109 |     const result = await runWiki(["prd", "create", "--title", "Core wiki CLI", "--project", "wiki-v2", "--supersedes", "PRD-0001"], fixture);
+110 | 
+111 |     expect(result.exitCode).toBe(0);
+                                  ^
+error: expect(received).toBe(expected)
+
+Expected: 0
+Received: 10
+
+      at <anonymous> (/Users/tothemoon/Dev/code-forge/wiki/tests/cli-dedup.test.ts:111:29)
+(fail) pre-write dedup gate > supersedes bypasses the gate and updates the old same-type artifact [77.60ms]
+121 |     tempPaths.push(repo);
+122 | 
+123 |     const handover = await runWiki(["handover", "create", "--project", "wiki-v2", "--phase", "implement"], fixture);
+124 |     const plan = await runWiki(["plan", "create", "--project", "wiki-v2", "--title", "Draft plan", "--repo", repo], fixture);
+125 | 
+126 |     expect(handover.exitCode).toBe(0);
+                                    ^
+error: expect(received).toBe(expected)
+
+Expected: 0
+Received: 1
+
+      at <anonymous> (/Users/tothemoon/Dev/code-forge/wiki/tests/cli-dedup.test.ts:126:31)
+(fail) pre-write dedup gate > handover create and plan create do not call QMD [83.59ms]
+
+ 0 pass
+ 8 fail
+ 10 expect() calls
+Ran 8 tests across 1 file. [432.00ms]

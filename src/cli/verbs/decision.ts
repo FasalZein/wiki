@@ -1,14 +1,23 @@
 import { join } from "node:path";
 
 import {
+  DedupBlockedError,
+  fieldsForDedupOverride,
+  formatDedupBlocked,
+  parseDedupOverride,
+  QmdError,
+  runDedupGate,
+} from "../../artifacts/dedup";
+import {
   appendField,
   ArtifactNotFoundError,
   ArtifactValidationError,
   createArtifact,
   readArtifact,
   setField,
+  setFields,
 } from "../../artifacts/store";
-import { assertProjectStructure } from "../../config/project";
+import { assertProjectStructure, loadProjectConfig, ProjectConfigError } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import { parseCommand, stringValue } from "../parse";
 import type { CliResult } from "../dispatch";
@@ -109,7 +118,7 @@ function formatFieldValue(value: unknown): string {
 }
 
 async function createDecision(args: string[]): Promise<CliResult> {
-  const parsed = parseCommand(args, ["title", "context", "decision", "consequences", "project"]);
+  const parsed = parseCommand(args, ["title", "context", "decision", "consequences", "project", "force-new", "related-to", "supersedes"]);
   const project = stringValue(parsed.values, "project");
   const title = stringValue(parsed.values, "title");
   const context = stringValue(parsed.values, "context");
@@ -132,20 +141,60 @@ async function createDecision(args: string[]): Promise<CliResult> {
     return { code: 1 };
   }
 
+  const override = parseDedupOverride({
+    forceNew: stringValue(parsed.values, "force-new"),
+    relatedTo: stringValue(parsed.values, "related-to"),
+    supersedes: stringValue(parsed.values, "supersedes"),
+  });
+  if (typeof override === "string") {
+    console.error(override);
+    return { code: 1 };
+  }
+
   const vaultRoot = await getVaultRoot();
-  await assertProjectStructure(join(vaultRoot, "projects", project));
+  const projectPath = join(vaultRoot, "projects", project);
+  await assertProjectStructure(projectPath);
   try {
+    if (override.kind === "supersedes") {
+      await readArtifact({ type: "decision", vaultRoot, project, id: override.id });
+    }
+    const config = await loadProjectConfig(projectPath);
+    await runDedupGate({
+      type: "decision",
+      project,
+      projectPath,
+      config,
+      query: `${title} ${context} ${decision}`,
+      override,
+    });
     const artifact = await createArtifact({
       type: "decision",
       vaultRoot,
       project,
-      fields: { title, context, decision, consequences },
+      fields: { title, context, decision, consequences, ...fieldsForDedupOverride(override) },
     });
+    if (override.kind === "supersedes") {
+      await setFields({
+        type: "decision",
+        vaultRoot,
+        project,
+        id: override.id,
+        fields: { status: "superseded", superseded_by: artifact.id },
+      });
+    }
     console.log(artifact.id);
     console.error(`created ${artifact.id}`);
     return { code: 0 };
   } catch (error) {
-    if (error instanceof ArtifactValidationError) {
+    if (error instanceof DedupBlockedError) {
+      console.error(formatDedupBlocked(error));
+      return { code: 1 };
+    }
+    if (error instanceof QmdError || error instanceof ProjectConfigError) {
+      console.error(error.message);
+      return { code: 10 };
+    }
+    if (error instanceof ArtifactValidationError || error instanceof ArtifactNotFoundError) {
       console.error(error.message);
       return { code: 1 };
     }

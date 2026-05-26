@@ -19,6 +19,8 @@ export type ProjectConfig = {
   test_command: string;
   qmd_command: string;
   research_path: string;
+  dedup_threshold_weak: number;
+  dedup_threshold_strong: number;
 };
 
 export class ProjectConfigError extends Error {
@@ -34,7 +36,7 @@ export async function assertProjectStructure(projectPath: string): Promise<void>
   }
 }
 
-export async function loadProjectConfig(projectPath: string): Promise<ProjectConfig> {
+export async function loadProjectConfig(projectPath: string, options: { requireLifecycle?: boolean } = {}): Promise<ProjectConfig> {
   let content: string;
   try {
     content = await readFile(join(projectPath, "_project.md"), "utf8");
@@ -45,14 +47,16 @@ export async function loadProjectConfig(projectPath: string): Promise<ProjectCon
     throw error;
   }
   const data = matter(content).data;
-  if (!isNonEmptyString(data.repo) || !isNonEmptyString(data.test_command)) {
+  if (options.requireLifecycle === true && (!isNonEmptyString(data.repo) || !isNonEmptyString(data.test_command))) {
     throw new ProjectConfigError();
   }
   return {
-    repo: data.repo,
-    test_command: data.test_command,
+    repo: isNonEmptyString(data.repo) ? data.repo : projectPath,
+    test_command: isNonEmptyString(data.test_command) ? data.test_command : "bun test",
     qmd_command: isNonEmptyString(data.qmd_command) ? data.qmd_command : "qmd",
     research_path: expandHome(isNonEmptyString(data.research_path) ? data.research_path : "~/.pi/artifacts/research"),
+    dedup_threshold_weak: numberValue(data.dedup_threshold_weak, 0.7),
+    dedup_threshold_strong: numberValue(data.dedup_threshold_strong, 0.85),
   };
 }
 
@@ -86,6 +90,10 @@ async function assertDirectory(path: string, label: string): Promise<void> {
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function numberValue(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
 function expandHome(path: string): string {

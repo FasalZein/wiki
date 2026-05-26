@@ -260,6 +260,18 @@ async function createFixture(options: { projectConfig?: string } = {}): Promise<
     `#!/usr/bin/env bash\nif [ -f "$1/want-fail" ]; then\n  echo "(fake) test failed"\n  exit 1\nfi\necho "(fake) test passed"\nexit 0\n`,
   );
   await chmod(scriptPath, 0o755);
+  const qmdCommand = join(repoPath, "fake-qmd.sh");
+  await writeFile(
+    qmdCommand,
+    `#!/usr/bin/env bash
+set -euo pipefail
+case "\${1:-}" in
+  collection) exit 0 ;;
+  query) echo '[]' ;;
+esac
+`,
+  );
+  await chmod(qmdCommand, 0o755);
 
   const projectPath = join(vaultRoot, "projects", project);
   await mkdir(join(projectPath, "prds"), { recursive: true });
@@ -268,8 +280,9 @@ async function createFixture(options: { projectConfig?: string } = {}): Promise<
   await mkdir(join(projectPath, "handovers"));
   await writeFile(
     join(projectPath, "_project.md"),
-    options.projectConfig ??
-      `---\nproject: ${project}\nrepo: ${repoPath}\ntest_command: ${scriptPath} ${statePath}\n---\n# ${project}\n`,
+    options.projectConfig === undefined
+      ? `---\nproject: ${project}\nrepo: ${repoPath}\ntest_command: ${scriptPath} ${statePath}\nqmd_command: ${qmdCommand}\n---\n# ${project}\n`
+      : options.projectConfig.replace("---\n", `---\nqmd_command: ${qmdCommand}\n`),
   );
   const prd = await runWiki(["prd", "create", "--title", "Core wiki CLI", "--project", project], vaultRoot);
   expect(prd.exitCode).toBe(0);

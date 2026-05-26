@@ -260,7 +260,7 @@ async function resolveRepo(values: Record<string, string | boolean | string[] | 
 
   try {
     const vaultRoot = await getVaultRoot();
-    const config = await loadProjectConfig(join(vaultRoot, "projects", project));
+    const config = await loadProjectConfig(join(vaultRoot, "projects", project), { requireLifecycle: true });
     await assertExistingDirectory(config.repo);
     return config.repo;
   } catch (error) {

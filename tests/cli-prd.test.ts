@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -244,7 +244,10 @@ async function createFixtureVault(project: string): Promise<string> {
   await mkdir(join(projectPath, "slices"));
   await mkdir(join(projectPath, "decisions"));
   await mkdir(join(projectPath, "handovers"));
-  await writeFile(join(projectPath, "_project.md"), `# ${project}\n`);
+  const qmdCommand = join(vaultRoot, "fake-qmd");
+  await writeFile(qmdCommand, "#!/usr/bin/env bash\nset -euo pipefail\ncase \"${1:-}\" in\n  collection) exit 0 ;;\n  query) echo '[]' ;;\nesac\n");
+  await chmod(qmdCommand, 0o755);
+  await writeFile(join(projectPath, "_project.md"), `---\nqmd_command: ${qmdCommand}\n---\n# ${project}\n`);
   return vaultRoot;
 }
 
