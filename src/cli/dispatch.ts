@@ -7,6 +7,7 @@ import { handleSearch } from "./verbs/search";
 import { handleSession } from "./verbs/session";
 import { handleSlice } from "./verbs/slice";
 import { handleStatus } from "./verbs/status";
+import { handleSync } from "./verbs/sync";
 import { handleTerm } from "./verbs/term";
 
 export type CliResult = {
@@ -41,6 +42,9 @@ export async function dispatch(args: string[]): Promise<CliResult> {
   }
   if (verb === "status") {
     return handleStatus(rest);
+  }
+  if (verb === "sync") {
+    return handleSync(rest);
   }
   if (verb === "term") {
     return handleTerm(rest);

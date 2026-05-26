@@ -39,6 +39,14 @@ export async function ensureCollection(qmdCommand: string, name: string, path: s
   }
 }
 
+export async function updateCollection(qmdCommand: string, name: string, pull: boolean): Promise<void> {
+  await runQmd(qmdCommand, pull ? ["update", "--pull", "-c", name] : ["update", "-c", name]);
+}
+
+export async function embedCollection(qmdCommand: string, name: string, force: boolean): Promise<void> {
+  await runQmd(qmdCommand, force ? ["embed", "-f", "-c", name] : ["embed", "-c", name]);
+}
+
 export async function runQuery(qmdCommand: string, query: string, collections: string[]): Promise<QmdResult[]> {
   const args = ["query", query, "--json", ...collections.flatMap((collection) => ["--collection", collection])];
   const stdout = await runQmd(qmdCommand, args);
