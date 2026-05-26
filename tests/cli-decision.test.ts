@@ -19,7 +19,7 @@ describe("decision CLI", () => {
     expect(result.stdout).toBe("DECISION-0001\n");
     expect(result.stderr).toContain("created DECISION-0001");
 
-    const file = await readFile(join(vaultRoot, "projects", "wiki-v2", "decisions", "DECISION-0001.md"), "utf8");
+    const file = await readFile(join(vaultRoot, "projects", "wiki-v2", "adrs", "DECISION-0001.md"), "utf8");
     expect(file).toContain("id: DECISION-0001");
     expect(file).toContain("# Use SQLite");
   });
@@ -85,7 +85,7 @@ describe("decision CLI", () => {
   test("decision set updates one field and preserves the body", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
     await runWiki(createArgs(), vaultRoot);
-    const before = await readFile(join(vaultRoot, "projects", "wiki-v2", "decisions", "DECISION-0001.md"), "utf8");
+    const before = await readFile(join(vaultRoot, "projects", "wiki-v2", "adrs", "DECISION-0001.md"), "utf8");
 
     const result = await runWiki(
       ["decision", "set", "DECISION-0001", "--project", "wiki-v2", "--field", "status", "proposed"],
@@ -94,7 +94,7 @@ describe("decision CLI", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toContain("updated DECISION-0001");
-    const after = await readFile(join(vaultRoot, "projects", "wiki-v2", "decisions", "DECISION-0001.md"), "utf8");
+    const after = await readFile(join(vaultRoot, "projects", "wiki-v2", "adrs", "DECISION-0001.md"), "utf8");
     expect(after).toContain("status: proposed");
     expect(after.slice(after.indexOf("# Use SQLite"))).toBe(before.slice(before.indexOf("# Use SQLite")));
   });
@@ -110,7 +110,7 @@ describe("decision CLI", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toContain("updated DECISION-0001");
-    const after = await readFile(join(vaultRoot, "projects", "wiki-v2", "decisions", "DECISION-0001.md"), "utf8");
+    const after = await readFile(join(vaultRoot, "projects", "wiki-v2", "adrs", "DECISION-0001.md"), "utf8");
     expect(after).toContain("context_terms:\n  - Vault");
   });
 
@@ -196,7 +196,7 @@ async function createFixtureVault(project: string): Promise<string> {
   const projectPath = join(vaultRoot, "projects", project);
   await mkdir(join(projectPath, "prds"), { recursive: true });
   await mkdir(join(projectPath, "slices"));
-  await mkdir(join(projectPath, "decisions"));
+  await mkdir(join(projectPath, "adrs"));
   await mkdir(join(projectPath, "handovers"));
   const qmdCommand = join(vaultRoot, "fake-qmd");
   await writeFile(qmdCommand, "#!/usr/bin/env bash\nset -euo pipefail\ncase \"${1:-}\" in\n  collection) exit 0 ;;\n  query) echo '[]' ;;\nesac\n");

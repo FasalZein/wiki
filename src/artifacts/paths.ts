@@ -5,7 +5,7 @@ import type { TemplateType } from "../schema/load";
 export function artifactFolder(type: TemplateType): string {
   switch (type) {
     case "decision":
-      return "decisions";
+      return "adrs";
     case "prd":
       return "prds";
     case "slice":

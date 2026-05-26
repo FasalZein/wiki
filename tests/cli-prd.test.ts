@@ -242,7 +242,7 @@ async function createFixtureVault(project: string): Promise<string> {
   const projectPath = join(vaultRoot, "projects", project);
   await mkdir(join(projectPath, "prds"), { recursive: true });
   await mkdir(join(projectPath, "slices"));
-  await mkdir(join(projectPath, "decisions"));
+  await mkdir(join(projectPath, "adrs"));
   await mkdir(join(projectPath, "handovers"));
   const qmdCommand = join(vaultRoot, "fake-qmd");
   await writeFile(qmdCommand, "#!/usr/bin/env bash\nset -euo pipefail\ncase \"${1:-}\" in\n  collection) exit 0 ;;\n  query) echo '[]' ;;\nesac\n");

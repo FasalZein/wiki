@@ -2,7 +2,7 @@
  * Search verb for ADR-0009. This is a thin wrapper over QMD: collection
  * registration, qmd query invocation, and stable stdout formatting only.
  *
- * Type filters use path-prefix filtering (`prds/`, `slices/`, `decisions/`,
+ * Type filters use path-prefix filtering (`prds/`, `slices/`, `adrs/`,
  * `handovers/`) rather than QMD frontmatter filters because the locked vault
  * layout already gives a cheap, stable template mapping. If QMD JSON later
  * exposes richer frontmatter, this can move into runQuery.
@@ -83,7 +83,7 @@ function folderForType(type: SearchType): string {
     return "slices";
   }
   if (type === "decision") {
-    return "decisions";
+    return "adrs";
   }
   return "handovers";
 }

@@ -237,7 +237,7 @@ async function createFixtureVault(project: string, repo: string): Promise<string
   const projectPath = join(vaultRoot, "projects", project);
   await mkdir(join(projectPath, "prds"), { recursive: true });
   await mkdir(join(projectPath, "slices"));
-  await mkdir(join(projectPath, "decisions"));
+  await mkdir(join(projectPath, "adrs"));
   await mkdir(join(projectPath, "handovers"));
   await writeFile(join(projectPath, "_project.md"), `---\nrepo: ${JSON.stringify(repo)}\ntest_command: bun test\n---\n# ${project}\n`);
   return vaultRoot;
@@ -249,7 +249,7 @@ async function createFixtureVaultWithoutRepo(project: string): Promise<string> {
   const projectPath = join(vaultRoot, "projects", project);
   await mkdir(join(projectPath, "prds"), { recursive: true });
   await mkdir(join(projectPath, "slices"));
-  await mkdir(join(projectPath, "decisions"));
+  await mkdir(join(projectPath, "adrs"));
   await mkdir(join(projectPath, "handovers"));
   await writeFile(join(projectPath, "_project.md"), `# ${project}\n`);
   return vaultRoot;

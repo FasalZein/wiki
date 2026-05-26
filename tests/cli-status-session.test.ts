@@ -194,7 +194,7 @@ async function createFixture(): Promise<Fixture> {
   const projectPath = join(vaultRoot, "projects", project);
   await mkdir(join(projectPath, "prds"), { recursive: true });
   await mkdir(join(projectPath, "slices"));
-  await mkdir(join(projectPath, "decisions"));
+  await mkdir(join(projectPath, "adrs"));
   await mkdir(join(projectPath, "handovers"));
   await writeFile(join(projectPath, "_project.md"), `---\nproject: ${project}\nrepo: ${repoPath}\ntest_command: bun test\n---\n# ${project}\n`);
   return { vaultRoot, repoPath, cwd };

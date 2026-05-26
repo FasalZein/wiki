@@ -12,7 +12,7 @@ afterEach(async () => {
 });
 
 describe("artifact store", () => {
-  test("creates DECISION-0001 in an empty decisions folder", async () => {
+  test("creates DECISION-0001 in an empty adrs folder", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
     const artifact = await createArtifact({
       type: "decision",
@@ -22,7 +22,7 @@ describe("artifact store", () => {
     });
 
     expect(artifact.id).toBe("DECISION-0001");
-    expect(artifact.path).toBe(join(vaultRoot, "projects", "wiki-v2", "decisions", "DECISION-0001.md"));
+    expect(artifact.path).toBe(join(vaultRoot, "projects", "wiki-v2", "adrs", "DECISION-0001.md"));
 
     const file = await readFile(artifact.path, "utf8");
     expect(file).toContain("id: DECISION-0001");
@@ -35,9 +35,9 @@ describe("artifact store", () => {
 
   test("creates the next unused decision id when files already exist", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
-    const decisionsPath = join(vaultRoot, "projects", "wiki-v2", "decisions");
-    await writeFile(join(decisionsPath, "DECISION-0001.md"), "existing");
-    await writeFile(join(decisionsPath, "DECISION-0003.md"), "existing");
+    const adrsPath = join(vaultRoot, "projects", "wiki-v2", "adrs");
+    await writeFile(join(adrsPath, "DECISION-0001.md"), "existing");
+    await writeFile(join(adrsPath, "DECISION-0003.md"), "existing");
 
     const artifact = await createArtifact({
       type: "decision",
@@ -169,7 +169,7 @@ async function createFixtureVault(project: string): Promise<string> {
   const projectPath = join(vaultRoot, "projects", project);
   await mkdir(join(projectPath, "prds"), { recursive: true });
   await mkdir(join(projectPath, "slices"));
-  await mkdir(join(projectPath, "decisions"));
+  await mkdir(join(projectPath, "adrs"));
   await mkdir(join(projectPath, "handovers"));
   await writeFile(join(projectPath, "_project.md"), `# ${project}\n`);
   return vaultRoot;

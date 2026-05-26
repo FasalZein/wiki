@@ -31,7 +31,7 @@ export class ProjectConfigError extends Error {
 
 export async function assertProjectStructure(projectPath: string): Promise<void> {
   await assertFile(join(projectPath, "_project.md"), "_project.md");
-  for (const folder of ["prds", "slices", "decisions", "handovers"]) {
+  for (const folder of ["prds", "slices", "adrs", "handovers"]) {
     await assertDirectory(join(projectPath, folder), `${folder}/`);
   }
 }

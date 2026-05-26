@@ -90,7 +90,7 @@ describe("pre-write dedup gate", () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("force-new reason must be at least 30 characters");
-    expect(await readdir(join(fixture.projectPath, "decisions"))).toEqual([]);
+    expect(await readdir(join(fixture.projectPath, "adrs"))).toEqual([]);
   });
 
   test("related-to bypasses the gate and records the link", async () => {
@@ -191,7 +191,7 @@ async function createDedupFixture(project: string, options: DedupFixtureOptions 
   const projectPath = join(vaultRoot, "projects", project);
   await mkdir(join(projectPath, "prds"), { recursive: true });
   await mkdir(join(projectPath, "slices"));
-  await mkdir(join(projectPath, "decisions"));
+  await mkdir(join(projectPath, "adrs"));
   await mkdir(join(projectPath, "handovers"));
 
   const stateFile = join(root, "qmd-state.log");
