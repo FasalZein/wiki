@@ -13,6 +13,12 @@ const tempPaths: string[] = [];
 
 beforeEach(() => {
   process.env = { ...originalEnv };
+  delete process.env.CLAUDECODE;
+  delete process.env.CLAUDE_CODE_ENTRYPOINT;
+  delete process.env.PI_SESSION_ID;
+  delete process.env.PI_AGENT;
+  delete process.env.CODEX_HOME;
+  delete process.env.OPENAI_CODEX;
 });
 
 afterEach(async () => {

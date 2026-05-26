@@ -14,9 +14,16 @@ schema:
   status:         { type: enum,      required: true, values: [open, completed, archived], default: open }
   created:        { type: date,      auto: true }
 ---
+<!--
+<%*
+// Only runs when created via Templater in Obsidian
+const project = await tp.system.prompt("Project name");
+const session_date = tp.date.now("YYYY-MM-DD");
+-%>
+-->
 # Handover {{id}} — {{title}}
 
-> {{project}} · {{session_date}} · phase: {{phase}} → next: {{next_phase}}
+> {{project}} · {{session_date}} · phase: {{phase}} → next: {{next_phase}} · `INPUT[select(option(open), option(completed), option(archived)):status]`
 
 ## What this session produced
 

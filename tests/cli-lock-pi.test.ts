@@ -138,7 +138,7 @@ async function createFixture(): Promise<Fixture> {
 async function runWiki(args: string[], fixture: Fixture, env: Record<string, string> = {}): Promise<CommandResult> {
   const proc = Bun.spawn(["bun", join(repoRoot, "src", "cli.ts"), ...args], {
     cwd: fixture.root,
-    env: { ...process.env, ...env },
+    env: { ...process.env, OBSIDIAN_BIN: join(import.meta.dir, "fixtures", "mock-obsidian.sh"), ...env },
     stdout: "pipe",
     stderr: "pipe",
   });

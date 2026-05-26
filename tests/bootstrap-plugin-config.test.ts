@@ -152,16 +152,16 @@ describe("plugin config", () => {
     }
   });
 
-  test("works for all 5 required plugins", async () => {
+  test("works for all 4 required plugins", async () => {
     manifest = await loadPluginManifest();
     const vault = await makeTempVault(manifest);
 
     const required = requiredPlugins(manifest);
-    expect(required).toHaveLength(5);
+    expect(required).toHaveLength(4);
 
     const result = await writePluginConfigs(vault, manifest);
 
-    expect(result.written).toHaveLength(5);
+    expect(result.written).toHaveLength(4);
     expect(result.skipped).toHaveLength(0);
 
     for (const p of required) {

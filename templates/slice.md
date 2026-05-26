@@ -11,7 +11,6 @@ schema:
   blocked_by:      { type: link_list, target: slice, default: [] }
   user_stories:    { type: list,      default: [], description: "References to PRD user-story IDs covered by this slice" }
   acceptance:      { type: list,      required: true, default: [], description: "Checkboxes; one per criterion. SLICE-006 state machine enforces non-empty before transitioning out of planned." }
-  todo:            { type: list,      default: [], description: "Structured items with id/text/done; CLI gates close on all done" }
   red_log_ref:     { type: file_ref,  description: "CLI-state path to captured failing-test output; set by `wiki slice red`" }
   green_log_ref:   { type: file_ref,  description: "CLI-state path to captured passing-test output; set by `wiki slice green`" }
   review_verdict:  { type: enum,      values: [pass, pass-with-notes, reject], description: "Set by `wiki slice close` via review-phase skill" }
@@ -24,9 +23,18 @@ schema:
   created:         { type: date,      auto: true }
   updated:         { type: date,      auto: true }
 ---
+<!--
+<%*
+// Only runs when created via Templater in Obsidian
+const title = await tp.system.prompt("Title");
+const project = await tp.system.prompt("Project name");
+const parent_prd = await tp.system.prompt("Parent PRD (e.g. PRD-001)");
+const type = await tp.system.suggester(["AFK", "HITL"], ["AFK", "HITL"]);
+-%>
+-->
 # {{title}}
 
-> {{id}} · {{project}} · {{status}} · {{type}}
+> {{id}} · {{project}} · `INPUT[select(option(planned), option(red), option(green), option(closed), option(blocked)):status]` · `INPUT[select(option(AFK), option(HITL)):type]`
 
 ## Parent
 
@@ -46,8 +54,9 @@ schema:
 
 ## Todo
 
-{{#each todo}}- [{{#if done}}x{{else}} {{/if}}] {{text}}
-{{/each}}
+- [ ] Write tests
+- [ ] Implement feature
+- [ ] Verify acceptance criteria
 
 > Slice close (`wiki slice close`) is gated on every item above being done.
 

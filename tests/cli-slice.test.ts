@@ -200,21 +200,6 @@ describe("slice CLI", () => {
     expect(await readSlice(vaultRoot, "SLICE-0001")).toContain("acceptance:\n  - First criterion");
   });
 
-  test("slice append adds a value to the todo list", async () => {
-    const vaultRoot = await createFixtureVault("wiki-v2");
-    await seedPrd(vaultRoot);
-    await runWiki(createArgs(), vaultRoot);
-
-    const result = await runWiki(
-      ["slice", "append", "SLICE-0001", "--project", "wiki-v2", "--field", "todo", "Write tests"],
-      vaultRoot,
-    );
-
-    expect(result.exitCode).toBe(0);
-    expect(result.stderr).toContain("updated SLICE-0001");
-    expect(await readSlice(vaultRoot, "SLICE-0001")).toContain("todo:\n  - Write tests");
-  });
-
   test("slice append rejects non-list fields", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
     await seedPrd(vaultRoot);
@@ -258,7 +243,7 @@ type CommandResult = {
 async function runWiki(args: string[], vaultRoot: string, stdin?: string): Promise<CommandResult> {
   const proc = Bun.spawn(["bun", "src/cli.ts", ...args], {
     cwd: import.meta.dir.replace(/\/tests$/, ""),
-    env: { ...process.env, KNOWLEDGE_VAULT_ROOT: vaultRoot },
+    env: { ...process.env, KNOWLEDGE_VAULT_ROOT: vaultRoot, OBSIDIAN_BIN: join(import.meta.dir, "fixtures", "mock-obsidian.sh") },
     stdin: stdin === undefined ? undefined : "pipe",
     stdout: "pipe",
     stderr: "pipe",

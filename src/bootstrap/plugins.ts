@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import type { PluginManifest } from "./manifest";
 import { requiredPlugins } from "./manifest";
+import { ensureObsidian, obsidianPluginInstall, obsidianPluginEnable } from "../integrations/obsidian";
 
 export type PluginInstallResult = {
   installed: string[];
@@ -39,24 +40,6 @@ async function copyFromLocal(
   }
 }
 
-async function downloadFromGitHub(
-  repo: string,
-  destDir: string
-): Promise<void> {
-  const baseUrl = `https://github.com/${repo}/releases/latest/download`;
-  for (const file of PLUGIN_FILES) {
-    const url = `${baseUrl}/${file}`;
-    const resp = await fetch(url);
-    if (resp.ok) {
-      const buf = Buffer.from(await resp.arrayBuffer());
-      await writeFile(join(destDir, file), buf);
-    } else if (file !== "styles.css") {
-      throw new Error(`Failed to download ${url}: ${resp.status}`);
-    }
-    // styles.css is optional — skip on 404
-  }
-}
-
 export async function installPlugins(
   vaultPath: string,
   manifest: PluginManifest,
@@ -67,6 +50,11 @@ export async function installPlugins(
 
   const lockfile = await readLockfile(vaultPath);
   const required = requiredPlugins(manifest);
+
+  // Ensure Obsidian is reachable when using the CLI path
+  if (!options?.pluginSource) {
+    await ensureObsidian();
+  }
 
   for (const entry of required) {
     const pluginDir = join(vaultPath, ".obsidian", "plugins", entry.id);
@@ -85,13 +73,14 @@ export async function installPlugins(
       }
     }
 
-    // Install
-    await mkdir(pluginDir, { recursive: true });
-
     if (options?.pluginSource) {
+      // Air-gapped: copy from local directory
+      await mkdir(pluginDir, { recursive: true });
       await copyFromLocal(options.pluginSource, entry.id, pluginDir);
     } else {
-      await downloadFromGitHub(entry.repo, pluginDir);
+      // Normal: install via Obsidian CLI
+      await obsidianPluginInstall(entry.id);
+      await obsidianPluginEnable(entry.id);
     }
 
     installed.push(entry.id);

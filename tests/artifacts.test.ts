@@ -1,9 +1,19 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { appendField, ArtifactValidationError, createArtifact, readArtifact, setField } from "../src/artifacts/store";
+
+const MOCK_BIN = join(import.meta.dir, "fixtures", "mock-obsidian.sh");
+
+beforeAll(() => {
+  process.env.OBSIDIAN_BIN = MOCK_BIN;
+});
+
+afterAll(() => {
+  delete process.env.OBSIDIAN_BIN;
+});
 
 const tempPaths: string[] = [];
 
@@ -33,7 +43,7 @@ describe("artifact store", () => {
     expect(file).toContain("Use SQLite for local persistence.");
   });
 
-  test("creates the next unused decision id when files already exist", async () => {
+  test("creates the next decision id after the highest existing number", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
     const adrsPath = join(vaultRoot, "projects", "wiki-v2", "adrs");
     await writeFile(join(adrsPath, "DECISION-0001.md"), "existing");
@@ -46,7 +56,7 @@ describe("artifact store", () => {
       fields: decisionFields(),
     });
 
-    expect(artifact.id).toBe("DECISION-0002");
+    expect(artifact.id).toBe("DECISION-0004");
   });
 
   test("creates PRD-0001 in an empty prds folder", async () => {
@@ -166,6 +176,7 @@ function decisionFields(): Record<string, unknown> {
 async function createFixtureVault(project: string): Promise<string> {
   const vaultRoot = await mkdtemp(join(tmpdir(), "wiki-vault-"));
   tempPaths.push(vaultRoot);
+  process.env.KNOWLEDGE_VAULT_ROOT = vaultRoot;
   const projectPath = join(vaultRoot, "projects", project);
   await mkdir(join(projectPath, "prds"), { recursive: true });
   await mkdir(join(projectPath, "slices"));

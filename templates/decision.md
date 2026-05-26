@@ -15,9 +15,19 @@ schema:
   created:      { type: date,      auto: true }
   updated:      { type: date,      auto: true }
 ---
+<!--
+<%*
+// Only runs when created via Templater in Obsidian
+const title = await tp.system.prompt("Title");
+const project = await tp.system.prompt("Project name");
+const context = await tp.system.prompt("Context (forces at play)");
+const decision = await tp.system.prompt("Decision (the choice taken)");
+const consequences = await tp.system.prompt("Consequences");
+-%>
+-->
 # {{title}}
 
-> {{id}} · {{status}} · {{date}}
+> {{id}} · `INPUT[select(option(proposed), option(accepted), option(superseded), option(rejected)):status]` · {{date}}
 
 ## Context
 

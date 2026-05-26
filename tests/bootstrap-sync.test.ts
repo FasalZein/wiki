@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { access, mkdtemp, readFile, rm, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -10,9 +10,14 @@ import { readLockfile } from "../src/bootstrap/plugins";
 import type { PluginManifest } from "../src/bootstrap/manifest";
 
 const FIXTURE_PLUGINS = resolve(import.meta.dir, "fixtures/plugins");
+const MOCK_OBSIDIAN = resolve(import.meta.dir, "fixtures/mock-obsidian.sh");
 const REPO_TEMPLATES = resolve(import.meta.dir, "..", "templates");
 
 const tempPaths: string[] = [];
+
+beforeAll(() => {
+  process.env.OBSIDIAN_BIN = MOCK_OBSIDIAN;
+});
 
 afterEach(async () => {
   await Promise.all(

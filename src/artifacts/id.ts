@@ -7,24 +7,28 @@ export async function nextId(type: TemplateType, vaultRoot: string, project: str
   const prefix = idPrefix(type);
   const directory = artifactDirectory(type, vaultRoot, project);
   const entries = await readdir(directory);
-  const used = new Set<number>();
+
+  const prefixPattern = new RegExp(`^${prefix}-(\\d{3,})\\.md$`);
+  const adrPattern = /^(\d{3,})-.+\.md$/;
+
+  let highest = 0;
 
   for (const entry of entries) {
-    const match = new RegExp(`^${prefix}-(\\d{4,})\\.md$`).exec(entry);
-    if (match !== null) {
-      const value = match[1];
-      if (value !== undefined) {
-        used.add(Number.parseInt(value, 10));
+    const prefixMatch = prefixPattern.exec(entry);
+    if (prefixMatch?.[1] !== undefined) {
+      highest = Math.max(highest, Number.parseInt(prefixMatch[1], 10));
+      continue;
+    }
+
+    if (type === "decision") {
+      const adrMatch = adrPattern.exec(entry);
+      if (adrMatch?.[1] !== undefined) {
+        highest = Math.max(highest, Number.parseInt(adrMatch[1], 10));
       }
     }
   }
 
-  let next = 1;
-  while (used.has(next)) {
-    next += 1;
-  }
-
-  return `${prefix}-${String(next).padStart(4, "0")}`;
+  return `${prefix}-${String(highest + 1).padStart(4, "0")}`;
 }
 
 function idPrefix(type: TemplateType): string {

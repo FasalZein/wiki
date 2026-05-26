@@ -1,6 +1,8 @@
 import matter from "gray-matter";
 import { readFile, rename, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
+
+import { obsidianCreate } from "../integrations/obsidian";
 
 import { loadTemplate, type TemplateType } from "../schema/load";
 import { validate } from "../schema/validate";
@@ -129,7 +131,7 @@ export async function createArtifact(input: CreateArtifactInput): Promise<Artifa
 
   const content = renderArtifact(template, result.value);
   const path = artifactPath(input.type, input.vaultRoot, input.project, id);
-  await atomicWrite(path, content);
+  await writeArtifact(input.vaultRoot, path, content);
 
   return {
     id,
@@ -171,8 +173,15 @@ async function writeFields(input: ReadArtifactInput, existing: Artifact, fields:
   }
 
   const content = matter.stringify(existing.body, result.value);
-  await atomicWrite(existing.path, content);
+  await writeArtifact(input.vaultRoot, existing.path, content);
   return { ...existing, fields: result.value };
+}
+
+async function writeArtifact(vaultRoot: string, path: string, content: string): Promise<void> {
+  const rel = relative(vaultRoot, path);
+  const name = basename(rel, ".md");
+  const folder = dirname(rel);
+  await obsidianCreate(name, content, folder, { silent: true, overwrite: true });
 }
 
 function artifactPath(type: TemplateType, vaultRoot: string, project: string, id: string): string {

@@ -126,24 +126,6 @@ describe("slice TDD state machine CLI", () => {
     expect(await readSlice(fixture.vaultRoot)).toBe(before);
   });
 
-  test("close with unfinished todo exits 1 and names the todo", async () => {
-    const fixture = await createGreenSlice();
-    await runWiki(
-      ["slice", "append", "SLICE-0001", "--project", "wiki-v2", "--field", "todo", "t1|Write implementation|false"],
-      fixture.vaultRoot,
-    );
-    const before = await readSlice(fixture.vaultRoot);
-
-    const result = await runWiki(
-      ["slice", "close", "SLICE-0001", "--project", "wiki-v2", "--review-verdict", "pass"],
-      fixture.vaultRoot,
-    );
-
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("unfinished todo t1: Write implementation");
-    expect(await readSlice(fixture.vaultRoot)).toBe(before);
-  });
-
   test("close success sets review verdict and closed status", async () => {
     const fixture = await createGreenSlice();
     await runWiki(
@@ -331,7 +313,7 @@ async function wantPass(fixture: Fixture): Promise<void> {
 async function runWiki(args: string[], vaultRoot: string): Promise<CommandResult> {
   const proc = Bun.spawn(["bun", "src/cli.ts", ...args], {
     cwd: repoRoot,
-    env: { ...process.env, KNOWLEDGE_VAULT_ROOT: vaultRoot },
+    env: { ...process.env, KNOWLEDGE_VAULT_ROOT: vaultRoot, OBSIDIAN_BIN: join(import.meta.dir, "fixtures", "mock-obsidian.sh") },
     stdout: "pipe",
     stderr: "pipe",
   });

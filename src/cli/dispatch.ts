@@ -4,6 +4,7 @@ import { handleLock } from "./verbs/lock";
 import { handlePhase } from "./verbs/phase";
 import { handlePlan } from "./verbs/plan";
 import { handlePrd } from "./verbs/prd";
+import { handleProject } from "./verbs/project";
 import { handleSearch } from "./verbs/search";
 import { handleSession } from "./verbs/session";
 import { handleSlice } from "./verbs/slice";
@@ -35,6 +36,9 @@ export async function dispatch(args: string[]): Promise<CliResult> {
   }
   if (verb === "prd") {
     return handlePrd(rest);
+  }
+  if (verb === "project") {
+    return handleProject(rest);
   }
   if (verb === "search") {
     return handleSearch(rest);

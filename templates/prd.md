@@ -16,9 +16,18 @@ schema:
   created:      { type: date,      auto: true }
   updated:      { type: date,      auto: true }
 ---
+<!--
+<%*
+// Only runs when created via Templater in Obsidian
+const title = await tp.system.prompt("Title");
+const project = await tp.system.prompt("Project name");
+-%>
+-->
 # {{title}}
 
-> {{id}} · {{project}} · {{status}}
+> {{id}} · {{project}} · `INPUT[select(option(draft), option(ready), option(in-progress), option(closed), option(superseded)):status]`
+
+**Triage:** `INPUT[select(option(needs-triage), option(ready-for-agent), option(blocked), option(deferred)):triage_label]`
 
 ## Problem Statement
 

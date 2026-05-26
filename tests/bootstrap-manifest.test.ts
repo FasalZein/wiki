@@ -11,9 +11,9 @@ import type { PluginManifest } from "../src/bootstrap/manifest";
 describe("plugin manifest", () => {
   let manifest: PluginManifest;
 
-  test("loadPluginManifest returns all 7 plugins", async () => {
+  test("loadPluginManifest returns all 6 plugins", async () => {
     manifest = await loadPluginManifest();
-    expect(manifest.plugins).toHaveLength(7);
+    expect(manifest.plugins).toHaveLength(6);
   });
 
   test("every plugin entry has id, repo, and required fields", async () => {
@@ -28,16 +28,15 @@ describe("plugin manifest", () => {
     }
   });
 
-  test("requiredPlugins returns exactly 5 required plugins", async () => {
+  test("requiredPlugins returns exactly 4 required plugins", async () => {
     manifest = await loadPluginManifest();
     const required = requiredPlugins(manifest);
-    expect(required).toHaveLength(5);
+    expect(required).toHaveLength(4);
     expect(required.every((p) => p.required)).toBe(true);
 
     const ids = required.map((p) => p.id).sort();
     expect(ids).toEqual([
       "dataview",
-      "dbfolder",
       "obsidian-git",
       "obsidian-linter",
       "templater-obsidian",
@@ -75,7 +74,6 @@ describe("plugin manifest", () => {
 
     const expectations: Record<string, string[]> = {
       dataview: ["refreshEnabled", "renderNullAs"],
-      dbfolder: ["global_settings"],
       "templater-obsidian": ["template_folder", "trigger_on_file_creation"],
       "obsidian-linter": ["ruleConfigs"],
       "obsidian-git": ["autoSaveInterval", "autoPullInterval"],

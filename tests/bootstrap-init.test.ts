@@ -1,11 +1,17 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { initVault } from "../src/bootstrap/init";
 
+const MOCK_OBSIDIAN = resolve(import.meta.dir, "fixtures/mock-obsidian.sh");
+
 const tempPaths: string[] = [];
+
+beforeAll(() => {
+  process.env.OBSIDIAN_BIN = MOCK_OBSIDIAN;
+});
 
 afterEach(async () => {
   await Promise.all(tempPaths.splice(0).map((path) => rm(path, { recursive: true, force: true })));

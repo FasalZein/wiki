@@ -175,7 +175,7 @@ async function wantPass(fixture: Fixture): Promise<void> {
 async function runWiki(args: string[], fixture: Fixture): Promise<CommandResult> {
   const proc = Bun.spawn(["bun", join(repoRoot, "src", "cli.ts"), ...args], {
     cwd: fixture.repoPath,
-    env: { ...process.env, KNOWLEDGE_VAULT_ROOT: fixture.vaultRoot },
+    env: { ...process.env, KNOWLEDGE_VAULT_ROOT: fixture.vaultRoot, OBSIDIAN_BIN: join(import.meta.dir, "fixtures", "mock-obsidian.sh") },
     stdout: "pipe",
     stderr: "pipe",
   });

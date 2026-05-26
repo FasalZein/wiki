@@ -310,7 +310,7 @@ describe("vault doctor", () => {
 
     // 2. Modify lockfile for a different plugin (version-mismatch)
     const lock = await readLockfile(vault);
-    lock.plugins["dbfolder"]!.version = "99.0.0";
+    lock.plugins["templater-obsidian"]!.version = "99.0.0";
     await writeFile(
       join(vault, ".wiki", "plugin-lock.json"),
       JSON.stringify(lock, null, 2) + "\n",

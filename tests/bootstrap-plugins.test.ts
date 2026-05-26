@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { access, mkdtemp, readFile, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -13,8 +13,13 @@ import { loadPluginManifest, requiredPlugins } from "../src/bootstrap/manifest";
 import type { PluginManifest } from "../src/bootstrap/manifest";
 
 const FIXTURE_PLUGINS = resolve(import.meta.dir, "fixtures/plugins");
+const MOCK_OBSIDIAN = resolve(import.meta.dir, "fixtures/mock-obsidian.sh");
 
 const tempPaths: string[] = [];
+
+beforeAll(() => {
+  process.env.OBSIDIAN_BIN = MOCK_OBSIDIAN;
+});
 
 afterEach(async () => {
   await Promise.all(
@@ -44,10 +49,10 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
-describe("plugin install", () => {
+describe("plugin install (air-gapped / pluginSource)", () => {
   let manifest: PluginManifest;
 
-  test("installs all 5 required plugin dirs under .obsidian/plugins/", async () => {
+  test("installs all 4 required plugin dirs under .obsidian/plugins/", async () => {
     manifest = await loadPluginManifest();
     const vault = await makeTempVault();
     const result = await installPlugins(vault, manifest, {
@@ -201,5 +206,21 @@ describe("plugin install", () => {
     const lock = await readLockfile(vault);
     expect(lock.version).toBe(1);
     expect(lock.plugins).toEqual({});
+  });
+});
+
+describe("plugin install (Obsidian CLI)", () => {
+  test("calls obsidian plugin:install and plugin:enable for each required plugin", async () => {
+    const manifest = await loadPluginManifest();
+    const vault = await makeTempVault();
+
+    const required = requiredPlugins(manifest);
+    const result = await installPlugins(vault, manifest);
+
+    // Mock doesn't create files on disk, so we verify via the result
+    expect(result.installed.sort()).toEqual(
+      required.map((p) => p.id).sort()
+    );
+    expect(result.skipped).toHaveLength(0);
   });
 });

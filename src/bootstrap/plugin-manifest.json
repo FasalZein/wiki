@@ -6,13 +6,7 @@
       "required": true,
       "defaultConfigPath": "defaults/dataview.json"
     },
-    {
-      "id": "dbfolder",
-      "repo": "RafaelGB/obsidian-db-folder",
-      "required": true,
-      "defaultConfigPath": "defaults/dbfolder.json"
-    },
-    {
+{
       "id": "templater-obsidian",
       "repo": "SilentVoid13/Templater",
       "required": true,

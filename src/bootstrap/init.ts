@@ -1,6 +1,8 @@
 import { access, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import { ensureObsidian, obsidianEval } from "../integrations/obsidian";
+
 export type VaultInitResult = {
   path: string;
   created: string[];
@@ -88,6 +90,10 @@ export async function initVault(vaultPath: string, options?: { pluginSource?: st
     await writeFile(lockfilePath, EMPTY_LOCKFILE);
     created.push(".wiki/plugin-lock.json");
   }
+
+  // Ensure Obsidian is running and configure template folder
+  await ensureObsidian();
+  await obsidianEval(`app.vault.setConfig('templateFolder', '_templates')`);
 
   return { path: vaultPath, created, skipped };
 }
