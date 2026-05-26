@@ -1,0 +1,46 @@
+{
+  "plugins": [
+    {
+      "id": "dataview",
+      "repo": "blacksmithgu/obsidian-dataview",
+      "required": true,
+      "defaultConfigPath": "defaults/dataview.json"
+    },
+    {
+      "id": "dbfolder",
+      "repo": "RafaelGB/obsidian-db-folder",
+      "required": true,
+      "defaultConfigPath": "defaults/dbfolder.json"
+    },
+    {
+      "id": "templater-obsidian",
+      "repo": "SilentVoid13/Templater",
+      "required": true,
+      "defaultConfigPath": "defaults/templater-obsidian.json"
+    },
+    {
+      "id": "obsidian-linter",
+      "repo": "platers/obsidian-linter",
+      "required": true,
+      "defaultConfigPath": "defaults/obsidian-linter.json"
+    },
+    {
+      "id": "obsidian-git",
+      "repo": "Vinzent03/obsidian-git",
+      "required": true,
+      "defaultConfigPath": "defaults/obsidian-git.json"
+    },
+    {
+      "id": "obsidian-tasks-plugin",
+      "repo": "obsidian-tasks-group/obsidian-tasks",
+      "required": false,
+      "defaultConfigPath": ""
+    },
+    {
+      "id": "obsidian-meta-bind-plugin",
+      "repo": "mProjectsCode/obsidian-meta-bind-plugin",
+      "required": false,
+      "defaultConfigPath": ""
+    }
+  ]
+}

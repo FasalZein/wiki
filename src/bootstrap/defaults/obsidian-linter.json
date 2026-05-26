@@ -1,0 +1,8 @@
+{
+  "ruleConfigs": {
+    "yaml-timestamp": {
+      "enabled": true,
+      "date-modified-key": "updated"
+    }
+  }
+}

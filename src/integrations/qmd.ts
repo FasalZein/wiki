@@ -47,6 +47,10 @@ export async function embedCollection(qmdCommand: string, name: string, force: b
   await runQmd(qmdCommand, force ? ["embed", "-f", "-c", name] : ["embed", "-c", name]);
 }
 
+export async function addContext(qmdCommand: string, collectionPath: string, description: string): Promise<void> {
+  await runQmd(qmdCommand, ["context", "add", collectionPath, description]);
+}
+
 export async function runQuery(qmdCommand: string, query: string, collections: string[]): Promise<QmdResult[]> {
   const args = ["query", query, "--json", ...collections.flatMap((collection) => ["--collection", collection])];
   const stdout = await runQmd(qmdCommand, args);
@@ -59,7 +63,7 @@ export async function runQuery(qmdCommand: string, query: string, collections: s
 async function runQmd(command: string, args: string[]): Promise<string> {
   let proc: Bun.Subprocess<"ignore", "pipe", "pipe">;
   try {
-    proc = Bun.spawn([command, ...args], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+    proc = Bun.spawn([command, ...args], { stdin: "ignore", stdout: "pipe", stderr: "pipe", env: { ...process.env } });
   } catch (error) {
     throw new QmdError(error instanceof Error ? error.message : String(error));
   }

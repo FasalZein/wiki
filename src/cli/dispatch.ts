@@ -10,6 +10,7 @@ import { handleSlice } from "./verbs/slice";
 import { handleStatus } from "./verbs/status";
 import { handleSync } from "./verbs/sync";
 import { handleTerm } from "./verbs/term";
+import { handleVault } from "./verbs/vault";
 
 export type CliResult = {
   code: number;
@@ -52,6 +53,9 @@ export async function dispatch(args: string[]): Promise<CliResult> {
   }
   if (verb === "term") {
     return handleTerm(rest);
+  }
+  if (verb === "vault") {
+    return handleVault(rest);
   }
   console.error(`unknown verb: ${verb ?? ""}`.trim());
   return { code: 1 };
