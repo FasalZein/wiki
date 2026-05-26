@@ -1,9 +1,12 @@
 import { handleDecision } from "./verbs/decision";
 import { handleHandover } from "./verbs/handover";
+import { handlePhase } from "./verbs/phase";
 import { handlePlan } from "./verbs/plan";
 import { handlePrd } from "./verbs/prd";
 import { handleSearch } from "./verbs/search";
+import { handleSession } from "./verbs/session";
 import { handleSlice } from "./verbs/slice";
+import { handleStatus } from "./verbs/status";
 import { handleTerm } from "./verbs/term";
 
 export type CliResult = {
@@ -18,6 +21,9 @@ export async function dispatch(args: string[]): Promise<CliResult> {
   if (verb === "handover") {
     return handleHandover(rest);
   }
+  if (verb === "phase") {
+    return handlePhase(rest);
+  }
   if (verb === "plan") {
     return handlePlan(rest);
   }
@@ -27,8 +33,14 @@ export async function dispatch(args: string[]): Promise<CliResult> {
   if (verb === "search") {
     return handleSearch(rest);
   }
+  if (verb === "session") {
+    return handleSession(rest);
+  }
   if (verb === "slice") {
     return handleSlice(rest);
+  }
+  if (verb === "status") {
+    return handleStatus(rest);
   }
   if (verb === "term") {
     return handleTerm(rest);

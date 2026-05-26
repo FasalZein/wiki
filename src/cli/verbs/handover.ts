@@ -8,8 +8,9 @@ import {
   readArtifact,
   setField,
 } from "../../artifacts/store";
-import { assertProjectStructure } from "../../config/project";
+import { assertProjectStructure, loadProjectConfig } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
+import { readSession } from "../../state/session";
 import type { CliResult } from "../dispatch";
 import { parseCommand, stringValue } from "../parse";
 
@@ -53,8 +54,11 @@ async function createHandover(args: string[]): Promise<CliResult> {
     ],
     ["active-slice", "decision", "suggested-skill"],
   );
-  const project = stringValue(parsed.values, "project");
-  const phase = stringValue(parsed.values, "phase");
+  const vaultRoot = await getVaultRoot();
+  const explicitProject = stringValue(parsed.values, "project");
+  const session = explicitProject === undefined ? await readSessionFromAnyProject(vaultRoot) : await readSessionForProject(vaultRoot, explicitProject);
+  const project = explicitProject ?? session?.project;
+  const phase = stringValue(parsed.values, "phase") ?? session?.phase;
   const required = { project, phase };
   const missing = Object.entries(required).flatMap(([name, value]) => (value === undefined ? [name] : []));
   if (missing.length > 0) {
@@ -72,17 +76,17 @@ async function createHandover(args: string[]): Promise<CliResult> {
     return { code: 1 };
   }
 
-  const vaultRoot = await getVaultRoot();
   await assertProjectStructure(join(vaultRoot, "projects", project));
   try {
+    const explicitSlices = stringListValue(parsed.values["active-slice"]);
     const fields: Record<string, unknown> = {
       phase,
-      active_slices: stringListValue(parsed.values["active-slice"]),
+      active_slices: explicitSlices.length > 0 ? explicitSlices : session?.active_slices ?? [],
       decisions_made: stringListValue(parsed.values.decision),
       suggested_skills: stringListValue(parsed.values["suggested-skill"]),
     };
     addStringField(fields, "next_phase", stringValue(parsed.values, "next-phase"));
-    addStringField(fields, "active_prd", stringValue(parsed.values, "active-prd"));
+    addStringField(fields, "active_prd", stringValue(parsed.values, "active-prd") ?? session?.active_prd);
     addStringField(fields, "produced", await stdinOrValue(produced));
     addStringField(fields, "open", await stdinOrValue(open));
 
@@ -191,6 +195,30 @@ function stringListValue(value: string | string[] | boolean | undefined): string
     return [value];
   }
   return [];
+}
+
+async function readSessionFromAnyProject(vaultRoot: string) {
+  const session = await readSession(process.cwd());
+  if (session === null) return null;
+  try {
+    await assertProjectStructure(join(vaultRoot, "projects", session.project));
+    return session;
+  } catch (error) {
+    if (error instanceof Error) return null;
+    throw error;
+  }
+}
+
+async function readSessionForProject(vaultRoot: string, project: string) {
+  try {
+    const config = await loadProjectConfig(join(vaultRoot, "projects", project));
+    return readSession(config.repo);
+  } catch (error) {
+    if (error instanceof Error) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 function formatFieldValue(value: unknown): string {
