@@ -21,6 +21,7 @@ import {
 import { assertProjectStructure, loadProjectConfig, ProjectConfigError } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import { parseCommand, stringValue } from "../parse";
+import { phaseDocOptions, writePhaseDocToStderr } from "../phase-docs";
 import type { CliResult } from "../dispatch";
 
 export async function handlePrd(args: string[]): Promise<CliResult> {
@@ -207,7 +208,7 @@ async function transitionPrd(
   allowedFrom: readonly string[],
   targetStatus: string,
 ): Promise<CliResult> {
-  const parsed = parseCommand(args, ["project"]);
+  const parsed = parseCommand(args, ["project", "doc-phase"], [], ["no-doc"]);
   const id = parsed.positionals[0];
   const project = stringValue(parsed.values, "project");
   if (id === undefined || project === undefined) {
@@ -225,6 +226,10 @@ async function transitionPrd(
     }
     await setField({ type: "prd", vaultRoot, project, id, field: "status", value: targetStatus });
     console.error(`updated ${id}`);
+    if (verb === "publish") {
+      const config = await loadProjectConfig(join(vaultRoot, "projects", project));
+      await writePhaseDocToStderr(config.repo, "slice", phaseDocOptions(parsed));
+    }
     return { code: 0 };
   } catch (error) {
     if (error instanceof ArtifactNotFoundError || error instanceof ArtifactValidationError) {

@@ -24,6 +24,7 @@ import { assertProjectStructure, loadProjectConfig, ProjectConfigError } from ".
 import { getVaultRoot } from "../../config/vault";
 import type { CliResult } from "../dispatch";
 import { parseCommand, stringValue } from "../parse";
+import { phaseDocOptions, writePhaseDocToStderr } from "../phase-docs";
 
 const reviewVerdicts = new Set(["pass", "pass-with-notes", "reject"]);
 
@@ -178,7 +179,7 @@ async function setSlice(args: string[]): Promise<CliResult> {
 }
 
 async function runTestTransition(args: string[], verb: "red" | "green"): Promise<CliResult> {
-  const parsed = parseCommand(args, ["project"]);
+  const parsed = parseCommand(args, ["project", "doc-phase"], [], ["no-doc"]);
   const id = parsed.positionals[0];
   const project = stringValue(parsed.values, "project");
   if (id === undefined || project === undefined) {
@@ -213,6 +214,7 @@ async function runTestTransition(args: string[], verb: "red" | "green"): Promise
     });
     console.log(logPath);
     console.error(`${verb} captured at ${logPath}`);
+    await writePhaseDocToStderr(config.repo, verb === "red" ? "green" : "close", phaseDocOptions(parsed));
     return { code: 0 };
   } catch (error) {
     return handleSliceError(error);
@@ -220,7 +222,7 @@ async function runTestTransition(args: string[], verb: "red" | "green"): Promise
 }
 
 async function closeSlice(args: string[]): Promise<CliResult> {
-  const parsed = parseCommand(args, ["project", "review-verdict"]);
+  const parsed = parseCommand(args, ["project", "review-verdict", "doc-phase"], [], ["no-doc"]);
   const id = parsed.positionals[0];
   const project = stringValue(parsed.values, "project");
   const verdict = stringValue(parsed.values, "review-verdict");
@@ -243,6 +245,8 @@ async function closeSlice(args: string[]): Promise<CliResult> {
     }
     await setFields({ type: "slice", vaultRoot, project, id, fields: { status: "closed", review_verdict: verdict } });
     console.error(`closed with verdict ${verdict}`);
+    const config = await loadProjectConfig(join(vaultRoot, "projects", project));
+    await writePhaseDocToStderr(config.repo, "handover", phaseDocOptions(parsed));
     return { code: 0 };
   } catch (error) {
     return handleSliceError(error);

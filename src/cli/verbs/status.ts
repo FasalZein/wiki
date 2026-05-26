@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { loadProjectConfig, ProjectConfigError } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import { readSession } from "../../state/session";
-import { phaseDocPath, readPhaseDoc } from "./phase";
+import { loadPhaseDoc, phaseDocPath } from "../phase-docs";
 import type { CliResult } from "../dispatch";
 import { booleanValue, parseCommand, stringValue } from "../parse";
 
@@ -39,7 +39,7 @@ export async function handleStatus(args: string[]): Promise<CliResult> {
   console.log(`Next: ${nextAction(session.project, session.phase, session.active_slices[0])}`);
 
   if (booleanValue(parsed.values, "with-doc")) {
-    const doc = await readPhaseDoc(repo, session.phase);
+    const doc = await loadPhaseDoc(repo, session.phase);
     if (doc === null) {
       console.error(`phase doc not found: ${phaseDocPath(repo, session.phase)}`);
       return { code: 0 };

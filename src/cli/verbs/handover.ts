@@ -13,6 +13,7 @@ import { getVaultRoot } from "../../config/vault";
 import { readSession } from "../../state/session";
 import type { CliResult } from "../dispatch";
 import { parseCommand, stringValue } from "../parse";
+import { phaseDocOptions, writePhaseDocToStderr } from "../phase-docs";
 
 export async function handleHandover(args: string[]): Promise<CliResult> {
   const [subverb, ...rest] = args;
@@ -51,8 +52,10 @@ async function createHandover(args: string[]): Promise<CliResult> {
       "active-slice",
       "decision",
       "suggested-skill",
+      "doc-phase",
     ],
     ["active-slice", "decision", "suggested-skill"],
+    ["no-doc"],
   );
   const vaultRoot = await getVaultRoot();
   const explicitProject = stringValue(parsed.values, "project");
@@ -98,6 +101,8 @@ async function createHandover(args: string[]): Promise<CliResult> {
     });
     console.log(artifact.id);
     console.error(`created ${artifact.id}`);
+    const config = await loadProjectConfig(join(vaultRoot, "projects", project));
+    await writePhaseDocToStderr(config.repo, stringValue(parsed.values, "next-phase") ?? "ad-hoc", phaseDocOptions(parsed));
     return { code: 0 };
   } catch (error) {
     if (error instanceof ArtifactValidationError) {
