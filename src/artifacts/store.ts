@@ -1,5 +1,5 @@
 import matter from "gray-matter";
-import { readFile, rename, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { basename, dirname, join, relative } from "node:path";
 
 import { obsidianCreate } from "../integrations/obsidian";
@@ -190,10 +190,4 @@ function artifactPath(type: TemplateType, vaultRoot: string, project: string, id
 
 function isFileNotFound(error: unknown): boolean {
   return error instanceof Error && "code" in error && error.code === "ENOENT";
-}
-
-export async function atomicWrite(path: string, content: string): Promise<void> {
-  const tempPath = `${path}.tmp-${process.pid}`;
-  await writeFile(tempPath, content);
-  await rename(tempPath, path);
 }

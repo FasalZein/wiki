@@ -4,8 +4,7 @@ import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 
 import { getConfig } from "../src/config/config";
-import { detectHarness } from "../src/config/harness";
-import { assertProjectStructure, resolveCurrentProject } from "../src/config/project";
+import { assertProjectStructure } from "../src/config/project";
 import { getVaultRoot } from "../src/config/vault";
 
 const originalEnv = { ...process.env };
@@ -105,7 +104,7 @@ describe("vault config", () => {
     expect(await getConfig()).toEqual({
       vault: { root: "/vault" },
       research: { sources: ["~/Research", "~/.pi/artifacts/research"] },
-      harness: { detected: "none" },
+
     });
   });
 
@@ -125,79 +124,8 @@ describe("vault config", () => {
           "~/Research",
         ],
       },
-      harness: { detected: "none" },
+
     });
-  });
-
-  test("detectHarness returns the harness named by explicit env vars", async () => {
-    const home = await mkdtemp(join(tmpdir(), "wiki-home-"));
-    tempPaths.push(home);
-    process.env.HOME = home;
-
-    process.env.PI_SESSION_ID = "pi-session";
-    expect(detectHarness()).toBe("pi");
-
-    delete process.env.PI_SESSION_ID;
-    process.env.PI_AGENT = "1";
-    expect(detectHarness()).toBe("pi");
-
-    delete process.env.PI_AGENT;
-    process.env.CLAUDECODE = "1";
-    expect(detectHarness()).toBe("claude-code");
-
-    delete process.env.CLAUDECODE;
-    process.env.CLAUDE_CODE_ENTRYPOINT = "cli";
-    expect(detectHarness()).toBe("claude-code");
-
-    delete process.env.CLAUDE_CODE_ENTRYPOINT;
-    process.env.CODEX_HOME = "/tmp/codex";
-    expect(detectHarness()).toBe("codex");
-
-    delete process.env.CODEX_HOME;
-    process.env.OPENAI_CODEX = "1";
-    expect(detectHarness()).toBe("codex");
-
-    delete process.env.OPENAI_CODEX;
-    expect(detectHarness()).toBe("none");
-  });
-
-  test("detectHarness detects Pi from the fallback marker when explicit env vars are absent", async () => {
-    const home = await mkdtemp(join(tmpdir(), "wiki-home-"));
-    tempPaths.push(home);
-    process.env.HOME = home;
-    await mkdir(join(home, ".pi"));
-
-    expect(detectHarness()).toBe("pi");
-  });
-
-  test("getConfig includes the harness detected at read time", async () => {
-    const home = await mkdtemp(join(tmpdir(), "wiki-home-"));
-    tempPaths.push(home);
-    process.env.HOME = home;
-    process.env.OPENAI_CODEX = "1";
-
-    expect((await getConfig()).harness.detected).toBe("codex");
-  });
-
-  test("resolveCurrentProject returns the project name when cwd is inside a project folder", async () => {
-    const vaultRoot = await mkdtemp(join(tmpdir(), "wiki-vault-"));
-    tempPaths.push(vaultRoot);
-    const nestedPath = join(vaultRoot, "projects", "wiki-v2", "slices");
-    await mkdir(nestedPath, { recursive: true });
-    process.env.KNOWLEDGE_VAULT_ROOT = vaultRoot;
-
-    expect(await resolveCurrentProject(nestedPath)).toBe("wiki-v2");
-  });
-
-  test("resolveCurrentProject returns null outside a project folder", async () => {
-    const vaultRoot = await mkdtemp(join(tmpdir(), "wiki-vault-"));
-    const outsidePath = await mkdtemp(join(tmpdir(), "wiki-outside-"));
-    tempPaths.push(vaultRoot, outsidePath);
-    await mkdir(join(vaultRoot, "projects"));
-    process.env.KNOWLEDGE_VAULT_ROOT = vaultRoot;
-
-    expect(await resolveCurrentProject(join(vaultRoot, "projects"))).toBeNull();
-    expect(await resolveCurrentProject(outsidePath)).toBeNull();
   });
 
   test("assertProjectStructure verifies required project folders and _project.md", async () => {

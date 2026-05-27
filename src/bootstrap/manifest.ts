@@ -18,10 +18,6 @@ export function requiredPlugins(manifest: PluginManifest): PluginEntry[] {
   return manifest.plugins.filter((p) => p.required);
 }
 
-export function optionalPlugins(manifest: PluginManifest): PluginEntry[] {
-  return manifest.plugins.filter((p) => !p.required);
-}
-
 export async function loadDefaultConfig(entry: PluginEntry): Promise<Record<string, unknown>> {
   const file = Bun.file(new URL(entry.defaultConfigPath, import.meta.url));
   return (await file.json()) as Record<string, unknown>;

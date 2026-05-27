@@ -2,7 +2,6 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse } from "smol-toml";
 
-import { detectHarness } from "./harness";
 import type { WikiConfig } from "./types";
 
 const defaultResearchSources = [
@@ -34,7 +33,6 @@ export async function getConfig(): Promise<WikiConfig> {
   return {
     vault: { root: parsed.vault.root },
     research: { sources },
-    harness: { detected: detectHarness() },
   };
 }
 
@@ -42,7 +40,6 @@ function defaultConfig(): WikiConfig {
   return {
     vault: { root: process.env.KNOWLEDGE_VAULT_ROOT ?? `${homeDirectory()}/Knowledge` },
     research: { sources: defaultResearchSources },
-    harness: { detected: detectHarness() },
   };
 }
 

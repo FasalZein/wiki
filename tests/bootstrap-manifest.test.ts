@@ -3,7 +3,6 @@ import { describe, expect, test } from "bun:test";
 import {
   loadPluginManifest,
   requiredPlugins,
-  optionalPlugins,
   loadDefaultConfig,
 } from "../src/bootstrap/manifest";
 import type { PluginManifest } from "../src/bootstrap/manifest";
@@ -43,19 +42,6 @@ describe("plugin manifest", () => {
     ]);
   });
 
-  test("optionalPlugins returns exactly 2 optional plugins", async () => {
-    manifest = await loadPluginManifest();
-    const optional = optionalPlugins(manifest);
-    expect(optional).toHaveLength(2);
-    expect(optional.every((p) => !p.required)).toBe(true);
-
-    const ids = optional.map((p) => p.id).sort();
-    expect(ids).toEqual([
-      "obsidian-meta-bind-plugin",
-      "obsidian-tasks-plugin",
-    ]);
-  });
-
   test("each required plugin has a non-empty defaultConfigPath that resolves to a readable file", async () => {
     manifest = await loadPluginManifest();
     const required = requiredPlugins(manifest);
@@ -91,12 +77,4 @@ describe("plugin manifest", () => {
     }
   });
 
-  test("optional plugins have empty defaultConfigPath", async () => {
-    manifest = await loadPluginManifest();
-    const optional = optionalPlugins(manifest);
-
-    for (const entry of optional) {
-      expect(entry.defaultConfigPath).toBe("");
-    }
-  });
 });
