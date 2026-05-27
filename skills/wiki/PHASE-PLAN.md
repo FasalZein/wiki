@@ -26,6 +26,8 @@ invalidate the next question.
   think?").
 - When the user introduces a new concept, update `domain-language.md` via
   `obsidian read` + direct edit before referencing it in any artifact.
+  Format: **Term**: 1-2 sentence definition. _Avoid_: synonyms to reject.
+  Keep definitions tight — what it IS, not what it does.
 - Stop questioning when every open question is resolved and constraints are
   recorded.
 

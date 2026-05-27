@@ -16,7 +16,9 @@ Returns a slice ID (e.g. SLICE-035). Status starts at `planned`.
 
 A slice is one tracer-bullet unit of work — vertical (touches every layer
 needed for the outcome), not horizontal (one layer across many outcomes).
-Acceptance criteria must be non-empty before the slice can leave `planned`.
+Prefer many thin slices over few thick ones. A completed slice should be
+demoable or verifiable on its own. Acceptance criteria must be non-empty
+before the slice can leave `planned`.
 
 ## Field updates
 
