@@ -6,6 +6,12 @@ fork-rationale: Preserves product-requirement structure while routing creates th
 
 Goal: create or refine a product requirement that can drive slices.
 
+## Inputs
+
+A PRD implements decisions from a preceding grill (plan phase). Reference
+ADRs by ID in the `implementation_decisions` field. If no grill was needed
+(scope was already clear), note that in `implementation_decisions`.
+
 ## Create a PRD
 
 ```

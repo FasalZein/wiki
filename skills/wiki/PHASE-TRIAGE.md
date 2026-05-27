@@ -62,4 +62,8 @@ Triage is done when:
 - The next slice to work on is identified.
 - The correct phase route (plan/prd/slice/red/green/close) is known.
 
-Return to the phase shown by `wiki status` after repair.
+If triage reveals that scope is unclear or the original requirements have
+shifted, chain to the plan (grill) phase rather than jumping straight to
+implementation. See `PHASE-PLAN.md`.
+
+Otherwise, return to the phase shown by `wiki status` after repair.

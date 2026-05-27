@@ -45,8 +45,8 @@ Field reads/writes: use `obsidian property:set`, `obsidian read`, `obsidian eval
 
 ## Phase routing
 
-- **plan**: Read `PHASE-PLAN.md` NOW. Plans are vault notes — create and edit them
-  directly in Obsidian. No CLI verbs for plans.
+- **plan (grill)**: Read `PHASE-PLAN.md` NOW. Grill the user with focused questions,
+  record ADRs via `wiki create decision`, update `domain-language.md`.
 - **prd**: Read `PHASE-PRD.md` NOW. Use `wiki create prd` to create; use
   `obsidian property:set` to fill fields; agents set status directly.
 - **slice**: Read `PHASE-SLICE.md` NOW. Use `wiki create slice` to create; use
@@ -62,9 +62,16 @@ Field reads/writes: use `obsidian property:set`, `obsidian read`, `obsidian eval
 
 ## Phase progression
 
-Normal flow: plan -> prd -> slice -> red -> green -> close -> handover.
-Not every project needs plan. Triage can fire at any point when context is lost.
-A PRD can have many slices; each slice goes through red/green/close independently.
+Normal flow: plan (grill) → prd → slice → red → green → close → handover.
+Triage can fire at any point when context is lost; it chains back to plan if scope
+needs re-establishing. Not every project needs the plan/grill phase — skip it when
+scope is already clear. A PRD can have many slices; each slice goes through
+red/green/close independently.
+
+Do NOT invoke `/grill-with-docs`, `/to-prd`, `/to-issues`, `/handoff`, or `/triage`
+directly from wiki context — those skills write to GitHub Issues, `docs/adr/`, or OS
+temp dirs. Use the PHASE-*.md flow inside `/wiki` instead; the phase docs are the
+wiki-medium versions of those skills.
 
 ## Admin routing
 
