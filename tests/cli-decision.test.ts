@@ -46,111 +46,12 @@ describe("decision CLI", () => {
     expect(result.stdout).toBe("");
   });
 
-  test("decision show prints the rendered body", async () => {
-    const vaultRoot = await createFixtureVault("wiki-v2");
-    await runWiki(createArgs(), vaultRoot);
-
-    const result = await runWiki(["decision", "show", "DECISION-0001", "--project", "wiki-v2"], vaultRoot);
-
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("# Use SQLite");
-    expect(result.stdout).toContain("## Decision\n\nUse SQLite for local persistence.");
-    expect(result.stderr).toBe("");
-  });
-
-  test("decision show --field prints only that field", async () => {
-    const vaultRoot = await createFixtureVault("wiki-v2");
-    await runWiki(createArgs(), vaultRoot);
-
-    const result = await runWiki(
-      ["decision", "show", "DECISION-0001", "--project", "wiki-v2", "--field", "title"],
-      vaultRoot,
-    );
-
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe("Use SQLite\n");
-    expect(result.stderr).toBe("");
-  });
-
-  test("decision show exits 1 and names a missing id", async () => {
-    const vaultRoot = await createFixtureVault("wiki-v2");
-
-    const result = await runWiki(["decision", "show", "DECISION-9999", "--project", "wiki-v2"], vaultRoot);
-
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("not found");
-    expect(result.stderr).toContain("DECISION-9999");
-  });
-
-  test("decision set updates one field and preserves the body", async () => {
-    const vaultRoot = await createFixtureVault("wiki-v2");
-    await runWiki(createArgs(), vaultRoot);
-    const before = await readFile(join(vaultRoot, "projects", "wiki-v2", "adrs", "DECISION-0001.md"), "utf8");
-
-    const result = await runWiki(
-      ["decision", "set", "DECISION-0001", "--project", "wiki-v2", "--field", "status", "proposed"],
-      vaultRoot,
-    );
-
-    expect(result.exitCode).toBe(0);
-    expect(result.stderr).toContain("updated DECISION-0001");
-    const after = await readFile(join(vaultRoot, "projects", "wiki-v2", "adrs", "DECISION-0001.md"), "utf8");
-    expect(after).toContain("status: proposed");
-    expect(after.slice(after.indexOf("# Use SQLite"))).toBe(before.slice(before.indexOf("# Use SQLite")));
-  });
-
-  test("decision append adds a value to a list field", async () => {
-    const vaultRoot = await createFixtureVault("wiki-v2");
-    await runWiki(createArgs(), vaultRoot);
-
-    const result = await runWiki(
-      ["decision", "append", "DECISION-0001", "--project", "wiki-v2", "--field", "context_terms", "Vault"],
-      vaultRoot,
-    );
-
-    expect(result.exitCode).toBe(0);
-    expect(result.stderr).toContain("updated DECISION-0001");
-    const after = await readFile(join(vaultRoot, "projects", "wiki-v2", "adrs", "DECISION-0001.md"), "utf8");
-    expect(after).toContain("context_terms:\n  - Vault");
-  });
-
-  test("decision append rejects non-list fields", async () => {
-    const vaultRoot = await createFixtureVault("wiki-v2");
-    await runWiki(createArgs(), vaultRoot);
-
-    const result = await runWiki(
-      ["decision", "append", "DECISION-0001", "--project", "wiki-v2", "--field", "title", "extra"],
-      vaultRoot,
-    );
-
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("title");
-    expect(result.stderr).toContain("not a list field");
-  });
-
-  test("decision set reads a multiline value from stdin when value is dash", async () => {
-    const vaultRoot = await createFixtureVault("wiki-v2");
-    await runWiki(createArgs(), vaultRoot);
-
-    const result = await runWiki(
-      ["decision", "set", "DECISION-0001", "--project", "wiki-v2", "--field", "decision", "-"],
-      vaultRoot,
-      "First line\nSecond line",
-    );
-
-    expect(result.exitCode).toBe(0);
-    const show = await runWiki(
-      ["decision", "show", "DECISION-0001", "--project", "wiki-v2", "--field", "decision"],
-      vaultRoot,
-    );
-    expect(show.stdout).toBe("First line\nSecond line\n");
-  });
 });
 
 function createArgs(): string[] {
   return [
-    "decision",
     "create",
+    "decision",
     "--title",
     "Use SQLite",
     "--context",

@@ -1,3 +1,4 @@
+import matter from "gray-matter";
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmod, mkdir, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -11,25 +12,13 @@ afterEach(async () => {
 });
 
 describe("phase auto-doc CLI", () => {
-  test("prd publish appends slice doc to stderr without changing stdout", async () => {
-    const fixture = await createFixture();
-    await seedPhaseDoc(fixture.repoPath, "slice", "# Slice\nCreate the slice\n");
-
-    const result = await runWiki(["prd", "publish", "PRD-0001", "--project", "wiki-v2"], fixture);
-
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe("");
-    expect(result.stderr).toContain("updated PRD-0001");
-    expect(result.stderr).toContain("--- phase doc: slice ---\n# Slice\nCreate the slice\n");
-  });
-
-  test("slice red appends green doc to stderr without changing stdout", async () => {
+  test("red appends green doc to stderr without changing stdout", async () => {
     const fixture = await createFixture();
     await createSliceWithAcceptance(fixture);
     await wantFail(fixture);
     await seedPhaseDoc(fixture.repoPath, "green", "# Green\nMake it pass\n");
 
-    const result = await runWiki(["slice", "red", "SLICE-0001", "--project", "wiki-v2"], fixture);
+    const result = await runWiki(["red", "SLICE-0001", "--project", "wiki-v2"], fixture);
 
     const logPath = join(fixture.repoPath, ".wiki", "state", "slices", "SLICE-0001-red.log");
     expect(result.exitCode).toBe(0);
@@ -38,18 +27,18 @@ describe("phase auto-doc CLI", () => {
     expect(result.stderr).toContain("--- phase doc: green ---\n# Green\nMake it pass\n");
   });
 
-  test("slice green appends close doc and slice close appends handover doc", async () => {
+  test("green appends close doc and close appends handover doc", async () => {
     const fixture = await createFixture();
     await createSliceWithAcceptance(fixture);
     await wantFail(fixture);
-    expect((await runWiki(["slice", "red", "SLICE-0001", "--project", "wiki-v2", "--no-doc"], fixture)).exitCode).toBe(0);
+    expect((await runWiki(["red", "SLICE-0001", "--project", "wiki-v2", "--no-doc"], fixture)).exitCode).toBe(0);
     await wantPass(fixture);
     await seedPhaseDoc(fixture.repoPath, "close", "# Close\nReview and close\n");
     await seedPhaseDoc(fixture.repoPath, "handover", "# Handover\nTransfer context\n");
 
-    const green = await runWiki(["slice", "green", "SLICE-0001", "--project", "wiki-v2"], fixture);
-    await runWiki(["slice", "append", "SLICE-0001", "--project", "wiki-v2", "--field", "todo", "t1|Done|true"], fixture);
-    const close = await runWiki(["slice", "close", "SLICE-0001", "--project", "wiki-v2", "--review-verdict", "pass"], fixture);
+    const green = await runWiki(["green", "SLICE-0001", "--project", "wiki-v2"], fixture);
+    await appendSliceField(fixture.vaultRoot, "todo", { id: "t1", text: "Done", done: true });
+    const close = await runWiki(["close", "SLICE-0001", "--project", "wiki-v2", "--review-verdict", "pass"], fixture);
 
     expect(green.exitCode).toBe(0);
     expect(green.stdout).toBe(`${join(fixture.repoPath, ".wiki", "state", "slices", "SLICE-0001-green.log")}\n`);
@@ -60,13 +49,13 @@ describe("phase auto-doc CLI", () => {
     expect(close.stderr).toContain("--- phase doc: handover ---\n# Handover\nTransfer context\n");
   });
 
-  test("handover write uses next phase doc and handover create defaults to ad-hoc", async () => {
+  test("handover uses next phase doc and defaults to ad-hoc", async () => {
     const fixture = await createFixture();
     await seedPhaseDoc(fixture.repoPath, "slice", "# Slice\nNext slice\n");
     await seedPhaseDoc(fixture.repoPath, "ad-hoc", "# Ad hoc\nDecide next\n");
 
-    const write = await runWiki(["handover", "write", "--project", "wiki-v2", "--phase", "handover", "--next-phase", "slice"], fixture);
-    const create = await runWiki(["handover", "create", "--project", "wiki-v2", "--phase", "handover"], fixture);
+    const write = await runWiki(["handover", "--project", "wiki-v2", "--phase", "handover", "--next-phase", "slice"], fixture);
+    const create = await runWiki(["handover", "--project", "wiki-v2", "--phase", "handover"], fixture);
 
     expect(write.exitCode).toBe(0);
     expect(write.stdout).toBe("HANDOVER-0001\n");
@@ -76,29 +65,28 @@ describe("phase auto-doc CLI", () => {
     expect(create.stderr).toContain("--- phase doc: ad-hoc ---\n# Ad hoc\nDecide next\n");
   });
 
-  test("--no-doc suppresses auto doc and --doc-phase overrides selected phase", async () => {
+  test("--no-doc suppresses auto doc on red", async () => {
     const fixture = await createFixture();
-    await seedPhaseDoc(fixture.repoPath, "custom", "# Custom\nUse override\n");
+    await createSliceWithAcceptance(fixture);
+    await wantFail(fixture);
+    await seedPhaseDoc(fixture.repoPath, "green", "# Green\nMake it pass\n");
 
-    const suppressed = await runWiki(["prd", "publish", "PRD-0001", "--project", "wiki-v2", "--no-doc"], fixture);
-    await runWiki(["prd", "set", "PRD-0001", "--project", "wiki-v2", "--field", "status", "draft"], fixture);
-    const overridden = await runWiki(["prd", "publish", "PRD-0001", "--project", "wiki-v2", "--doc-phase", "custom"], fixture);
+    const result = await runWiki(["red", "SLICE-0001", "--project", "wiki-v2", "--no-doc"], fixture);
 
-    expect(suppressed.exitCode).toBe(0);
-    expect(suppressed.stderr).not.toContain("phase doc");
-    expect(overridden.exitCode).toBe(0);
-    expect(overridden.stderr).toContain("--- phase doc: custom ---\n# Custom\nUse override\n");
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).not.toContain("phase doc");
   });
 
   test("missing auto doc is non-fatal and reported on stderr", async () => {
     const fixture = await createFixture();
+    await createSliceWithAcceptance(fixture);
+    await wantFail(fixture);
 
-    const result = await runWiki(["prd", "publish", "PRD-0001", "--project", "wiki-v2"], fixture);
+    const result = await runWiki(["red", "SLICE-0001", "--project", "wiki-v2"], fixture);
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe("");
-    expect(result.stderr).toContain("updated PRD-0001");
-    expect(result.stderr).toContain("phase doc missing: slice");
+    expect(result.stderr).toContain("red captured");
+    expect(result.stderr).toContain("phase doc missing: green");
   });
 });
 
@@ -140,19 +128,25 @@ async function createFixture(): Promise<Fixture> {
     join(projectPath, "_project.md"),
     `---\nproject: ${project}\nrepo: ${repoPath}\ntest_command: ${scriptPath} ${statePath}\nqmd_command: ${qmdCommand}\n---\n# ${project}\n`,
   );
-  expect((await runWiki(["prd", "create", "--title", "Core wiki CLI", "--project", project], { vaultRoot, repoPath, statePath })).exitCode).toBe(0);
+  expect((await runWiki(["create", "prd", "--title", "Core wiki CLI", "--project", project], { vaultRoot, repoPath, statePath })).exitCode).toBe(0);
   return { vaultRoot, repoPath, statePath };
 }
 
 async function createSliceWithAcceptance(fixture: Fixture): Promise<void> {
   expect(
-    (await runWiki(["slice", "create", "--title", "Build slice authoring", "--project", "wiki-v2", "--parent-prd", "PRD-0001"], fixture))
+    (await runWiki(["create", "slice", "--title", "Build slice authoring", "--project", "wiki-v2", "--parent-prd", "PRD-0001"], fixture))
       .exitCode,
   ).toBe(0);
-  expect(
-    (await runWiki(["slice", "append", "SLICE-0001", "--project", "wiki-v2", "--field", "acceptance", "First criterion"], fixture))
-      .exitCode,
-  ).toBe(0);
+  await appendSliceField(fixture.vaultRoot, "acceptance", "First criterion");
+}
+
+async function appendSliceField(vaultRoot: string, field: string, value: unknown): Promise<void> {
+  const path = join(vaultRoot, "projects", "wiki-v2", "slices", "SLICE-0001.md");
+  const content = await readFile(path, "utf8");
+  const parsed = matter(content);
+  const current = parsed.data[field];
+  parsed.data[field] = Array.isArray(current) ? [...current, value] : [value];
+  await writeFile(path, matter.stringify(parsed.content, parsed.data));
 }
 
 async function seedPhaseDoc(repoPath: string, phase: string, content: string): Promise<void> {

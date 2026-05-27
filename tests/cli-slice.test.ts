@@ -96,130 +96,12 @@ describe("slice CLI", () => {
     expect(result.stderr).toContain("title");
     expect(result.stdout).toBe("");
   });
-
-  test("slice show prints the rendered body", async () => {
-    const vaultRoot = await createFixtureVault("wiki-v2");
-    await seedPrd(vaultRoot);
-    await runWiki(createArgs(), vaultRoot);
-
-    const result = await runWiki(["slice", "show", "SLICE-0001", "--project", "wiki-v2"], vaultRoot);
-
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("# Build slice authoring");
-    expect(result.stdout).toContain("## What to build");
-    expect(result.stdout).toContain("[[PRD-0001]]");
-    expect(result.stderr).toBe("");
-  });
-
-  test("slice show --field prints only that field", async () => {
-    const vaultRoot = await createFixtureVault("wiki-v2");
-    await seedPrd(vaultRoot);
-    await runWiki(createArgs(), vaultRoot);
-
-    const result = await runWiki(["slice", "show", "SLICE-0001", "--project", "wiki-v2", "--field", "title"], vaultRoot);
-
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe("Build slice authoring\n");
-    expect(result.stderr).toBe("");
-  });
-
-  test("slice show exits 1 and names a missing id", async () => {
-    const vaultRoot = await createFixtureVault("wiki-v2");
-
-    const result = await runWiki(["slice", "show", "SLICE-9999", "--project", "wiki-v2"], vaultRoot);
-
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("not found");
-    expect(result.stderr).toContain("SLICE-9999");
-  });
-
-  test("slice set updates one field and preserves the body", async () => {
-    const vaultRoot = await createFixtureVault("wiki-v2");
-    await seedPrd(vaultRoot);
-    await runWiki(createArgs(), vaultRoot);
-    const before = await readSlice(vaultRoot, "SLICE-0001");
-
-    const result = await runWiki(
-      ["slice", "set", "SLICE-0001", "--project", "wiki-v2", "--field", "title", "Updated slice title"],
-      vaultRoot,
-    );
-
-    expect(result.exitCode).toBe(0);
-    expect(result.stderr).toContain("updated SLICE-0001");
-    const after = await readSlice(vaultRoot, "SLICE-0001");
-    expect(after).toContain("title: Updated slice title");
-    expect(after.slice(after.indexOf("# Build slice authoring"))).toBe(before.slice(before.indexOf("# Build slice authoring")));
-  });
-
-  test("slice set status accepts a valid closed value without state enforcement", async () => {
-    const vaultRoot = await createFixtureVault("wiki-v2");
-    await seedPrd(vaultRoot);
-    await runWiki(createArgs(), vaultRoot);
-
-    const result = await runWiki(
-      ["slice", "set", "SLICE-0001", "--project", "wiki-v2", "--field", "status", "closed"],
-      vaultRoot,
-    );
-
-    expect(result.exitCode).toBe(0);
-    expect(result.stderr).toContain("updated SLICE-0001");
-    expect(await readSlice(vaultRoot, "SLICE-0001")).toContain("status: closed");
-  });
-
-  test("slice set reads a multiline placeholder value from stdin when value is dash", async () => {
-    const vaultRoot = await createFixtureVault("wiki-v2");
-    await seedPrd(vaultRoot);
-    await runWiki(createArgs(), vaultRoot);
-
-    const result = await runWiki(
-      ["slice", "set", "SLICE-0001", "--project", "wiki-v2", "--field", "what_to_build", "-"],
-      vaultRoot,
-      "First line\nSecond line",
-    );
-
-    expect(result.exitCode).toBe(0);
-    const show = await runWiki(
-      ["slice", "show", "SLICE-0001", "--project", "wiki-v2", "--field", "what_to_build"],
-      vaultRoot,
-    );
-    expect(show.stdout).toBe("First line\nSecond line\n");
-  });
-
-  test("slice append adds a value to the acceptance list", async () => {
-    const vaultRoot = await createFixtureVault("wiki-v2");
-    await seedPrd(vaultRoot);
-    await runWiki(createArgs(), vaultRoot);
-
-    const result = await runWiki(
-      ["slice", "append", "SLICE-0001", "--project", "wiki-v2", "--field", "acceptance", "First criterion"],
-      vaultRoot,
-    );
-
-    expect(result.exitCode).toBe(0);
-    expect(result.stderr).toContain("updated SLICE-0001");
-    expect(await readSlice(vaultRoot, "SLICE-0001")).toContain("acceptance:\n  - First criterion");
-  });
-
-  test("slice append rejects non-list fields", async () => {
-    const vaultRoot = await createFixtureVault("wiki-v2");
-    await seedPrd(vaultRoot);
-    await runWiki(createArgs(), vaultRoot);
-
-    const result = await runWiki(
-      ["slice", "append", "SLICE-0001", "--project", "wiki-v2", "--field", "title", "extra"],
-      vaultRoot,
-    );
-
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("title");
-    expect(result.stderr).toContain("not a list field");
-  });
 });
 
 function createArgs(): string[] {
   return [
-    "slice",
     "create",
+    "slice",
     "--title",
     "Build slice authoring",
     "--project",
@@ -230,7 +112,7 @@ function createArgs(): string[] {
 }
 
 async function seedPrd(vaultRoot: string): Promise<void> {
-  const result = await runWiki(["prd", "create", "--title", "Core wiki CLI", "--project", "wiki-v2"], vaultRoot);
+  const result = await runWiki(["create", "prd", "--title", "Core wiki CLI", "--project", "wiki-v2"], vaultRoot);
   expect(result.exitCode).toBe(0);
 }
 

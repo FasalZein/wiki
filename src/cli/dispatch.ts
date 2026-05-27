@@ -1,16 +1,14 @@
-import { handleDecision } from "./verbs/decision";
-import { handleHandover } from "./verbs/handover";
-import { handleLock } from "./verbs/lock";
-import { handlePhase } from "./verbs/phase";
-import { handlePlan } from "./verbs/plan";
-import { handlePrd } from "./verbs/prd";
+import { handleClose } from "./verbs/close";
+import { handleCreate } from "./verbs/create";
+import { handleGreen } from "./verbs/green";
+import { handleNextId } from "./verbs/next-id";
 import { handleProject } from "./verbs/project";
+import { handleRed } from "./verbs/red";
 import { handleSearch } from "./verbs/search";
 import { handleSession } from "./verbs/session";
-import { handleSlice } from "./verbs/slice";
 import { handleStatus } from "./verbs/status";
 import { handleSync } from "./verbs/sync";
-import { handleTerm } from "./verbs/term";
+import { handleValidate } from "./verbs/validate";
 import { handleVault } from "./verbs/vault";
 
 export type CliResult = {
@@ -19,48 +17,21 @@ export type CliResult = {
 
 export async function dispatch(args: string[]): Promise<CliResult> {
   const [verb, ...rest] = args;
-  if (verb === "decision") {
-    return handleDecision(rest);
-  }
-  if (verb === "handover") {
-    return handleHandover(rest);
-  }
-  if (verb === "lock") {
-    return handleLock(rest);
-  }
-  if (verb === "phase") {
-    return handlePhase(rest);
-  }
-  if (verb === "plan") {
-    return handlePlan(rest);
-  }
-  if (verb === "prd") {
-    return handlePrd(rest);
-  }
-  if (verb === "project") {
-    return handleProject(rest);
-  }
-  if (verb === "search") {
-    return handleSearch(rest);
-  }
-  if (verb === "session") {
-    return handleSession(rest);
-  }
-  if (verb === "slice") {
-    return handleSlice(rest);
-  }
-  if (verb === "status") {
-    return handleStatus(rest);
-  }
-  if (verb === "sync") {
-    return handleSync(rest);
-  }
-  if (verb === "term") {
-    return handleTerm(rest);
-  }
-  if (verb === "vault") {
-    return handleVault(rest);
-  }
+  if (verb === "create") return handleCreate(rest);
+  if (verb === "red") return handleRed(rest);
+  if (verb === "green") return handleGreen(rest);
+  if (verb === "close") return handleClose(rest);
+  if (verb === "status") return handleStatus(rest);
+  if (verb === "search") return handleSearch(rest);
+  if (verb === "validate") return handleValidate(rest);
+  if (verb === "next-id") return handleNextId(rest);
+  if (verb === "doctor") return handleVault(["doctor", ...rest]);
+  if (verb === "sync") return handleSync(rest);
+  if (verb === "session") return handleSession(rest);
+  if (verb === "vault") return handleVault(rest);
+  if (verb === "project") return handleProject(rest);
+  if (verb === "handover") return handleCreate(["handover", ...rest]);
   console.error(`unknown verb: ${verb ?? ""}`.trim());
+  console.error("verbs: create, red, green, close, status, search, validate, next-id, doctor, sync, session, vault, project, handover");
   return { code: 1 };
 }

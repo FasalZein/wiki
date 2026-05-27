@@ -15,10 +15,10 @@ describe("slice TDD state machine CLI", () => {
   test("red on non-planned exits 2 and leaves the slice unchanged", async () => {
     const fixture = await createFixture();
     await createSliceWithAcceptance(fixture);
-    await runWiki(["slice", "set", "SLICE-0001", "--project", "wiki-v2", "--field", "status", "green"], fixture.vaultRoot);
+    await setSliceFields(fixture.vaultRoot, { status: "green" });
     const before = await readSlice(fixture.vaultRoot);
 
-    const result = await runWiki(["slice", "red", "SLICE-0001", "--project", "wiki-v2"], fixture.vaultRoot);
+    const result = await runWiki(["red", "SLICE-0001", "--project", "wiki-v2"], fixture.vaultRoot);
 
     expect(result.exitCode).toBe(2);
     expect(result.stderr).toContain("cannot red SLICE-0001 from status green");
@@ -30,7 +30,7 @@ describe("slice TDD state machine CLI", () => {
     await createSlice(fixture);
     const before = await readSlice(fixture.vaultRoot);
 
-    const result = await runWiki(["slice", "red", "SLICE-0001", "--project", "wiki-v2"], fixture.vaultRoot);
+    const result = await runWiki(["red", "SLICE-0001", "--project", "wiki-v2"], fixture.vaultRoot);
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("acceptance");
@@ -42,7 +42,7 @@ describe("slice TDD state machine CLI", () => {
     await createSliceWithAcceptance(fixture);
     await wantFail(fixture);
 
-    const result = await runWiki(["slice", "red", "SLICE-0001", "--project", "wiki-v2"], fixture.vaultRoot);
+    const result = await runWiki(["red", "SLICE-0001", "--project", "wiki-v2"], fixture.vaultRoot);
 
     expect(result.exitCode).toBe(0);
     const logPath = join(fixture.repoPath, ".wiki", "state", "slices", "SLICE-0001-red.log");
@@ -59,7 +59,7 @@ describe("slice TDD state machine CLI", () => {
     await createSliceWithAcceptance(fixture);
     const before = await readSlice(fixture.vaultRoot);
 
-    const result = await runWiki(["slice", "red", "SLICE-0001", "--project", "wiki-v2"], fixture.vaultRoot);
+    const result = await runWiki(["red", "SLICE-0001", "--project", "wiki-v2"], fixture.vaultRoot);
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("no failing tests captured");
@@ -71,7 +71,7 @@ describe("slice TDD state machine CLI", () => {
     await createSliceWithAcceptance(fixture);
     const before = await readSlice(fixture.vaultRoot);
 
-    const result = await runWiki(["slice", "green", "SLICE-0001", "--project", "wiki-v2"], fixture.vaultRoot);
+    const result = await runWiki(["green", "SLICE-0001", "--project", "wiki-v2"], fixture.vaultRoot);
 
     expect(result.exitCode).toBe(2);
     expect(result.stderr).toContain("cannot green SLICE-0001 from status planned");
@@ -82,10 +82,10 @@ describe("slice TDD state machine CLI", () => {
     const fixture = await createFixture();
     await createSliceWithAcceptance(fixture);
     await wantFail(fixture);
-    expect((await runWiki(["slice", "red", "SLICE-0001", "--project", "wiki-v2"], fixture.vaultRoot)).exitCode).toBe(0);
+    expect((await runWiki(["red", "SLICE-0001", "--project", "wiki-v2"], fixture.vaultRoot)).exitCode).toBe(0);
     await wantPass(fixture);
 
-    const result = await runWiki(["slice", "green", "SLICE-0001", "--project", "wiki-v2"], fixture.vaultRoot);
+    const result = await runWiki(["green", "SLICE-0001", "--project", "wiki-v2"], fixture.vaultRoot);
 
     expect(result.exitCode).toBe(0);
     const logPath = join(fixture.repoPath, ".wiki", "state", "slices", "SLICE-0001-green.log");
@@ -101,10 +101,10 @@ describe("slice TDD state machine CLI", () => {
     const fixture = await createFixture();
     await createSliceWithAcceptance(fixture);
     await wantFail(fixture);
-    expect((await runWiki(["slice", "red", "SLICE-0001", "--project", "wiki-v2"], fixture.vaultRoot)).exitCode).toBe(0);
+    expect((await runWiki(["red", "SLICE-0001", "--project", "wiki-v2"], fixture.vaultRoot)).exitCode).toBe(0);
     const before = await readSlice(fixture.vaultRoot);
 
-    const result = await runWiki(["slice", "green", "SLICE-0001", "--project", "wiki-v2"], fixture.vaultRoot);
+    const result = await runWiki(["green", "SLICE-0001", "--project", "wiki-v2"], fixture.vaultRoot);
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("tests still failing");
@@ -117,7 +117,7 @@ describe("slice TDD state machine CLI", () => {
     const before = await readSlice(fixture.vaultRoot);
 
     const result = await runWiki(
-      ["slice", "close", "SLICE-0001", "--project", "wiki-v2", "--review-verdict", "pass"],
+      ["close", "SLICE-0001", "--project", "wiki-v2", "--review-verdict", "pass"],
       fixture.vaultRoot,
     );
 
@@ -128,13 +128,10 @@ describe("slice TDD state machine CLI", () => {
 
   test("close success sets review verdict and closed status", async () => {
     const fixture = await createGreenSlice();
-    await runWiki(
-      ["slice", "append", "SLICE-0001", "--project", "wiki-v2", "--field", "todo", "t1|Write implementation|true"],
-      fixture.vaultRoot,
-    );
+    await appendSliceField(fixture.vaultRoot, "todo", { id: "t1", text: "Write implementation", done: true });
 
     const result = await runWiki(
-      ["slice", "close", "SLICE-0001", "--project", "wiki-v2", "--review-verdict", "pass-with-notes"],
+      ["close", "SLICE-0001", "--project", "wiki-v2", "--review-verdict", "pass-with-notes"],
       fixture.vaultRoot,
     );
 
@@ -148,23 +145,10 @@ describe("slice TDD state machine CLI", () => {
   test("tdd_exempt planned slice closes directly when it has a valid reason", async () => {
     const fixture = await createFixture();
     await createSliceWithAcceptance(fixture);
-    await runWiki(["slice", "set", "SLICE-0001", "--project", "wiki-v2", "--field", "tdd_exempt", "true"], fixture.vaultRoot);
-    await runWiki(
-      [
-        "slice",
-        "set",
-        "SLICE-0001",
-        "--project",
-        "wiki-v2",
-        "--field",
-        "tdd_exempt_reason",
-        "Documentation-only change has no runnable behavior",
-      ],
-      fixture.vaultRoot,
-    );
+    await setSliceFields(fixture.vaultRoot, { tdd_exempt: true, tdd_exempt_reason: "Documentation-only change has no runnable behavior" });
 
     const result = await runWiki(
-      ["slice", "close", "SLICE-0001", "--project", "wiki-v2", "--review-verdict", "pass"],
+      ["close", "SLICE-0001", "--project", "wiki-v2", "--review-verdict", "pass"],
       fixture.vaultRoot,
     );
 
@@ -175,12 +159,12 @@ describe("slice TDD state machine CLI", () => {
   test("tdd_exempt without a valid reason makes all state verbs exit 2", async () => {
     const fixture = await createFixture();
     await createSliceWithAcceptance(fixture);
-    await runWiki(["slice", "set", "SLICE-0001", "--project", "wiki-v2", "--field", "tdd_exempt", "true"], fixture.vaultRoot);
+    await setSliceFields(fixture.vaultRoot, { tdd_exempt: true });
 
-    const red = await runWiki(["slice", "red", "SLICE-0001", "--project", "wiki-v2"], fixture.vaultRoot);
-    const green = await runWiki(["slice", "green", "SLICE-0001", "--project", "wiki-v2"], fixture.vaultRoot);
+    const red = await runWiki(["red", "SLICE-0001", "--project", "wiki-v2"], fixture.vaultRoot);
+    const green = await runWiki(["green", "SLICE-0001", "--project", "wiki-v2"], fixture.vaultRoot);
     const close = await runWiki(
-      ["slice", "close", "SLICE-0001", "--project", "wiki-v2", "--review-verdict", "pass"],
+      ["close", "SLICE-0001", "--project", "wiki-v2", "--review-verdict", "pass"],
       fixture.vaultRoot,
     );
 
@@ -196,7 +180,7 @@ describe("slice TDD state machine CLI", () => {
     const fixture = await createFixture({ projectConfig: "---\nproject: wiki-v2\nrepo: /tmp/example\n---\n# wiki-v2\n" });
     await createSliceWithAcceptance(fixture);
 
-    const result = await runWiki(["slice", "red", "SLICE-0001", "--project", "wiki-v2"], fixture.vaultRoot);
+    const result = await runWiki(["red", "SLICE-0001", "--project", "wiki-v2"], fixture.vaultRoot);
 
     expect(result.exitCode).toBe(10);
     expect(result.stderr).toContain("_project.md: missing 'repo' or 'test_command'");
@@ -207,7 +191,7 @@ describe("slice TDD state machine CLI", () => {
     await createSliceWithAcceptance(fixture);
     const before = await readSlice(fixture.vaultRoot);
 
-    const result = await runWiki(["slice", "red", "SLICE-0001", "--project", "wiki-v2"], fixture.vaultRoot);
+    const result = await runWiki(["red", "SLICE-0001", "--project", "wiki-v2"], fixture.vaultRoot);
 
     expect(result.exitCode).toBe(1);
     expect(await readSlice(fixture.vaultRoot)).toBe(before);
@@ -266,14 +250,14 @@ esac
       ? `---\nproject: ${project}\nrepo: ${repoPath}\ntest_command: ${scriptPath} ${statePath}\nqmd_command: ${qmdCommand}\n---\n# ${project}\n`
       : options.projectConfig.replace("---\n", `---\nqmd_command: ${qmdCommand}\n`),
   );
-  const prd = await runWiki(["prd", "create", "--title", "Core wiki CLI", "--project", project], vaultRoot);
+  const prd = await runWiki(["create", "prd", "--title", "Core wiki CLI", "--project", project], vaultRoot);
   expect(prd.exitCode).toBe(0);
   return { vaultRoot, repoPath, statePath };
 }
 
 async function createSlice(fixture: Fixture): Promise<void> {
   const create = await runWiki(
-    ["slice", "create", "--title", "Build slice authoring", "--project", "wiki-v2", "--parent-prd", "PRD-0001"],
+    ["create", "slice", "--title", "Build slice authoring", "--project", "wiki-v2", "--parent-prd", "PRD-0001"],
     fixture.vaultRoot,
   );
   expect(create.exitCode).toBe(0);
@@ -281,20 +265,33 @@ async function createSlice(fixture: Fixture): Promise<void> {
 
 async function createSliceWithAcceptance(fixture: Fixture): Promise<void> {
   await createSlice(fixture);
-  const append = await runWiki(
-    ["slice", "append", "SLICE-0001", "--project", "wiki-v2", "--field", "acceptance", "First criterion"],
-    fixture.vaultRoot,
-  );
-  expect(append.exitCode).toBe(0);
+  await appendSliceField(fixture.vaultRoot, "acceptance", "First criterion");
+}
+
+async function setSliceFields(vaultRoot: string, fields: Record<string, unknown>): Promise<void> {
+  const path = join(vaultRoot, "projects", "wiki-v2", "slices", "SLICE-0001.md");
+  const content = await readFile(path, "utf8");
+  const parsed = matter(content);
+  Object.assign(parsed.data, fields);
+  await writeFile(path, matter.stringify(parsed.content, parsed.data));
+}
+
+async function appendSliceField(vaultRoot: string, field: string, value: unknown): Promise<void> {
+  const path = join(vaultRoot, "projects", "wiki-v2", "slices", "SLICE-0001.md");
+  const content = await readFile(path, "utf8");
+  const parsed = matter(content);
+  const current = parsed.data[field];
+  parsed.data[field] = Array.isArray(current) ? [...current, value] : [value];
+  await writeFile(path, matter.stringify(parsed.content, parsed.data));
 }
 
 async function createGreenSlice(): Promise<Fixture> {
   const fixture = await createFixture();
   await createSliceWithAcceptance(fixture);
   await wantFail(fixture);
-  expect((await runWiki(["slice", "red", "SLICE-0001", "--project", "wiki-v2"], fixture.vaultRoot)).exitCode).toBe(0);
+  expect((await runWiki(["red", "SLICE-0001", "--project", "wiki-v2"], fixture.vaultRoot)).exitCode).toBe(0);
   await wantPass(fixture);
-  expect((await runWiki(["slice", "green", "SLICE-0001", "--project", "wiki-v2"], fixture.vaultRoot)).exitCode).toBe(0);
+  expect((await runWiki(["green", "SLICE-0001", "--project", "wiki-v2"], fixture.vaultRoot)).exitCode).toBe(0);
   return fixture;
 }
 

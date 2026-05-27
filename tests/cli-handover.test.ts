@@ -13,7 +13,7 @@ describe("handover CLI", () => {
   test("handover create with required flags writes an open handover", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
 
-    const result = await runWiki(["handover", "create", "--project", "wiki-v2", "--phase", "plan"], vaultRoot);
+    const result = await runWiki(["handover", "--project", "wiki-v2", "--phase", "plan"], vaultRoot);
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("HANDOVER-0001\n");
@@ -28,7 +28,7 @@ describe("handover CLI", () => {
   test("handover create missing --phase exits 1", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
 
-    const result = await runWiki(["handover", "create", "--project", "wiki-v2"], vaultRoot);
+    const result = await runWiki(["handover", "--project", "wiki-v2"], vaultRoot);
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("phase");
@@ -38,7 +38,7 @@ describe("handover CLI", () => {
   test("handover create without --project uses session project", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
 
-    const result = await runWiki(["handover", "create", "--phase", "plan"], vaultRoot);
+    const result = await runWiki(["handover", "--phase", "plan"], vaultRoot);
 
     expect(result.exitCode).toBe(0);
   });
@@ -49,7 +49,6 @@ describe("handover CLI", () => {
     const result = await runWiki(
       [
         "handover",
-        "create",
         "--project",
         "wiki-v2",
         "--phase",
@@ -71,7 +70,7 @@ describe("handover CLI", () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
 
     const result = await runWiki(
-      ["handover", "create", "--project", "wiki-v2", "--phase", "plan", "--produced", "-"],
+      ["handover", "--project", "wiki-v2", "--phase", "plan", "--produced", "-"],
       vaultRoot,
       "Built one thing\nVerified it",
     );
@@ -79,95 +78,6 @@ describe("handover CLI", () => {
     expect(result.exitCode).toBe(0);
     const file = await readHandover(vaultRoot, "HANDOVER-0001");
     expect(file).toContain("Built one thing\nVerified it");
-  });
-
-  test("handover show prints the rendered body", async () => {
-    const vaultRoot = await createFixtureVault("wiki-v2");
-    await runWiki(["handover", "create", "--project", "wiki-v2", "--phase", "plan"], vaultRoot);
-
-    const result = await runWiki(["handover", "show", "HANDOVER-0001", "--project", "wiki-v2"], vaultRoot);
-
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("# Handover HANDOVER-0001");
-    expect(result.stdout).toContain("## What this session produced");
-    expect(result.stderr).toBe("");
-  });
-
-  test("handover show --field prints one field", async () => {
-    const vaultRoot = await createFixtureVault("wiki-v2");
-    await runWiki(["handover", "create", "--project", "wiki-v2", "--phase", "plan"], vaultRoot);
-
-    const result = await runWiki(
-      ["handover", "show", "HANDOVER-0001", "--project", "wiki-v2", "--field", "phase"],
-      vaultRoot,
-    );
-
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe("plan\n");
-    expect(result.stderr).toBe("");
-  });
-
-  test("handover show missing id exits 1", async () => {
-    const vaultRoot = await createFixtureVault("wiki-v2");
-
-    const result = await runWiki(["handover", "show", "HANDOVER-9999", "--project", "wiki-v2"], vaultRoot);
-
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("not found");
-    expect(result.stderr).toContain("HANDOVER-9999");
-  });
-
-  test("handover set updates a field and preserves the body", async () => {
-    const vaultRoot = await createFixtureVault("wiki-v2");
-    await runWiki(["handover", "create", "--project", "wiki-v2", "--phase", "plan"], vaultRoot);
-    const before = await readHandover(vaultRoot, "HANDOVER-0001");
-
-    const result = await runWiki(
-      ["handover", "set", "HANDOVER-0001", "--project", "wiki-v2", "--field", "phase", "review"],
-      vaultRoot,
-    );
-
-    expect(result.exitCode).toBe(0);
-    const after = await readHandover(vaultRoot, "HANDOVER-0001");
-    expect(after).toContain("phase: review");
-    expect(after.slice(after.indexOf("# Handover HANDOVER-0001"))).toBe(before.slice(before.indexOf("# Handover HANDOVER-0001")));
-  });
-
-  test("handover append adds to a list field", async () => {
-    const vaultRoot = await createFixtureVault("wiki-v2");
-    await runWiki(["handover", "create", "--project", "wiki-v2", "--phase", "plan"], vaultRoot);
-
-    const result = await runWiki(
-      ["handover", "append", "HANDOVER-0001", "--project", "wiki-v2", "--field", "suggested_skills", "/wiki"],
-      vaultRoot,
-    );
-
-    expect(result.exitCode).toBe(0);
-    expect(await readHandover(vaultRoot, "HANDOVER-0001")).toContain("suggested_skills:\n  - /wiki");
-  });
-
-  test("handover append rejects non-list fields", async () => {
-    const vaultRoot = await createFixtureVault("wiki-v2");
-    await runWiki(["handover", "create", "--project", "wiki-v2", "--phase", "plan"], vaultRoot);
-
-    const result = await runWiki(
-      ["handover", "append", "HANDOVER-0001", "--project", "wiki-v2", "--field", "phase", "review"],
-      vaultRoot,
-    );
-
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("phase");
-    expect(result.stderr).toContain("not a list field");
-  });
-
-  test("handover write aliases create", async () => {
-    const vaultRoot = await createFixtureVault("wiki-v2");
-
-    const result = await runWiki(["handover", "write", "--project", "wiki-v2", "--phase", "handover"], vaultRoot);
-
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe("HANDOVER-0001\n");
-    expect(await readHandover(vaultRoot, "HANDOVER-0001")).toContain("phase: handover");
   });
 });
 

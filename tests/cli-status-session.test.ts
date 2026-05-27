@@ -108,20 +108,6 @@ describe("status and session CLI", () => {
     expect(result.stderr).toContain("phase doc not found");
   });
 
-  test("phase doc prints docs and missing doc exits 1", async () => {
-    const fixture = await createFixture();
-    await mkdir(join(fixture.cwd, "skills", "wiki"), { recursive: true });
-    await writeFile(join(fixture.cwd, "skills", "wiki", "PHASE-RED.md"), "# Red\nFix failing tests\n");
-
-    const found = await runWiki(["phase", "doc", "red"], fixture);
-    const missing = await runWiki(["phase", "doc", "green"], fixture);
-
-    expect(found.exitCode).toBe(0);
-    expect(found.stdout).toBe("# Red\nFix failing tests\n");
-    expect(missing.exitCode).toBe(1);
-    expect(missing.stderr).toContain("phase doc not found: green");
-  });
-
   test("session set updates fields and supports stdin notes", async () => {
     const fixture = await createFixture();
     await runWiki(["session", "start", "--project", "wiki-v2", "--phase", "red"], fixture);

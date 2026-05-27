@@ -1,0 +1,57 @@
+import matter from "gray-matter";
+import { readFile } from "node:fs/promises";
+import { basename, relative } from "node:path";
+
+import { loadTemplate, type TemplateType } from "../../schema/load";
+import { validate } from "../../schema/validate";
+import { getVaultRoot } from "../../config/vault";
+import type { CliResult } from "../dispatch";
+
+const typeMap: Record<string, TemplateType> = { prds: "prd", slices: "slice", adrs: "decision", handovers: "handover" };
+
+export async function handleValidate(args: string[]): Promise<CliResult> {
+  const filePath = args[0];
+  if (filePath === undefined) {
+    console.error("usage: wiki validate <file>");
+    return { code: 1 };
+  }
+
+  let content: string;
+  try {
+    content = await readFile(filePath, "utf8");
+  } catch {
+    console.error(`cannot read: ${filePath}`);
+    return { code: 1 };
+  }
+
+  const vaultRoot = await getVaultRoot();
+  const rel = relative(vaultRoot, filePath);
+  const type = inferType(rel);
+  if (type === undefined) {
+    console.error(`cannot infer artifact type from path: ${rel}`);
+    console.error("expected path under projects/<name>/<prds|slices|adrs|handovers>/");
+    return { code: 1 };
+  }
+
+  const parsed = matter(content);
+  const schema = await loadTemplate(type);
+  const result = validate(schema, parsed.data);
+  if (result.ok) {
+    console.error(`valid ${type}: ${basename(filePath)}`);
+    return { code: 0 };
+  }
+
+  for (const error of result.errors) {
+    console.error(`${error.field}: ${error.reason}${error.expected ? ` (expected: ${error.expected})` : ""}`);
+  }
+  return { code: 1 };
+}
+
+function inferType(rel: string): TemplateType | undefined {
+  const parts = rel.split("/");
+  const dir = parts[2];
+  if (parts[0] === "projects" && parts.length >= 4 && dir !== undefined) {
+    return typeMap[dir];
+  }
+  return undefined;
+}
