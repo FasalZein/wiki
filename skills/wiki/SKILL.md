@@ -1,6 +1,6 @@
 ---
 name: wiki
-description: "Use for wiki vault work — PRD, slice, decision, TDD, close, handover, init, doctor, migrate."
+description: "Manages wiki vault delivery workflow — PRDs, slices, decisions, TDD gates, handovers. Use when work touches the wiki vault, user asks to create/update/close delivery artifacts, or context needs restoring via triage."
 ---
 # /wiki
 

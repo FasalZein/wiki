@@ -12,6 +12,22 @@ A PRD implements decisions from a preceding grill (plan phase). Reference
 ADRs by ID in the `implementation_decisions` field. If no grill was needed
 (scope was already clear), note that in `implementation_decisions`.
 
+## Process
+
+Do NOT interview the user — synthesize what you already know from the
+conversation and codebase exploration.
+
+1. **Explore the codebase** to understand the current state. Use the project's
+   domain glossary vocabulary throughout the PRD, and respect any ADRs in the
+   area you're touching.
+
+2. **Sketch major modules** you will need to build or modify. Actively look for
+   opportunities to extract deep modules — small interface, deep implementation,
+   testable in isolation. Check with the user that these modules match their
+   expectations. Check which modules they want tests written for.
+
+3. **Create and fill the PRD** using the steps below.
+
 ## Create a PRD
 
 ```
@@ -26,23 +42,16 @@ Fill every section before publishing. Use `obsidian property:set` for each:
 
 - **problem_statement** — the user problem, from the user's perspective.
 - **solution** — outcome-focused, not implementation-focused.
-- **user_stories** — numbered list: `As a <actor>, I want <feature>, so that <benefit>.`
-- **implementation_decisions** — modules, interfaces, schema changes. No file paths.
-- **testing_decisions** — what makes a good test, which modules, prior art.
+- **user_stories** — long, numbered list: `As a <actor>, I want <feature>, so
+  that <benefit>.` This list should be extensive and cover all aspects.
+- **implementation_decisions** — modules, interfaces, schema changes,
+  architectural decisions, API contracts. No file paths — they go stale.
+  Exception: if a prototype produced a snippet that encodes a decision more
+  precisely than prose can (state machine, reducer, schema, type shape), inline
+  it and note it came from a prototype.
+- **testing_decisions** — what makes a good test (only test external behavior,
+  not implementation details), which modules, prior art in the codebase.
 - **out_of_scope** — what is deliberately excluded.
-
-For long values, pipe content via stdin:
-
-```
-echo "Users cannot reset passwords without email verification" | \
-  obsidian property:set <prd-file> problem_statement -
-```
-
-Short values work inline:
-
-```
-obsidian property:set <prd-file> title "New title"
-```
 
 ## Domain terms
 
@@ -74,9 +83,3 @@ obsidian property:set <prd-file> status closed
 ```
 
 Verify all linked slices are closed before setting this status.
-
-## Reading PRDs
-
-```
-obsidian read <prd-file>                   # display full PRD with current field values
-```

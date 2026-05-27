@@ -1,7 +1,29 @@
 # ADR Guidance
 
-Wiki ADRs are vault artifacts created via `wiki create decision`. The template
-defines the schema; this doc covers *when* to create one and *what qualifies*.
+Wiki ADRs are vault artifacts created via `wiki create decision`. This doc
+covers the format, *when* to create one, and *what qualifies*.
+
+## Format
+
+An ADR can be a single paragraph. The value is in recording *that* a decision
+was made and *why* — not in filling out sections.
+
+Fill at minimum:
+
+- **context** — 1-3 sentences: what's the situation and what did we decide.
+- **decision** — what was chosen and why.
+- **status** — `proposed`, `accepted`, `deprecated`, or `superseded by ADR-NNNN`.
+
+### Optional fields
+
+Only include these when they add genuine value. Most ADRs won't need them.
+
+- **alternatives** — only when the rejected options are worth remembering.
+- **consequences** — only when non-obvious downstream effects need calling out.
+
+## Numbering
+
+`wiki create decision` auto-generates the next sequential ID (e.g. ADR-0005).
 
 ## When to offer an ADR
 
@@ -20,7 +42,7 @@ nothing to record beyond "we did the obvious thing."
 ## What qualifies
 
 - **Architectural shape.** "We're using a monorepo." "The write model is
-  event-sourced, the read model is projected."
+  event-sourced, the read model is projected into Postgres."
 - **Integration patterns between contexts.** "Ordering and Billing communicate
   via domain events, not synchronous HTTP."
 - **Technology choices that carry lock-in.** Database, message bus, auth
@@ -31,25 +53,11 @@ nothing to record beyond "we did the obvious thing."
   valuable as the yes's.
 - **Deliberate deviations from the obvious path.** "We use manual SQL instead
   of an ORM because X." Anything where a reasonable reader would assume the
-  opposite.
+  opposite. These stop the next engineer from "fixing" something that was
+  deliberate.
 - **Constraints not visible in the code.** "We can't use AWS because of
-  compliance." "Response times must be under 200ms because of the partner API."
+  compliance requirements." "Response times must be under 200ms because of the
+  partner API contract."
 - **Rejected alternatives when the rejection is non-obvious.** If you considered
   GraphQL and picked REST for subtle reasons, record it — otherwise someone
   will suggest GraphQL again in six months.
-
-## What does NOT qualify
-
-- Obvious choices or framework defaults.
-- Decisions that are easy to reverse (just change it later).
-- Implementation details that are already clear from the code.
-
-## Format
-
-The `wiki create decision` template handles the structure. Fill at minimum:
-- **context** — why this decision came up.
-- **decision** — what was chosen and why.
-- **status** — `proposed`, `accepted`, `deprecated`, or `superseded by ADR-NNNN`.
-
-Optional: `alternatives` (only when rejected options are worth remembering),
-`consequences` (only when non-obvious downstream effects need calling out).
