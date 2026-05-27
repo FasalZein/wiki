@@ -18,7 +18,8 @@ unclear.
 Wiki artifacts have status fields instead of issue labels. The canonical states:
 
 **PRDs**: `draft` → `ready` → `in-progress` → `closed`
-**Slices**: `planned` → `red` → `green` → `closed` (or `blocked`)
+**Slices**: `planned` → `red` → `green` → `closed`
+  Slices with `blocked_by` set cannot transition until blockers are closed.
 **Handovers**: `open` → `completed`
 **Decisions**: `proposed` → `accepted` (or `deprecated`, `superseded`)
 
@@ -70,6 +71,10 @@ address.
    - Write a handover → if the session produced useful context.
 
 ## Recording out-of-scope decisions
+
+Before recording a rejection, apply the three-part test from PHASE-PLAN.md:
+hard to reverse, surprising without context, real trade-off. Trivial rejections
+don't need an ADR.
 
 When a feature request or enhancement is deliberately rejected during triage or
 a grill session, record it as an ADR with status `rejected`:

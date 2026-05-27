@@ -74,6 +74,22 @@ required sections should not be marked ready.
 Every user story must map to at least one slice. A PRD with unmapped stories
 cannot be closed.
 
+## Example: filled PRD frontmatter
+
+```yaml
+id: PRD-003
+title: "Semantic search over vault artifacts"
+status: ready
+problem_statement: "Users cannot find related artifacts without remembering exact titles or IDs."
+solution: "Embed artifact content via QMD and expose a search command that ranks by semantic similarity."
+user_stories: |
+  1. As an agent, I want to search by concept so that I find related slices without exact keywords.
+  2. As a user, I want search results ranked by relevance so that the best match appears first.
+implementation_decisions: "Deep module: search index is a single function that accepts a query and returns ranked IDs. See ADR-0007."
+testing_decisions: "Test search ranking with known-good embeddings; mock the embedding API, not the index."
+out_of_scope: "Full-text search, fuzzy matching on titles, cross-project search."
+```
+
 ## Close
 
 Set the status to `closed` once all linked slices are in `closed` status:

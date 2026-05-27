@@ -8,7 +8,7 @@ Use this skill whenever work touches the wiki vault or delivery records.
 
 ## Hard rules
 
-1. Use the CLI for workflow transitions (create, red, green, close, handover). Use Obsidian primitives (`obsidian property:set`, `obsidian read`, `obsidian eval`) for field-level reads and writes.
+1. Use the CLI for workflow transitions (`create`, `red`, `green`, `close`, `handover`). Use Obsidian primitives (`obsidian property:set`, `obsidian read`, `obsidian eval`) for field-level reads/writes and PRD status changes.
 2. Resolve project context before acting: `wiki status --project <name>` or `wiki session show`.
 3. Follow the current phase exactly; do not skip TDD, review, close, or handover gates.
 4. Keep generated skill source in this repo only; do not install or symlink into `~/.pi`.
@@ -45,28 +45,31 @@ Field reads/writes: use `obsidian property:set`, `obsidian read`, `obsidian eval
 
 ## Phase routing
 
-- **plan (grill)**: Read `PHASE-PLAN.md` NOW. Grill the user with focused questions,
-  record ADRs via `wiki create decision`, update `domain-language.md`.
-- **prd**: Read `PHASE-PRD.md` NOW. Use `wiki create prd` to create; use
-  `obsidian property:set` to fill fields; agents set status directly.
-- **slice**: Read `PHASE-SLICE.md` NOW. Use `wiki create slice` to create; use
-  `obsidian property:set` for fields; `wiki red/green/close` for TDD gates.
-- **triage**: Read `PHASE-TRIAGE.md` NOW. Use `wiki status`, `wiki search`, and
-  `obsidian read` to restore truth.
-- **red/green/TDD**: Load `/tdd`. Use `wiki red` for a failing behavior, then
-  `wiki green` for the passing behavior.
-- **close**: Verify todos, evidence, and review verdict, then run `wiki close`.
-- **handover**: Read `PHASE-HANDOVER.md` NOW. Use `wiki handover`.
-- **query**: Use `obsidian eval` to run Dataview queries against vault content when you
-  need to aggregate or filter artifacts (e.g. list all open slices, count PRDs by status).
-
-## Phase progression
-
 Normal flow: plan (grill) → prd → slice → red → green → close → handover.
 Triage can fire at any point when context is lost; it chains back to plan if scope
 needs re-establishing. Not every project needs the plan/grill phase — skip it when
 scope is already clear. A PRD can have many slices; each slice goes through
 red/green/close independently.
+
+- **plan (grill)**: Read `PHASE-PLAN.md` NOW. Grill the user with focused questions,
+  record ADRs via `wiki create decision`, update `domain-language.md`.
+- **prd**: Read `PHASE-PRD.md` NOW. Use `wiki create prd` to create; use
+  `obsidian property:set` to fill fields. Close PRDs via
+  `obsidian property:set <prd-file> status closed` (not `wiki close`).
+- **slice**: Read `PHASE-SLICE.md` NOW. Use `wiki create slice` to create; use
+  `obsidian property:set` for fields; `wiki red/green/close` for TDD gates.
+- **triage**: Read `PHASE-TRIAGE.md` NOW. Use `wiki status`, `wiki search`, and
+  `obsidian read` to restore truth.
+- **red/green/TDD**: Read `PHASE-SLICE.md` NOW for the TDD gate workflow. For
+  test-writing philosophy (what makes a good test), also consider loading `/tdd`.
+  The gates are `wiki red` and `wiki green`.
+- **close (slice)**: Run `wiki close <id> --project <name>` after verifying todos,
+  evidence, and review verdict. Rejected slices return to `green`.
+- **close (PRD)**: Run `obsidian property:set <prd-file> status closed` after
+  verifying all linked slices are closed.
+- **handover**: Read `PHASE-HANDOVER.md` NOW. Use `wiki handover`.
+- **query**: Use `obsidian eval` to run Dataview queries against vault content when you
+  need to aggregate or filter artifacts (e.g. list all open slices, count PRDs by status).
 
 Do NOT invoke `/grill-with-docs`, `/to-prd`, `/to-issues`, `/handoff`, or `/triage`
 directly from wiki context — those skills write to GitHub Issues, `docs/adr/`, or OS
@@ -76,10 +79,6 @@ wiki-medium versions of those skills.
 ## Admin routing
 
 - **vault init/doctor/sync/bless**: Read `ADMIN-VAULT.md` NOW before running admin commands.
-- **migrate**: Read `ADMIN-MIGRATION.md` NOW before moving v1 content into v2.
-- **bases**: Use Obsidian Bases views for tabular project dashboards (PRD status boards,
-  slice progress grids, decision logs). Bases views are configured in the vault, not
-  through the CLI. Check them in Obsidian to get a visual overview of project state.
 
 ## Common pitfalls
 
@@ -88,3 +87,7 @@ wiki-medium versions of those skills.
 - Creating slices before the PRD is published — slices reference a parent PRD that must be `ready`.
 - Leaving handovers open — stale open handovers clutter triage. Close them after the next agent
   resumes.
+- Trying `wiki close` on a PRD — PRDs are closed via `obsidian property:set`, not the CLI.
+  `wiki close` is for slices only.
+- Bases views are configured in Obsidian, not through the CLI. Check them in Obsidian
+  for tabular project dashboards (PRD status boards, slice progress grids, decision logs).

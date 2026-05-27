@@ -76,6 +76,24 @@ Use when you want to undo accidental config changes.
 
 **Skill symlink not found:** Manually symlink `<repo>/skills/wiki/` into your agent's skills directory.
 
+## Other admin commands
+
+### `wiki validate <artifact-file>`
+
+Schema-checks a single artifact file. Reports missing required fields, invalid
+status values, and type mismatches. Use after manual frontmatter edits or migration.
+
+### `wiki next-id --project <name> --type <prd|slice|decision|handover>`
+
+Returns the next available sequential ID for the given artifact type. Useful
+when scripting bulk creation or verifying ID gaps.
+
+### `wiki project create <name>` / `wiki project list`
+
+Creates a new project directory structure under `projects/` or lists existing
+projects. `create` provisions the standard subdirectories (prds, slices,
+decisions, handovers) and an empty `domain-language.md`.
+
 ## When to run
 
 - **New machine:** `wiki vault init <path>`

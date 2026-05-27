@@ -132,6 +132,14 @@ wonder why. If there was no real alternative, there's nothing to record.
 - **Rejected alternatives when non-obvious.** Record it so someone doesn't
   suggest the same thing again in six months.
 
+## Example: domain-language.md entry produced during a grill
+
+```md
+**Artifact**:
+A versioned vault record with typed frontmatter — PRDs, slices, decisions, or handovers.
+_Avoid_: document, note, file, ticket
+```
+
 ## Promote to PRD
 
 When all questions are resolved and ADRs are recorded, create a PRD:

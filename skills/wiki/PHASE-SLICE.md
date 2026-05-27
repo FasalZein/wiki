@@ -108,6 +108,26 @@ Checks: all todos done, red/green evidence exists (or `tdd_exempt` is true),
 acceptance criteria satisfied. Records `review_verdict`. Rejected slices
 return to `green` for rework.
 
+## Example: filled slice frontmatter
+
+```yaml
+id: SLICE-037
+title: "Sync detects stale QMD collections"
+status: green
+parent_prd: PRD-003
+acceptance: |
+  - [ ] sync command detects when a collection's source files changed since last embed
+  - [ ] stale collections are re-embedded automatically
+  - [ ] collections with no changes are skipped
+todo: |
+  - Add mtime tracking to collection metadata
+  - Compare mtimes in sync loop
+  - Add test with a modified fixture file
+user_stories: "1, 3"
+red_log_ref: "tests/cli-sync.test.ts:2025-05-27T14:32:00Z"
+green_log_ref: "tests/cli-sync.test.ts:2025-05-27T15:01:00Z"
+```
+
 ## Blocked slices
 
 ```
