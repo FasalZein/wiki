@@ -1,6 +1,6 @@
 ---
 based-on: mattpocock/skills/engineering/grill-with-docs@b8be62f
-fork-rationale: Keeps the questioning discipline but records outcomes through wiki CLI planning artifacts instead of free-form docs.
+fork-rationale: Keeps the questioning discipline but treats plans as vault notes edited directly in Obsidian.
 ---
 # Phase: plan
 
@@ -14,18 +14,17 @@ understood and scoped.
 
 ## Create a plan
 
-```
-wiki plan create --project <name> --title "Short description of the problem"
-```
-
-Returns a plan ID (e.g. PLAN-0001). Status starts at `draft`. Fields:
-`problem_drafts`, `solution_drafts`, `acceptance_drafts`, `user_stories_drafts`,
-`notes`. Fill list fields with `wiki plan append`, scalar fields with
-`wiki plan set`:
+Plans are vault notes — create them directly in Obsidian:
 
 ```
-wiki plan append <id> --project <name> --field problem_drafts "Users lose context between sessions"
-wiki plan set <id> --project <name> --field notes "Explored caching but ruled it out"
+obsidian create --folder projects/<name>/plans --template plan "Short description of the problem"
+```
+
+Fill the plan with sections: `problem_drafts`, `solution_drafts`,
+`acceptance_drafts`, `user_stories_drafts`, `notes`. Edit fields directly:
+
+```
+obsidian property:set <plan-file> notes "Explored caching but ruled it out"
 ```
 
 ## Grill discipline
@@ -47,21 +46,23 @@ Record a decision (ADR) only when:
 - The trade-off would surprise a future reader who wasn't in the room.
 - Two reasonable engineers would pick different options.
 
-Do not create ADRs for obvious choices or framework defaults.
+Do not create ADRs for obvious choices or framework defaults. Use `wiki create decision`
+to create ADR artifacts.
 
-## Review and promote
+## Promote to PRD
+
+When the plan is complete, create a PRD from it:
 
 ```
-wiki plan show <id>            # review the plan artifact
-wiki plan promote <id>         # graduate to PRD phase
+wiki create prd --project <name> --title "Title from the plan"
 ```
 
-`promote` refuses if open_questions is non-empty or success_criteria is blank.
+Then fill the PRD sections using the plan content as input. See `PHASE-PRD.md`.
 
 ## Exit criteria
 
 - Scope is bounded: there is a clear "what is in" and "what is out."
 - Success criteria are testable: each criterion can be verified by a human or
   automated check.
-- No unresolved open questions remain in the plan artifact.
+- No unresolved open questions remain in the plan.
 - If ADRs were needed, they are recorded and accepted.

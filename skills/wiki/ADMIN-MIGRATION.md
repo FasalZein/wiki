@@ -43,17 +43,22 @@ Common field mappings (v1 -> v2):
 | `test_evidence`  | `red_log_ref` / `green_log_ref` | Split into two fields   |
 | `tags`           | `domain_terms`     | Must reference domain-language.md  |
 
-After updating frontmatter, use CLI verbs to validate:
+After updating frontmatter, validate each artifact:
 
 ```
-wiki prd set <id> --project <name> --field <field> <value>
-wiki slice set <id> --field <field> <value>
+wiki validate <artifact-file>
+```
+
+For field updates, use Obsidian primitives directly:
+
+```
+obsidian property:set <artifact-file> <field> <value>
 ```
 
 ### 4. Verify
 
 ```
-wiki vault doctor
+wiki doctor
 ```
 
 Doctor reports schema violations, missing required fields, and broken links.

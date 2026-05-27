@@ -35,8 +35,8 @@ what happened or what comes next.
 ## Step 3 — Inspect artifacts
 
 ```
-wiki prd show <id>             # full PRD with field values
-wiki slice show <id>           # slice with evidence and todo state
+obsidian read <prd-file>                   # full PRD with field values
+obsidian read <slice-file>                 # slice with evidence and todo state
 ```
 
 Read the artifacts named by status. Check for missing fields, stale values,
@@ -49,9 +49,9 @@ Common problems and repairs:
 - **Stale slice**: status is `planned` but the parent PRD is `in-progress`.
   The slice was never started. Either begin work or mark it blocked.
 - **Missing evidence**: slice is `green` but `green_log_ref` is empty.
-  Re-run `wiki slice green <id>` to capture the evidence.
+  Re-run `wiki green <id> --project <name>` to capture the evidence.
 - **Orphan handover**: handover is `open` but the session it describes is
-  finished. Close it: `wiki handover close <id>`.
+  finished. Close it: `obsidian property:set <handover-file> status completed`.
 - **Blocked slice**: check if the blocking slice is now closed. If so, the
   block auto-clears on next status check.
 

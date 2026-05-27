@@ -17,11 +17,19 @@ replaying the whole session.
 ## Create a handover
 
 ```
-wiki handover create --project <name>
+wiki handover --project <name>
 ```
 
 Auto-fills from CLI session state: active PRD, in-flight slices, current
 phase, decisions made this session. Returns a handover ID (e.g. HANDOVER-0012).
+
+Override auto-filled fields with flags:
+
+```
+wiki handover --project <name> --phase slice --active-prd PRD-003 \
+  --active-slice SLICE-035 --produced "Implemented sync command" \
+  --open "Need to add error handling for offline mode"
+```
 
 ## Required content
 
@@ -41,24 +49,24 @@ link to it — do not copy its content into the handover.
 ## Review
 
 ```
-wiki handover show <id>        # display the full handover artifact
+obsidian read <handover-file>              # display the full handover artifact
 ```
 
 ## Session state
 
 ```
-wiki session show              # current session: active project, phase, artifacts touched
+wiki session show                          # current session: active project, phase, artifacts touched
 ```
 
 Use this to verify the handover captures everything before closing the session.
 
 ## Close obsolete handovers
 
-When the next agent has resumed and confirmed context, close the handover:
+When the next agent has resumed and confirmed context, close the handover
+by setting its status directly:
 
 ```
-wiki handover close <id>
+obsidian property:set <handover-file> status completed
 ```
 
-Status moves from `open` to `completed`. Stale open handovers are flagged by
-`wiki status` during triage.
+Stale open handovers are flagged by `wiki status` during triage.

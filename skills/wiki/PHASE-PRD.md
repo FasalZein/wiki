@@ -1,6 +1,6 @@
 ---
 based-on: mattpocock/skills/engineering/to-prd@b8be62f
-fork-rationale: Preserves product-requirement structure while routing all writes through wiki PRD commands.
+fork-rationale: Preserves product-requirement structure while routing creates through wiki CLI and field edits through Obsidian.
 ---
 # Phase: PRD
 
@@ -9,14 +9,14 @@ Goal: create or refine a product requirement that can drive slices.
 ## Create a PRD
 
 ```
-wiki prd create --project <name> --title "Short descriptive title"
+wiki create prd --project <name> --title "Short descriptive title"
 ```
 
 Returns a PRD ID (e.g. PRD-003). Status starts at `draft`.
 
 ## Required sections
 
-Fill every section before publishing. Use `wiki prd set` for each:
+Fill every section before publishing. Use `obsidian property:set` for each:
 
 - **problem_statement** — the user problem, from the user's perspective.
 - **solution** — outcome-focused, not implementation-focused.
@@ -29,13 +29,13 @@ For long values, pipe content via stdin:
 
 ```
 echo "Users cannot reset passwords without email verification" | \
-  wiki prd set PRD-003 --project wiki-v2 --field problem_statement -
+  obsidian property:set <prd-file> problem_statement -
 ```
 
 Short values work inline:
 
 ```
-wiki prd set PRD-003 --project wiki-v2 --field title "New title"
+obsidian property:set <prd-file> title "New title"
 ```
 
 ## Domain terms
@@ -45,13 +45,14 @@ If a term is missing, define it there before using it in the PRD.
 
 ## Publish
 
+Set the status to `ready` once all required sections are filled:
+
 ```
-wiki prd publish <id>
+obsidian property:set <prd-file> status ready
 ```
 
-Transitions `draft` to `ready`. Refuses if any required section is empty.
-Auto-inlines PHASE-SLICE.md into the agent context so slicing can begin
-immediately.
+Verify all required sections are present before publishing. A PRD with empty
+required sections should not be marked ready.
 
 ## Acceptance criteria
 
@@ -60,16 +61,16 @@ cannot be closed.
 
 ## Close
 
-```
-wiki prd close <id>
-```
-
-Refuses if any linked slice is not in `closed` status. Transitions PRD to
-`closed`.
-
-## Other commands
+Set the status to `closed` once all linked slices are in `closed` status:
 
 ```
-wiki prd show <id>             # display full PRD with current field values
-wiki prd set <id> --field status in-progress  # manual status override
+obsidian property:set <prd-file> status closed
+```
+
+Verify all linked slices are closed before setting this status.
+
+## Reading PRDs
+
+```
+obsidian read <prd-file>                   # display full PRD with current field values
 ```

@@ -9,7 +9,7 @@ Goal: define and deliver the smallest verifiable increment.
 ## Create a slice
 
 ```
-wiki slice create --prd <id> --project <name> --title "Short outcome description"
+wiki create slice --project <name> --title "Short outcome description" --parent-prd <id>
 ```
 
 Returns a slice ID (e.g. SLICE-035). Status starts at `planned`.
@@ -20,13 +20,15 @@ Acceptance criteria must be non-empty before the slice can leave `planned`.
 
 ## Field updates
 
+Use Obsidian primitives to read and update fields:
+
 ```
-wiki slice set <id> --field <field> <value>
-wiki slice append <id> --field todo "Write integration test for sync"
+obsidian property:set <slice-file> <field> <value>
+obsidian read <slice-file>
 ```
 
-Use `set` for scalar fields, `append` for list fields (todo, acceptance,
-user_stories).
+Use `property:set` for scalar fields. For list fields (todo, acceptance,
+user_stories), use `obsidian property:set` with the list value.
 
 ## TDD state machine
 
@@ -35,7 +37,7 @@ Slices follow a strict status progression: `planned` -> `red` -> `green` -> `clo
 ### Red phase
 
 ```
-wiki slice red <id>
+wiki red <id> --project <name>
 ```
 
 Runs the test command defined in the slice or project config. Refuses if zero
@@ -46,7 +48,7 @@ proves the behavior is missing. On success, records the output path in
 ### Green phase
 
 ```
-wiki slice green <id>
+wiki green <id> --project <name>
 ```
 
 Runs the test command again. Refuses unless every test that failed in the red
@@ -58,9 +60,11 @@ log now passes AND there are no new regressions. Records the output path in
 When a slice has no testable behavior (pure docs, config-only), set both fields:
 
 ```
-wiki slice set <id> --field tdd_exempt true
-wiki slice set <id> --field tdd_exempt_reason "Documentation-only change with no testable behavior"
+obsidian property:set <slice-file> tdd_exempt true type=checkbox
+obsidian property:set <slice-file> tdd_exempt_reason "Documentation-only change with no testable behavior"
 ```
+
+Note: use `type=checkbox` for boolean fields — without it, Obsidian writes `"true"` (string) instead of `true` (boolean).
 
 `tdd_exempt_reason` must be >= 20 characters. Exempt slices skip red/green and
 go directly from `planned` to close review.
@@ -68,7 +72,7 @@ go directly from `planned` to close review.
 ## Close
 
 ```
-wiki slice close <id>
+wiki close <id> --project <name>
 ```
 
 Loads review-phase skills, checks: all todos done, red/green evidence exists
@@ -79,8 +83,8 @@ Loads review-phase skills, checks: all todos done, red/green evidence exists
 ## Blocked slices
 
 ```
-wiki slice set <id> --field blocked_by SLICE-034
+obsidian property:set <slice-file> blocked_by SLICE-034
 ```
 
 Status becomes `blocked`. Cannot transition until every `blocked_by` slice is
-`closed`. Use `wiki slice show <id>` to inspect current block state.
+`closed`. Use `obsidian read <slice-file>` to inspect current block state.
