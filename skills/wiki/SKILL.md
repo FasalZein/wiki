@@ -1,6 +1,6 @@
 ---
 name: wiki
-description: Use for wiki vault work: PRD, slice, decision, TDD, close, handover, init, doctor, migrate.
+description: "Use for wiki vault work — PRD, slice, decision, TDD, close, handover, init, doctor, migrate."
 ---
 # /wiki
 
