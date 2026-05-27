@@ -42,6 +42,16 @@ address.
 1. **Gather context.** Read the full artifact via `obsidian read`. Parse any
    prior handovers so you don't re-ask resolved questions. Explore the codebase
    using the project's domain glossary, respecting ADRs in the area.
+   Search for prior rejected decisions before evaluating new requests:
+
+   ```
+   wiki search "<topic>" --project <name> --type decision
+   ```
+
+   If a match exists, surface it: "We rejected this before (ADR-NNNN) because
+   [reason]. Do you still feel the same way?" The user may confirm (note in
+   existing ADR), reconsider (supersede and re-grill), or disagree (proceed
+   normally).
 
 2. **Recommend.** Tell the user your assessment with reasoning, plus a brief
    codebase summary relevant to the artifact. Wait for direction.
@@ -57,8 +67,27 @@ address.
 5. **Apply the outcome.** Fix the artifact state:
    - Resume work → identify the correct phase and route there.
    - Needs more context → write specific questions, don't say "provide more info."
-   - Write a handover → if the session produced useful context. See
-     [HANDOVER-QUALITY.md](HANDOVER-QUALITY.md) for what makes a good one.
+   - Write a handover → if the session produced useful context.
+
+## Recording out-of-scope decisions
+
+When a feature request or enhancement is deliberately rejected during triage or
+a grill session, record it as an ADR with status `rejected`:
+
+```
+wiki create decision --project <name> --title "Dark mode support"
+obsidian property:set <decision-file> status rejected
+obsidian property:set <decision-file> context "Requested during triage"
+obsidian property:set <decision-file> decision "Out of scope — [substantive reason]"
+```
+
+The decision field should be substantive — not "we don't want this" but why.
+Good reasons reference project scope/philosophy, technical constraints, or
+strategic decisions. Avoid referencing temporary circumstances ("we're too
+busy right now") — those are deferrals, not rejections.
+
+**When NOT to record:** bug reports (only enhancement rejections) and deferrals
+("not now" is not "never" — track as a planned slice instead).
 
 ## Resuming a previous session
 

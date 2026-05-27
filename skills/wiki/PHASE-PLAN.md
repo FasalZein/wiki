@@ -53,7 +53,32 @@ which is right?"
 ## Update domain-language.md
 
 When a term is resolved, update `domain-language.md` right there — don't batch.
-See [DOMAIN-LANGUAGE-FORMAT.md](DOMAIN-LANGUAGE-FORMAT.md) for the entry format.
+Capture terms as they happen so the glossary stays current.
+
+`domain-language.md` should be totally devoid of implementation details. It is a
+glossary and nothing else.
+
+### Entry format
+
+```md
+**Term**:
+One or two sentence definition of what it IS (not what it does).
+_Avoid_: Synonyms to reject
+```
+
+### Rules
+
+- **Be opinionated.** Pick the best term and list others under _Avoid_.
+- **Flag conflicts explicitly.** If a term is used ambiguously, call it out with
+  a clear resolution.
+- **Keep definitions tight.** One or two sentences max.
+- **Show relationships.** Express cardinality where obvious ("an Order has many
+  LineItems").
+- **Only include terms specific to this project.** General programming concepts
+  don't belong.
+- **Group terms under subheadings** when natural clusters emerge.
+- **Write an example dialogue.** A conversation between a dev and a domain expert
+  that demonstrates how the terms interact naturally.
 
 ## Record decisions as ADRs
 
@@ -71,13 +96,41 @@ obsidian property:set <decision-file> decision "What we chose and why"
 obsidian property:set <decision-file> status accepted
 ```
 
-Create an ADR only when all three are true:
-- **Hard to reverse** — the cost of changing your mind later is meaningful.
-- **Surprising without context** — a future reader will wonder "why?"
-- **Real trade-off** — genuine alternatives existed and you picked one for
-  specific reasons.
+An ADR can be a single paragraph. The value is in recording *that* a decision
+was made and *why* — not in filling out sections. Optional fields: **alternatives**
+(only when rejected options are worth remembering), **consequences** (only when
+non-obvious downstream effects need calling out).
 
-For what qualifies and what doesn't, see [ADR-GUIDANCE.md](ADR-GUIDANCE.md).
+### When to offer an ADR
+
+All three must be true:
+
+1. **Hard to reverse** — the cost of changing your mind later is meaningful.
+2. **Surprising without context** — a future reader will wonder "why?"
+3. **Real trade-off** — genuine alternatives existed and you picked one for
+   specific reasons.
+
+If a decision is easy to reverse, skip it. If it's not surprising, nobody will
+wonder why. If there was no real alternative, there's nothing to record.
+
+### What qualifies
+
+- **Architectural shape.** "We're using a monorepo." "The write model is
+  event-sourced, the read model is projected into Postgres."
+- **Integration patterns between contexts.** "Ordering and Billing communicate
+  via domain events, not synchronous HTTP."
+- **Technology choices that carry lock-in.** Database, message bus, auth provider,
+  deployment target. Not every library — just the ones that take a quarter to swap.
+- **Boundary and scope decisions.** "Customer data is owned by the Customer
+  context; other contexts reference it by ID only." The explicit no's are as
+  valuable as the yes's.
+- **Deliberate deviations from the obvious path.** "We use manual SQL instead of
+  an ORM because X." These stop the next engineer from "fixing" something
+  deliberate.
+- **Constraints not visible in the code.** "We can't use AWS because of
+  compliance." "Response times must be under 200ms because of the partner API."
+- **Rejected alternatives when non-obvious.** Record it so someone doesn't
+  suggest the same thing again in six months.
 
 ## Promote to PRD
 
@@ -93,8 +146,7 @@ The PRD should reference the ADRs created during this phase in its
 ## Exit criteria
 
 - Scope is bounded: there is a clear "what is in" and "what is out."
-- Success criteria are testable: each criterion can be verified by a human or
-  automated check.
+- Success criteria are testable.
 - No unresolved open questions remain.
 - ADRs are recorded for all non-trivial decisions.
 - `domain-language.md` is updated with any new terms introduced.
