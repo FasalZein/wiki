@@ -52,13 +52,13 @@ export async function handleStatus(args: string[]): Promise<CliResult> {
 
 function nextAction(project: string, phase: string, activeSlice: string | undefined): string {
   const slice = activeSlice ?? "<slice>";
-  if (phase === "plan") return "run wiki plan promote ...";
-  if (phase === "prd") return "run wiki prd publish ...";
-  if (phase === "slice") return "run wiki slice red ...";
-  if (phase === "red") return `write implementation, then run wiki slice green ${slice} --project ${project}`;
+  if (phase === "plan") return "run wiki create prd ...";
+  if (phase === "prd") return "run wiki create slice ...";
+  if (phase === "slice") return `run wiki red ${slice} --project ${project}`;
+  if (phase === "red") return `write implementation, then run wiki green ${slice} --project ${project}`;
   if (phase === "green" || phase === "review" || phase === "close") {
-    return `run wiki slice close ${slice} --project ${project} --review-verdict pass`;
+    return `run wiki close ${slice} --project ${project} --review-verdict pass`;
   }
-  if (phase === "handover") return "run wiki handover write ...";
+  if (phase === "handover") return "run wiki handover ...";
   return "no enforced next step";
 }

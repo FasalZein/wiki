@@ -67,7 +67,7 @@ describe("status and session CLI", () => {
     expect(result.stdout).toContain("Phase: green");
     expect(result.stdout).toContain("Active PRD: PRD-001");
     expect(result.stdout).toContain("Active slices: SLICE-011");
-    expect(result.stdout).toContain("Next: run wiki slice close SLICE-011 --project wiki-v2 --review-verdict pass");
+    expect(result.stdout).toContain("Next: run wiki close SLICE-011 --project wiki-v2 --review-verdict pass");
   });
 
   test("status and session show can read the current repo session without --project", async () => {

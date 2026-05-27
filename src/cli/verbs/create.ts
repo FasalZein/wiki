@@ -17,6 +17,7 @@ import {
   readArtifact,
   setFields,
 } from "../../artifacts/store";
+import type { TemplateType } from "../../schema/load";
 import { assertProjectStructure, loadProjectConfig, ProjectConfigError } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import { readSession } from "../../state/session";
@@ -43,32 +44,7 @@ async function createPrd(args: string[]): Promise<CliResult> {
   if (missing) return missing;
   if (project === undefined || title === undefined) return { code: 1 };
 
-  const override = parseOverride(parsed.values);
-  if (typeof override === "string") { console.error(override); return { code: 1 }; }
-
-  try {
-    const vaultRoot = await getVaultRoot();
-    const projectPath = join(vaultRoot, "projects", project);
-    await assertProjectStructure(projectPath);
-    if (override.kind === "supersedes") {
-      await readArtifact({ type: "prd", vaultRoot, project, id: override.id });
-    }
-    await advisoryDedup("prd", project, projectPath, title, override);
-    const artifact = await createArtifact({
-      type: "prd",
-      vaultRoot,
-      project,
-      fields: { title, ...fieldsForDedupOverride(override) },
-    });
-    if (override.kind === "supersedes") {
-      await setFields({ type: "prd", vaultRoot, project, id: override.id, fields: { status: "superseded", superseded_by: artifact.id } });
-    }
-    console.log(artifact.id);
-    console.error(`created ${artifact.id}`);
-    return { code: 0 };
-  } catch (error) {
-    return handleCreateError(error);
-  }
+  return createWithSupersede("prd", project, title, { title }, parsed.values);
 }
 
 async function createSlice(args: string[]): Promise<CliResult> {
@@ -80,9 +56,6 @@ async function createSlice(args: string[]): Promise<CliResult> {
   if (missing) return missing;
   if (project === undefined || title === undefined || parentPrd === undefined) return { code: 1 };
 
-  const override = parseOverride(parsed.values);
-  if (typeof override === "string") { console.error(override); return { code: 1 }; }
-
   const vaultRoot = await getVaultRoot();
   const projectPath = join(vaultRoot, "projects", project);
   await assertProjectStructure(projectPath);
@@ -92,26 +65,7 @@ async function createSlice(args: string[]): Promise<CliResult> {
     return { code: 1 };
   }
 
-  try {
-    if (override.kind === "supersedes") {
-      await readArtifact({ type: "slice", vaultRoot, project, id: override.id });
-    }
-    await advisoryDedup("slice", project, projectPath, `${title} ${parentPrd}`, override);
-    const artifact = await createArtifact({
-      type: "slice",
-      vaultRoot,
-      project,
-      fields: { title, parent_prd: parentPrd, acceptance: [], ...fieldsForDedupOverride(override) },
-    });
-    if (override.kind === "supersedes") {
-      await setFields({ type: "slice", vaultRoot, project, id: override.id, fields: { superseded_by: artifact.id } });
-    }
-    console.log(artifact.id);
-    console.error(`created ${artifact.id}`);
-    return { code: 0 };
-  } catch (error) {
-    return handleCreateError(error);
-  }
+  return createWithSupersede("slice", project, `${title} ${parentPrd}`, { title, parent_prd: parentPrd, acceptance: [] }, parsed.values);
 }
 
 async function createDecision(args: string[]): Promise<CliResult> {
@@ -125,7 +79,17 @@ async function createDecision(args: string[]): Promise<CliResult> {
   if (missing) return missing;
   if (project === undefined || title === undefined || context === undefined || decision === undefined || consequences === undefined) return { code: 1 };
 
-  const override = parseOverride(parsed.values);
+  return createWithSupersede("decision", project, `${title} ${context} ${decision}`, { title, context, decision, consequences }, parsed.values);
+}
+
+async function createWithSupersede(
+  type: "prd" | "slice" | "decision",
+  project: string,
+  dedupQuery: string,
+  fields: Record<string, unknown>,
+  rawValues: Record<string, string | string[] | boolean | undefined>,
+): Promise<CliResult> {
+  const override = parseOverride(rawValues);
   if (typeof override === "string") { console.error(override); return { code: 1 }; }
 
   const vaultRoot = await getVaultRoot();
@@ -133,17 +97,17 @@ async function createDecision(args: string[]): Promise<CliResult> {
   await assertProjectStructure(projectPath);
   try {
     if (override.kind === "supersedes") {
-      await readArtifact({ type: "decision", vaultRoot, project, id: override.id });
+      await readArtifact({ type, vaultRoot, project, id: override.id });
     }
-    await advisoryDedup("decision", project, projectPath, `${title} ${context} ${decision}`, override);
+    await advisoryDedup(type, project, projectPath, dedupQuery, override);
     const artifact = await createArtifact({
-      type: "decision",
+      type,
       vaultRoot,
       project,
-      fields: { title, context, decision, consequences, ...fieldsForDedupOverride(override) },
+      fields: { ...fields, ...fieldsForDedupOverride(override) },
     });
     if (override.kind === "supersedes") {
-      await setFields({ type: "decision", vaultRoot, project, id: override.id, fields: { status: "superseded", superseded_by: artifact.id } });
+      await setFields({ type, vaultRoot, project, id: override.id, fields: { status: "superseded", superseded_by: artifact.id } });
     }
     console.log(artifact.id);
     console.error(`created ${artifact.id}`);
@@ -217,6 +181,7 @@ async function advisoryDedup(type: "decision" | "prd" | "slice", project: string
       return;
     }
     if (error instanceof QmdError || error instanceof ProjectConfigError) {
+      console.error(`dedup check skipped: ${error.message}`);
       return;
     }
     throw error;

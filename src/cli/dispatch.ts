@@ -1,9 +1,8 @@
 import { handleClose } from "./verbs/close";
 import { handleCreate } from "./verbs/create";
-import { handleGreen } from "./verbs/green";
 import { handleNextId } from "./verbs/next-id";
 import { handleProject } from "./verbs/project";
-import { handleRed } from "./verbs/red";
+import { handleRed, handleGreen } from "./verbs/tdd";
 import { handleSearch } from "./verbs/search";
 import { handleSession } from "./verbs/session";
 import { handleStatus } from "./verbs/status";
