@@ -9,16 +9,17 @@
  */
 import { join, relative, sep } from "node:path";
 
-import { ensureCollection, QmdError, runStructuredQuery, updateCollection, type QmdResult } from "../../integrations/qmd";
+import { ensureCollection, QmdError, runQuery, updateCollection, type QmdResult } from "../../integrations/qmd";
+import { artifactFolder } from "../../artifacts/paths";
 import { assertProjectStructure, loadProjectConfig } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
+import type { TemplateType } from "../../schema/load";
 import { classifyIntent } from "../../search/intent";
 import { buildStructuredQuery } from "../../search/query-builder";
 import { booleanValue, parseCommand, stringValue } from "../parse";
 import type { CliResult } from "../dispatch";
 
-const allowedTypes = ["prd", "slice", "decision", "handover"] as const;
-type SearchType = (typeof allowedTypes)[number];
+const allowedTypes: readonly TemplateType[] = ["prd", "slice", "decision", "handover"];
 
 export async function handleSearch(args: string[]): Promise<CliResult> {
   const parsed = parseCommand(args, ["project", "type"], [], ["include-research", "explain", "no-refresh"]);
@@ -64,7 +65,7 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
     const intent = classifyIntent(query);
     const queryDocument = buildStructuredQuery(query, { intent, project });
     const results = filterByType(
-      await runStructuredQuery(qmdCommand, queryDocument, collections, { explain }),
+      await runQuery(qmdCommand, queryDocument, collections, { explain }),
       projectPath,
       type,
     );
@@ -72,39 +73,27 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
     return { code: 0 };
   } catch (error) {
     if (error instanceof QmdError) {
-      console.error(error.message);
+      const errorLine = error.message.split("\n").find(l => l.startsWith("Error:")) ?? error.message.split("\n")[0] ?? error.message;
+      console.error(errorLine);
       return { code: 10 };
     }
     throw error;
   }
 }
 
-function parseSearchType(value: string | undefined): SearchType | undefined | null {
+function parseSearchType(value: string | undefined): TemplateType | undefined | null {
   if (value === undefined) {
     return undefined;
   }
-  return allowedTypes.includes(value as SearchType) ? (value as SearchType) : null;
+  return allowedTypes.includes(value as TemplateType) ? (value as TemplateType) : null;
 }
 
-function filterByType(results: QmdResult[], projectPath: string, type: SearchType | undefined): QmdResult[] {
+function filterByType(results: QmdResult[], projectPath: string, type: TemplateType | undefined): QmdResult[] {
   if (type === undefined) {
     return results;
   }
-  const prefix = `${folderForType(type)}${sep}`;
+  const prefix = `${artifactFolder(type)}${sep}`;
   return results.filter((result) => relative(projectPath, result.path).startsWith(prefix));
-}
-
-function folderForType(type: SearchType): string {
-  if (type === "prd") {
-    return "prds";
-  }
-  if (type === "slice") {
-    return "slices";
-  }
-  if (type === "decision") {
-    return "adrs";
-  }
-  return "handovers";
 }
 
 function writeResults(results: QmdResult[]): void {

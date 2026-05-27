@@ -13,7 +13,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@tobilu/qmd": "^2.1.0",
     "gray-matter": "^4.0.3",
     "smol-toml": "1.6.1"
   },

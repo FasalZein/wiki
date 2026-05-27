@@ -60,6 +60,7 @@ function matchesType(field: FieldDef, value: unknown): boolean {
     case "link":
     case "enum":
     case "date":
+      return typeof value === "string" || value instanceof Date;
     case "file_ref":
       return typeof value === "string";
     case "list":

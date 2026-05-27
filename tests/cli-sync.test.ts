@@ -19,7 +19,7 @@ describe("sync CLI", () => {
     expect(result.stdout).toBe("");
     expect(result.stderr).toContain("synced collection wiki-v2");
     expect(await readFile(fixture.stateFile, "utf8")).toBe(
-      `collection list\ncollection add wiki-v2 ${fixture.projectPath} **/*.md\nupdate -c wiki-v2\nembed -c wiki-v2\n`,
+      `collection list\ncollection add ${fixture.projectPath} --name wiki-v2 --mask **/*.md\nupdate -c wiki-v2\nembed -c wiki-v2\n`,
     );
   });
 
@@ -31,8 +31,8 @@ describe("sync CLI", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("");
     expect(await readFile(fixture.stateFile, "utf8")).toBe(
-      `collection list\ncollection add wiki-v2 ${fixture.projectPath} **/*.md\nupdate -c wiki-v2\nembed -c wiki-v2\n` +
-        `collection list\ncollection add research ${fixture.researchPath} **/*.md\nupdate -c research\nembed -c research\n`,
+      `collection list\ncollection add ${fixture.projectPath} --name wiki-v2 --mask **/*.md\nupdate -c wiki-v2\nembed -c wiki-v2\n` +
+        `collection list\ncollection add ${fixture.researchPath} --name research --mask **/*.md\nupdate -c research\nembed -c research\n`,
     );
   });
 
@@ -43,7 +43,7 @@ describe("sync CLI", () => {
     expect((await runWiki(["sync", "--project", "wiki-v2"], fixture)).exitCode).toBe(0);
 
     expect(await readFile(fixture.stateFile, "utf8")).toBe(
-      `collection list\ncollection add wiki-v2 ${fixture.projectPath} **/*.md\nupdate -c wiki-v2\nembed -c wiki-v2\n` +
+      `collection list\ncollection add ${fixture.projectPath} --name wiki-v2 --mask **/*.md\nupdate -c wiki-v2\nembed -c wiki-v2\n` +
         "collection list\nupdate -c wiki-v2\nembed -c wiki-v2\n",
     );
   });
@@ -55,7 +55,7 @@ describe("sync CLI", () => {
 
     expect(result.exitCode).toBe(0);
     expect(await readFile(fixture.stateFile, "utf8")).toBe(
-      `collection list\ncollection add wiki-v2 ${fixture.projectPath} **/*.md\nupdate --pull -c wiki-v2\nembed -f -c wiki-v2\n`,
+      `collection list\ncollection add ${fixture.projectPath} --name wiki-v2 --mask **/*.md\nupdate --pull -c wiki-v2\nembed -f -c wiki-v2\n`,
     );
   });
 
@@ -146,7 +146,15 @@ case "\${1:-}" in
         fi
         ;;
       add)
-        echo "$3" >> "$REGISTERED_FILE"
+        # extract --name value from args
+        shift 2
+        while [ $# -gt 0 ]; do
+          if [ "$1" = "--name" ]; then
+            echo "$2" >> "$REGISTERED_FILE"
+            break
+          fi
+          shift
+        done
         ;;
     esac
     ;;

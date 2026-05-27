@@ -6,7 +6,7 @@ import { obsidianCreate } from "../integrations/obsidian";
 
 import { loadTemplate, resolveTemplatePath, type TemplateType } from "../schema/load";
 import { validate } from "../schema/validate";
-import type { NormalizedRecord, ValidationError } from "../schema/types";
+import type { NormalizedRecord, Schema, ValidationError } from "../schema/types";
 import { nextId } from "./id";
 import { artifactDirectory } from "./paths";
 import { applyDefaults, renderArtifact } from "./render";
@@ -90,8 +90,11 @@ export async function setField(input: SetFieldInput): Promise<Artifact> {
 
 export async function setFields(input: SetFieldsInput): Promise<Artifact> {
   const existing = await readArtifact(input);
+  const schema = await loadTemplate(input.type);
+  const template = await Bun.file(resolveTemplatePath(`${input.type}.md`)).text();
+  const placeholders = templatePlaceholders(template);
   for (const field of Object.keys(input.fields)) {
-    await assertKnownField(input.type, existing, field);
+    assertKnownField(schema, existing, field, placeholders);
   }
   return writeFields(input, existing, {
     ...existing.fields,
@@ -141,14 +144,11 @@ export async function createArtifact(input: CreateArtifactInput): Promise<Artifa
   };
 }
 
-async function assertKnownField(type: TemplateType, existing: Artifact, fieldName: string): Promise<void> {
-  const schema = await loadTemplate(type);
-  const templateFile = Bun.file(resolveTemplatePath(`${type}.md`));
-  const template = await templateFile.text();
+function assertKnownField(schema: Schema, existing: Artifact, fieldName: string, placeholders: Set<string>): void {
   if (
     !schema.fields.some((field) => field.name === fieldName) &&
     existing.fields[fieldName] === undefined &&
-    !templatePlaceholders(template).has(fieldName)
+    !placeholders.has(fieldName)
   ) {
     throw new ArtifactValidationError([{ field: fieldName, reason: "unknown field" }]);
   }

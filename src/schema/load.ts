@@ -86,7 +86,7 @@ function isFieldType(value: unknown): value is FieldType {
   return typeof value === "string" && fieldTypes.has(value);
 }
 
-function normalizeInlineMaps(template: string): string {
+export function normalizeInlineMaps(template: string): string {
   return template.replace(/^(\s*[A-Za-z0-9_]+):(\s*\{)/gm, "$1: $2");
 }
 

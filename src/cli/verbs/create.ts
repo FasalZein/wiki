@@ -17,7 +17,6 @@ import {
   readArtifact,
   setFields,
 } from "../../artifacts/store";
-import type { TemplateType } from "../../schema/load";
 import { assertProjectStructure, loadProjectConfig, ProjectConfigError } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import { readSession } from "../../state/session";
@@ -181,7 +180,8 @@ async function advisoryDedup(type: "decision" | "prd" | "slice", project: string
       return;
     }
     if (error instanceof QmdError || error instanceof ProjectConfigError) {
-      console.error(`dedup check skipped: ${error.message}`);
+      const errorLine = error.message.split("\n").find(l => l.startsWith("Error:")) ?? error.message.split("\n")[0] ?? error.message;
+      console.error(`dedup check skipped: ${errorLine}`);
       return;
     }
     throw error;

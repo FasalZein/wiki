@@ -40,7 +40,7 @@ describe("search CLI", () => {
     expect(result.stderr).toBe("");
     const log = await readFile(fixture.stateFile, "utf8");
     expect(log).toContain("collection list");
-    expect(log).toContain(`collection add wiki-v2 ${fixture.projectPath} **/*.md`);
+    expect(log).toContain(`collection add ${fixture.projectPath} --name wiki-v2 --mask **/*.md`);
     expect(log).toContain("update -c wiki-v2");
     expect(log).toContain("query");
     expect(log).toContain("lex: vault");
@@ -80,8 +80,8 @@ describe("search CLI", () => {
 
     expect(result.exitCode).toBe(0);
     const log = await readFile(fixture.stateFile, "utf8");
-    expect(log).toContain(`collection add wiki-v2 ${fixture.projectPath} **/*.md`);
-    expect(log).toContain(`collection add research ${fixture.researchPath} **/*.md`);
+    expect(log).toContain(`collection add ${fixture.projectPath} --name wiki-v2 --mask **/*.md`);
+    expect(log).toContain(`collection add ${fixture.researchPath} --name research --mask **/*.md`);
     // Both collections get auto-refreshed
     expect(log).toContain("update -c wiki-v2");
     expect(log).toContain("update -c research");
@@ -186,7 +186,15 @@ case "\${1:-}" in
         fi
         ;;
       add)
-        echo "$3" >> "$REGISTERED_FILE"
+        # extract --name value from args
+        shift 2
+        while [ $# -gt 0 ]; do
+          if [ "$1" = "--name" ]; then
+            echo "$2" >> "$REGISTERED_FILE"
+            break
+          fi
+          shift
+        done
         ;;
     esac
     ;;

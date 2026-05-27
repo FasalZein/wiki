@@ -1,5 +1,6 @@
 import matter from "gray-matter";
 
+import { normalizeInlineMaps } from "../schema/load";
 import type { NormalizedRecord, Schema } from "../schema/types";
 
 export function renderArtifact(template: string, values: NormalizedRecord): string {
@@ -58,10 +59,6 @@ function readTemplateDefaults(template: string): Record<string, unknown> {
     }
   }
   return defaults;
-}
-
-function normalizeInlineMaps(template: string): string {
-  return template.replace(/^(\s*[A-Za-z0-9_]+):(\s*\{)/gm, "$1: $2");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

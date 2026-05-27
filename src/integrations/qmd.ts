@@ -29,7 +29,7 @@ export async function listCollections(qmdCommand: string): Promise<string> {
 }
 
 export async function addCollection(qmdCommand: string, name: string, path: string, glob: string): Promise<void> {
-  await runQmd(qmdCommand, ["collection", "add", name, path, glob]);
+  await runQmd(qmdCommand, ["collection", "add", path, "--name", name, "--mask", glob]);
 }
 
 export async function ensureCollection(qmdCommand: string, name: string, path: string): Promise<void> {
@@ -47,28 +47,15 @@ export async function embedCollection(qmdCommand: string, name: string, force: b
   await runQmd(qmdCommand, force ? ["embed", "-f", "-c", name] : ["embed", "-c", name]);
 }
 
-export async function addContext(qmdCommand: string, collectionPath: string, description: string): Promise<void> {
-  await runQmd(qmdCommand, ["context", "add", collectionPath, description]);
-}
-
-export async function runQuery(qmdCommand: string, query: string, collections: string[]): Promise<QmdResult[]> {
-  const args = ["query", query, "--json", ...collections.flatMap((collection) => ["--collection", collection])];
-  const stdout = await runQmd(qmdCommand, args);
-  if (stdout.trim().length === 0) {
-    return [];
-  }
-  return parseQmdResults(stdout);
-}
-
-export async function runStructuredQuery(
+export async function runQuery(
   qmdCommand: string,
-  queryDocument: string,
+  query: string,
   collections: string[],
   options?: { explain?: boolean },
 ): Promise<QmdResult[]> {
   const args = [
     "query",
-    queryDocument,
+    query,
     "--json",
     ...(options?.explain === true ? ["--explain"] : []),
     ...collections.flatMap((collection) => ["--collection", collection]),
@@ -93,7 +80,13 @@ async function runQmd(command: string, args: string[]): Promise<string> {
     proc.exited,
   ]);
   if (exitCode !== 0) {
-    throw new QmdError(stderr.length > 0 ? stderr : `qmd exited ${exitCode}`);
+    if (stdout.trim().length === 0) {
+      throw new QmdError(stderr.length > 0 ? stderr : `qmd exited ${exitCode}`);
+    }
+    if (stderr.length > 0) {
+      const warning = stderr.split("\n").find(l => l.startsWith("Error:")) ?? stderr.split("\n")[0] ?? "";
+      if (warning.length > 0) console.error(`qmd warning: ${warning}`);
+    }
   }
   return stdout;
 }
