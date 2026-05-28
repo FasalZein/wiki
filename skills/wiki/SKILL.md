@@ -36,7 +36,7 @@ Field reads/writes: use `obsidian property:set`, `obsidian read`, `obsidian eval
 ## Agent steps
 
 1. Run `wiki status --project <project> --with-doc` to read the active phase and inline guidance.
-2. If no session exists, run the requested init, plan, migration, or ad-hoc command explicitly.
+2. If no session exists, run the requested init, plan, or ad-hoc command explicitly.
 3. Pick the phase route below and read its one-hop doc. Use only the matching commands.
 4. Run tests or checks named by the active slice/PRD.
 5. Record the state transition through the CLI (e.g. `wiki red`, `wiki close`).
