@@ -1,6 +1,6 @@
 ---
 name: wiki
-description: "Manages wiki vault delivery workflow — PRDs, slices, decisions, TDD gates, handovers. Use when work touches the wiki vault, user asks to create/update/close delivery artifacts, or context needs restoring via triage."
+description: "Manages wiki vault delivery workflow — PRDs, slices, decisions, TDD gates, handovers. Use when work touches the wiki vault, user asks to create/update/close delivery artifacts, context needs restoring via triage, or the vault needs init or doctor health checks."
 ---
 # /wiki
 
@@ -15,7 +15,7 @@ Use this skill whenever work touches the wiki vault or delivery records.
 5. When details matter, read the referenced one-hop doc now, then return to this workflow.
 6. Obsidian must be running. The vault relies on Obsidian for rendering, Dataview queries,
    and Bases views. If Obsidian is not open, start it before running wiki commands.
-7. Domain terms used in any artifact must exist in domain-language.md. Define before using.
+7. New artifacts use human-readable filenames (`ID-title-slug.md`); resolve by frontmatter ID, never assume `ID.md`. Docs live in `docs/<category>/` where category is locked to: `architecture`, `research`, `runbooks`, `specs`, `notes`, `legacy`. Create with `wiki create doc --category <cat>` (defaults from `--type`). DOC ids stay globally unique per project.
 
 ## Quick reference
 
@@ -30,7 +30,7 @@ wiki doctor                                # check vault health
 
 Workflow gates: `create`, `red`, `green`, `close`, `handover`.
 Read/query: `status`, `search`, `session show`.
-Admin: `validate`, `next-id`, `doctor`, `sync`, `vault`, `project`.
+Admin: `validate`, `next-id`, `doctor`, `sync`, `vault`, `project`, `doc` (retitle/recategorize).
 Field reads/writes: use `obsidian property:set`, `obsidian read`, `obsidian eval` directly.
 
 ## Agent steps
@@ -52,7 +52,7 @@ scope is already clear. A PRD can have many slices; each slice goes through
 red/green/close independently.
 
 - **plan (grill)**: Read `PHASE-PLAN.md` NOW. Grill the user with focused questions,
-  record ADRs via `wiki create decision`, update `domain-language.md`.
+  record ADRs via `wiki create decision`, and capture reusable context as docs.
 - **prd**: Read `PHASE-PRD.md` NOW. Use `wiki create prd` to create; use
   `obsidian property:set` to fill fields. Close PRDs via
   `obsidian property:set <prd-file> status closed` (not `wiki close`).

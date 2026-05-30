@@ -17,8 +17,11 @@ import {
   readArtifact,
   setFields,
 } from "../../artifacts/store";
+import { ARTIFACTS } from "../../artifacts/registry";
+import { defaultCategoryForDocType, DOC_CATEGORIES, isDocCategory } from "../../artifacts/registry";
 import { assertProjectStructure, loadProjectConfig, ProjectConfigError } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
+import type { TemplateType } from "../../schema/load";
 import { readSession } from "../../state/session";
 import type { CliResult } from "../dispatch";
 import { parseCommand, stringValue } from "../parse";
@@ -30,8 +33,9 @@ export async function handleCreate(args: string[]): Promise<CliResult> {
   if (type === "slice") return createSlice(rest);
   if (type === "decision") return createDecision(rest);
   if (type === "handover") return createHandover(rest);
+  if (type === "doc") return createDoc(rest);
   console.error(`unknown artifact type: ${type ?? ""}`.trim());
-  console.error("usage: wiki create <prd|slice|decision|handover> [flags]");
+  console.error("usage: wiki create <prd|slice|decision|handover|doc> [flags]");
   return { code: 1 };
 }
 
@@ -58,10 +62,14 @@ async function createSlice(args: string[]): Promise<CliResult> {
   const vaultRoot = await getVaultRoot();
   const projectPath = join(vaultRoot, "projects", project);
   await assertProjectStructure(projectPath);
-  const parentPrdPath = join(projectPath, "prds", `${parentPrd}.md`);
-  if (!(await fileExists(parentPrdPath))) {
-    console.error(`parent PRD not found: ${parentPrd}`);
-    return { code: 1 };
+  try {
+    await readArtifact({ type: "prd", vaultRoot, project, id: parentPrd });
+  } catch (error) {
+    if (error instanceof ArtifactNotFoundError) {
+      console.error(`parent PRD not found: ${parentPrd}`);
+      return { code: 1 };
+    }
+    throw error;
   }
 
   return createWithSupersede("slice", project, `${title} ${parentPrd}`, { title, parent_prd: parentPrd, acceptance: [] }, parsed.values);
@@ -81,12 +89,39 @@ async function createDecision(args: string[]): Promise<CliResult> {
   return createWithSupersede("decision", project, `${title} ${context} ${decision}`, { title, context, decision, consequences }, parsed.values);
 }
 
+async function createDoc(args: string[]): Promise<CliResult> {
+  const parsed = parseCommand(args, ["title", "project", "type", "category", "tags", "source-url", "force-new", "related-to", "supersedes"]);
+  const project = stringValue(parsed.values, "project");
+  const title = stringValue(parsed.values, "title");
+  const docType = stringValue(parsed.values, "type");
+  const missing = missingFields({ project, title, type: docType });
+  if (missing) return missing;
+  if (project === undefined || title === undefined || docType === undefined) return { code: 1 };
+
+  const explicitCategory = stringValue(parsed.values, "category");
+  if (explicitCategory !== undefined && !isDocCategory(explicitCategory)) {
+    console.error(`unknown category: ${explicitCategory}`);
+    console.error(`category must be one of: ${DOC_CATEGORIES.join(", ")}`);
+    return { code: 1 };
+  }
+  const category = explicitCategory ?? defaultCategoryForDocType(docType);
+
+  const fields: Record<string, unknown> = { title, type: docType };
+  const tags = stringValue(parsed.values, "tags");
+  if (tags !== undefined) fields.tags = tags.split(",").map((t) => t.trim());
+  const sourceUrl = stringValue(parsed.values, "source-url");
+  if (sourceUrl !== undefined) fields.source_url = sourceUrl;
+
+  return createWithSupersede("doc", project, `${title} ${docType}`, fields, parsed.values, category);
+}
+
 async function createWithSupersede(
-  type: "prd" | "slice" | "decision",
+  type: TemplateType,
   project: string,
   dedupQuery: string,
   fields: Record<string, unknown>,
   rawValues: Record<string, string | string[] | boolean | undefined>,
+  category?: string,
 ): Promise<CliResult> {
   const override = parseOverride(rawValues);
   if (typeof override === "string") { console.error(override); return { code: 1 }; }
@@ -103,6 +138,7 @@ async function createWithSupersede(
       type,
       vaultRoot,
       project,
+      category,
       fields: { ...fields, ...fieldsForDedupOverride(override) },
     });
     if (override.kind === "supersedes") {
@@ -168,8 +204,8 @@ async function createHandover(args: string[]): Promise<CliResult> {
   }
 }
 
-async function advisoryDedup(type: "decision" | "prd" | "slice", project: string, projectPath: string, query: string, override: DedupOverride): Promise<void> {
-  if (override.kind !== "none") return;
+async function advisoryDedup(type: TemplateType, project: string, projectPath: string, query: string, override: DedupOverride): Promise<void> {
+  if (override.kind !== "none" || !ARTIFACTS[type].dedup) return;
   try {
     const config = await loadProjectConfig(projectPath);
     await runDedupGate({ type, project, projectPath, config, query, override });

@@ -91,8 +91,17 @@ when scripting bulk creation or verifying ID gaps.
 ### `wiki project create <name>` / `wiki project list`
 
 Creates a new project directory structure under `projects/` or lists existing
-projects. `create` provisions the standard subdirectories (prds, slices,
-decisions, handovers) and an empty `domain-language.md`.
+projects. `create` provisions the standard artifact subdirectories (prds, slices,
+decisions, handovers, docs). Artifact files are named `ID-title-slug.md` for human readability.
+Docs are organized into category subfolders (`docs/architecture|research|runbooks|specs|notes|legacy/`),
+created lazily as content is added.
+
+### `wiki doc retitle <DOC-NNNN> --project <name> --title <t>` / `wiki doc recategorize <DOC-NNNN> --project <name> --category <c>`
+
+Maintains an existing doc in place. `retitle` rewrites the title and re-slugs the
+filename (staying in its current category); `recategorize` moves the file into
+another locked category subfolder. Both preserve the DOC id and its `[[DOC-NNNN]]`
+alias, so links keep resolving. Re-run `wiki vault sync` afterwards to refresh search.
 
 ## When to run
 

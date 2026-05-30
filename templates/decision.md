@@ -2,7 +2,7 @@
 template: decision
 version: 1
 schema:
-  id:           { type: string,    required: true,  pattern: "DECISION-\\d{4,}|ADR-\\d{4,}", description: "DECISION-NNNN or ADR-NNNN (legacy alias accepted)" }
+  id:           { type: string,    required: true,  pattern: "ADR-\\d{3,}|DECISION-\\d{4,}", description: "ADR-NNNN (DECISION-NNNN legacy alias still accepted)" }
   title:        { type: string,    required: true,  min: 5, max: 100 }
   project:      { type: string,    required: true }
   status:       { type: enum,      required: true,  values: [proposed, accepted, superseded, rejected], default: accepted }

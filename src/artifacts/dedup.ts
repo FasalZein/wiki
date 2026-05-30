@@ -2,8 +2,7 @@ import { relative } from "node:path";
 
 import { ensureCollection, QmdError, runQuery, type QmdResult } from "../integrations/qmd";
 import type { ProjectConfig } from "../config/project";
-
-export type DedupArtifactType = "decision" | "prd" | "slice";
+import type { TemplateType } from "../schema/load";
 
 export type DedupThresholds = {
   weak: number;
@@ -24,7 +23,7 @@ export type DedupResult = {
 };
 
 export type DedupGateInput = {
-  type: DedupArtifactType;
+  type: TemplateType;
   project: string;
   projectPath: string;
   config: ProjectConfig;

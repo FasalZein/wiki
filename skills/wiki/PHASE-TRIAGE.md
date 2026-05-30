@@ -42,7 +42,7 @@ address.
 
 1. **Gather context.** Read the full artifact via `obsidian read`. Parse any
    prior handovers so you don't re-ask resolved questions. Explore the codebase
-   using the project's domain glossary, respecting ADRs in the area.
+   using vocabulary from project docs and respecting ADRs in the area.
    Search for prior rejected decisions before evaluating new requests:
 
    ```
@@ -62,7 +62,7 @@ address.
    happened — successful repro, failed repro, or insufficient detail.
 
 4. **Grill (if needed).** If the artifact needs fleshing out, run a grill
-   session per `PHASE-PLAN.md`. Update `domain-language.md` and create ADRs
+   session per `PHASE-PLAN.md`. Create/update docs for reusable context and create ADRs
    as decisions crystallize.
 
 5. **Apply the outcome.** Fix the artifact state:

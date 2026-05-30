@@ -1,5 +1,6 @@
 import { handleClose } from "./verbs/close";
 import { handleCreate } from "./verbs/create";
+import { handleDoc } from "./verbs/doc";
 import { handleNextId } from "./verbs/next-id";
 import { handleProject } from "./verbs/project";
 import { handleRed, handleGreen } from "./verbs/tdd";
@@ -17,6 +18,7 @@ export type CliResult = {
 export async function dispatch(args: string[]): Promise<CliResult> {
   const [verb, ...rest] = args;
   if (verb === "create") return handleCreate(rest);
+  if (verb === "doc") return handleDoc(rest);
   if (verb === "red") return handleRed(rest);
   if (verb === "green") return handleGreen(rest);
   if (verb === "close") return handleClose(rest);
@@ -31,6 +33,6 @@ export async function dispatch(args: string[]): Promise<CliResult> {
   if (verb === "project") return handleProject(rest);
   if (verb === "handover") return handleCreate(["handover", ...rest]);
   console.error(`unknown verb: ${verb ?? ""}`.trim());
-  console.error("verbs: create, red, green, close, status, search, validate, next-id, doctor, sync, session, vault, project, handover");
+  console.error("verbs: create, doc, red, green, close, status, search, validate, next-id, doctor, sync, session, vault, project, handover");
   return { code: 1 };
 }

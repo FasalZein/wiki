@@ -1,18 +1,10 @@
 import { join } from "node:path";
 
 import type { TemplateType } from "../schema/load";
+import { ARTIFACTS } from "./registry";
 
 export function artifactFolder(type: TemplateType): string {
-  switch (type) {
-    case "decision":
-      return "adrs";
-    case "prd":
-      return "prds";
-    case "slice":
-      return "slices";
-    case "handover":
-      return "handovers";
-  }
+  return ARTIFACTS[type].folder;
 }
 
 export function projectPath(vaultRoot: string, project: string): string {

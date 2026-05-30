@@ -16,10 +16,9 @@ const requiredFiles = [
   "PHASE-TRIAGE.md",
   "PHASE-HANDOVER.md",
   "ADMIN-VAULT.md",
-  "ADMIN-MIGRATION.md",
 ] as const;
 
-const triggerTerms = ["vault", "PRD", "slice", "decision", "TDD", "close", "handover", "init", "doctor", "migrate"] as const;
+const triggerTerms = ["vault", "PRD", "slice", "decision", "TDD", "close", "handover", "init", "doctor"] as const;
 const phaseDocs = ["plan", "prd", "slice", "triage", "handover"] as const;
 
 describe("wiki skill bundle", () => {
@@ -45,6 +44,15 @@ describe("wiki skill bundle", () => {
     for (const term of triggerTerms) {
       expect(description).toContain(term);
     }
+  });
+
+  test("phase docs resolve from the skill bundle when the project repo lacks them", async () => {
+    // A real project repo (e.g. rift) has no skills/wiki/ docs; loading must fall
+    // back to the CLI's own bundled skill docs rather than returning null.
+    const doc = await loadPhaseDoc("/tmp/nonexistent-project-repo-xyz", "slice");
+
+    expect(doc).not.toBeNull();
+    expect(doc).toMatch(/^---\n[\s\S]*(based-on:|source: wiki-v2)[\s\S]*---\n/);
   });
 
   test("phase docs carry lineage frontmatter and can be read by the phase doc loader", async () => {

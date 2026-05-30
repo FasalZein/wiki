@@ -19,6 +19,7 @@ async function createVault(project: string): Promise<string> {
   await mkdir(join(projectPath, "slices"));
   await mkdir(join(projectPath, "adrs"));
   await mkdir(join(projectPath, "handovers"));
+  await mkdir(join(projectPath, "docs"));
   return vaultRoot;
 }
 
@@ -26,7 +27,7 @@ describe("nextId", () => {
   test("empty directory starts at 0001", async () => {
     const vault = await createVault("test");
     expect(await nextId("prd", vault, "test")).toBe("PRD-0001");
-    expect(await nextId("decision", vault, "test")).toBe("DECISION-0001");
+    expect(await nextId("decision", vault, "test")).toBe("ADR-0001");
     expect(await nextId("slice", vault, "test")).toBe("SLICE-0001");
   });
 
@@ -52,17 +53,17 @@ describe("nextId", () => {
     const adrs = join(vault, "projects", "test", "adrs");
     await writeFile(join(adrs, "0017-obsidian-cli-write-substrate.md"), "existing");
 
-    expect(await nextId("decision", vault, "test")).toBe("DECISION-0018");
+    expect(await nextId("decision", vault, "test")).toBe("ADR-0018");
   });
 
   test("handles mixed formats in the same directory", async () => {
     const vault = await createVault("test");
     const adrs = join(vault, "projects", "test", "adrs");
     await writeFile(join(adrs, "0005-old-decision.md"), "legacy");
-    await writeFile(join(adrs, "DECISION-0003.md"), "new format");
+    await writeFile(join(adrs, "ADR-0003.md"), "new format");
 
     // Highest is 5 (from 0005-old-decision.md), next is 6
-    expect(await nextId("decision", vault, "test")).toBe("DECISION-0006");
+    expect(await nextId("decision", vault, "test")).toBe("ADR-0006");
   });
 
   test("handles gaps by using highest + 1", async () => {
@@ -93,11 +94,15 @@ describe("nextId", () => {
     expect(await nextId("prd", vault, "test")).toBe("PRD-0011");
   });
 
-  test("pads to more than 4 digits when needed", async () => {
+  test("doc ids are globally unique across category subfolders", async () => {
     const vault = await createVault("test");
-    const prds = join(vault, "projects", "test", "prds");
-    await writeFile(join(prds, "PRD-9999.md"), "existing");
+    const docs = join(vault, "projects", "test", "docs");
+    await mkdir(join(docs, "research"), { recursive: true });
+    await mkdir(join(docs, "runbooks"), { recursive: true });
+    await writeFile(join(docs, "research", "DOC-0004-a.md"), "existing");
+    await writeFile(join(docs, "runbooks", "DOC-0009-b.md"), "existing");
+    await writeFile(join(docs, "DOC-0002-flat.md"), "existing");
 
-    expect(await nextId("prd", vault, "test")).toBe("PRD-10000");
+    expect(await nextId("doc", vault, "test")).toBe("DOC-0010");
   });
 });

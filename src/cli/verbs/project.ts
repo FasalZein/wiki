@@ -2,6 +2,7 @@ import { mkdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 import { projectPath } from "../../artifacts/paths";
+import { ARTIFACT_FOLDERS, STRUCTURAL_FOLDERS } from "../../artifacts/registry";
 import { deployViews } from "../../bootstrap/views";
 import { getVaultRoot } from "../../config/vault";
 import { ensureObsidian, obsidianCreate } from "../../integrations/obsidian";
@@ -41,7 +42,7 @@ async function createProject(args: string[]): Promise<CliResult> {
   }
 
   // Create directory structure
-  const dirs = ["prds", "slices", "adrs", "handovers", "architecture"];
+  const dirs = [...ARTIFACT_FOLDERS, ...STRUCTURAL_FOLDERS];
   await Promise.all(dirs.map((dir) => mkdir(join(projPath, dir), { recursive: true })));
 
   const today = new Date().toISOString().slice(0, 10);
@@ -49,24 +50,6 @@ async function createProject(args: string[]): Promise<CliResult> {
   // Create _project.md
   const projectContent = `---\nproject: ${name}\nstatus: planning\ncreated: ${today}\n---\n# ${name}\n`;
   await obsidianCreate("_project", projectContent, `projects/${name}`);
-
-  // Create architecture/domain-language.md
-  const domainContent = [
-    `---`,
-    `project: ${name}`,
-    `artifact: domain-language`,
-    `updated: ${today}`,
-    `---`,
-    `# Domain Language`,
-    ``,
-    `## Storage and structure`,
-    ``,
-    `## Delivery lifecycle`,
-    ``,
-    `## Relationships`,
-    ``,
-  ].join("\n");
-  await obsidianCreate("domain-language", domainContent, `projects/${name}/architecture`);
 
   // Deploy .base view files
   await deployViews(vaultRoot, name);

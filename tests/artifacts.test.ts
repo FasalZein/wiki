@@ -22,7 +22,7 @@ afterEach(async () => {
 });
 
 describe("artifact store", () => {
-  test("creates DECISION-0001 in an empty adrs folder", async () => {
+  test("creates ADR-0001 with a human-readable filename in an empty adrs folder", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
     const artifact = await createArtifact({
       type: "decision",
@@ -31,11 +31,11 @@ describe("artifact store", () => {
       fields: decisionFields(),
     });
 
-    expect(artifact.id).toBe("DECISION-0001");
-    expect(artifact.path).toBe(join(vaultRoot, "projects", "wiki-v2", "adrs", "DECISION-0001.md"));
+    expect(artifact.id).toBe("ADR-0001");
+    expect(artifact.path).toBe(join(vaultRoot, "projects", "wiki-v2", "adrs", "ADR-0001-use-sqlite.md"));
 
     const file = await readFile(artifact.path, "utf8");
-    expect(file).toContain("id: DECISION-0001");
+    expect(file).toContain("id: ADR-0001");
     expect(file).toContain("title: Use SQLite");
     expect(file).toContain("project: wiki-v2");
     expect(file).toContain("status: accepted");
@@ -43,11 +43,11 @@ describe("artifact store", () => {
     expect(file).toContain("Use SQLite for local persistence.");
   });
 
-  test("creates the next decision id after the highest existing number", async () => {
+  test("creates the next decision id after the highest existing old or human-readable number", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
     const adrsPath = join(vaultRoot, "projects", "wiki-v2", "adrs");
-    await writeFile(join(adrsPath, "DECISION-0001.md"), "existing");
-    await writeFile(join(adrsPath, "DECISION-0003.md"), "existing");
+    await writeFile(join(adrsPath, "ADR-0001.md"), "existing");
+    await writeFile(join(adrsPath, "ADR-0003-use-sqlite.md"), "existing");
 
     const artifact = await createArtifact({
       type: "decision",
@@ -56,10 +56,10 @@ describe("artifact store", () => {
       fields: decisionFields(),
     });
 
-    expect(artifact.id).toBe("DECISION-0004");
+    expect(artifact.id).toBe("ADR-0004");
   });
 
-  test("creates PRD-0001 in an empty prds folder", async () => {
+  test("creates PRD-0001 with a human-readable filename in an empty prds folder", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
     const artifact = await createArtifact({
       type: "prd",
@@ -69,7 +69,7 @@ describe("artifact store", () => {
     });
 
     expect(artifact.id).toBe("PRD-0001");
-    expect(artifact.path).toBe(join(vaultRoot, "projects", "wiki-v2", "prds", "PRD-0001.md"));
+    expect(artifact.path).toBe(join(vaultRoot, "projects", "wiki-v2", "prds", "PRD-0001-core-wiki-cli.md"));
 
     const file = await readFile(artifact.path, "utf8");
     expect(file).toContain("id: PRD-0001");
@@ -78,7 +78,66 @@ describe("artifact store", () => {
     expect(file).toContain("status: draft");
   });
 
-  test("creates SLICE-0001 in an empty slices folder", async () => {
+  test("stamps the bare id as an alias so [[PRD-0001]] links resolve", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    const artifact = await createArtifact({
+      type: "prd",
+      vaultRoot,
+      project: "wiki-v2",
+      fields: { title: "Core wiki CLI" },
+    });
+
+    expect(artifact.fields.aliases).toEqual(["PRD-0001"]);
+    const file = await readFile(artifact.path, "utf8");
+    expect(file).toContain("aliases:");
+    expect(file).toContain("- PRD-0001");
+  });
+
+  test("reads human-readable artifact filenames by id", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    await createArtifact({
+      type: "prd",
+      vaultRoot,
+      project: "wiki-v2",
+      fields: { title: "Core wiki CLI" },
+    });
+
+    const artifact = await readArtifact({ type: "prd", vaultRoot, project: "wiki-v2", id: "PRD-0001" });
+
+    expect(artifact.path).toBe(join(vaultRoot, "projects", "wiki-v2", "prds", "PRD-0001-core-wiki-cli.md"));
+    expect(artifact.fields.title).toBe("Core wiki CLI");
+  });
+
+  test("creates a doc inside its category subfolder", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    const artifact = await createArtifact({
+      type: "doc",
+      vaultRoot,
+      project: "wiki-v2",
+      category: "research",
+      fields: { title: "Native search benchmark", type: "research" },
+    });
+
+    expect(artifact.id).toBe("DOC-0001");
+    expect(artifact.path).toBe(join(vaultRoot, "projects", "wiki-v2", "docs", "research", "DOC-0001-native-search-benchmark.md"));
+  });
+
+  test("reads a doc by id from its category subfolder", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    await createArtifact({
+      type: "doc",
+      vaultRoot,
+      project: "wiki-v2",
+      category: "runbooks",
+      fields: { title: "Deploy runbook", type: "runbook" },
+    });
+
+    const artifact = await readArtifact({ type: "doc", vaultRoot, project: "wiki-v2", id: "DOC-0001" });
+    expect(artifact.path).toBe(join(vaultRoot, "projects", "wiki-v2", "docs", "runbooks", "DOC-0001-deploy-runbook.md"));
+    expect(artifact.fields.title).toBe("Deploy runbook");
+  });
+
+  test("creates SLICE-0001 with a human-readable filename in an empty slices folder", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
     const artifact = await createArtifact({
       type: "slice",
@@ -88,7 +147,7 @@ describe("artifact store", () => {
     });
 
     expect(artifact.id).toBe("SLICE-0001");
-    expect(artifact.path).toBe(join(vaultRoot, "projects", "wiki-v2", "slices", "SLICE-0001.md"));
+    expect(artifact.path).toBe(join(vaultRoot, "projects", "wiki-v2", "slices", "SLICE-0001-build-slice-authoring.md"));
 
     const file = await readFile(artifact.path, "utf8");
     expect(file).toContain("id: SLICE-0001");
@@ -103,7 +162,7 @@ describe("artifact store", () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
     await createArtifact({ type: "decision", vaultRoot, project: "wiki-v2", fields: decisionFields() });
 
-    const artifact = await readArtifact({ type: "decision", vaultRoot, project: "wiki-v2", id: "DECISION-0001" });
+    const artifact = await readArtifact({ type: "decision", vaultRoot, project: "wiki-v2", id: "ADR-0001" });
 
     expect(artifact.fields.title).toBe("Use SQLite");
     expect(artifact.body).toContain("# Use SQLite");
@@ -113,13 +172,13 @@ describe("artifact store", () => {
   test("sets one frontmatter field and preserves the rendered body", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
     await createArtifact({ type: "decision", vaultRoot, project: "wiki-v2", fields: decisionFields() });
-    const before = await readArtifact({ type: "decision", vaultRoot, project: "wiki-v2", id: "DECISION-0001" });
+    const before = await readArtifact({ type: "decision", vaultRoot, project: "wiki-v2", id: "ADR-0001" });
 
     const after = await setField({
       type: "decision",
       vaultRoot,
       project: "wiki-v2",
-      id: "DECISION-0001",
+      id: "ADR-0001",
       field: "status",
       value: "proposed",
     });
@@ -132,13 +191,13 @@ describe("artifact store", () => {
   test("appends to a list frontmatter field in order and preserves the body", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
     await createArtifact({ type: "decision", vaultRoot, project: "wiki-v2", fields: decisionFields() });
-    const before = await readArtifact({ type: "decision", vaultRoot, project: "wiki-v2", id: "DECISION-0001" });
+    const before = await readArtifact({ type: "decision", vaultRoot, project: "wiki-v2", id: "ADR-0001" });
 
     const after = await appendField({
       type: "decision",
       vaultRoot,
       project: "wiki-v2",
-      id: "DECISION-0001",
+      id: "ADR-0001",
       field: "context_terms",
       value: "Vault",
     });
@@ -156,7 +215,7 @@ describe("artifact store", () => {
         type: "decision",
         vaultRoot,
         project: "wiki-v2",
-        id: "DECISION-0001",
+        id: "ADR-0001",
         field: "unknown",
         value: "value",
       }),
@@ -182,6 +241,7 @@ async function createFixtureVault(project: string): Promise<string> {
   await mkdir(join(projectPath, "slices"));
   await mkdir(join(projectPath, "adrs"));
   await mkdir(join(projectPath, "handovers"));
+  await mkdir(join(projectPath, "docs"));
   await writeFile(join(projectPath, "_project.md"), `# ${project}\n`);
   return vaultRoot;
 }

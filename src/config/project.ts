@@ -2,6 +2,8 @@ import matter from "gray-matter";
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 
+import { ARTIFACT_FOLDERS } from "../artifacts/registry";
+
 export type ProjectConfig = {
   repo: string;
   test_command: string;
@@ -19,7 +21,7 @@ export class ProjectConfigError extends Error {
 
 export async function assertProjectStructure(projectPath: string): Promise<void> {
   await assertFile(join(projectPath, "_project.md"), "_project.md");
-  for (const folder of ["prds", "slices", "adrs", "handovers"]) {
+  for (const folder of ARTIFACT_FOLDERS) {
     await assertDirectory(join(projectPath, folder), `${folder}/`);
   }
 }

@@ -161,6 +161,31 @@ export function generateDecisionsBase(projectPath: string): string {
   return renderBase(folder, properties, views);
 }
 
+export function generateDocsBase(projectPath: string): string {
+  const folder = `${fwd(projectPath)}/docs`;
+  const properties: Record<string, string> = {
+    "file.name": "Doc",
+    title: "Title",
+    type: "Type",
+    tags: "Tags",
+    updated: "Updated",
+  };
+  const views: BaseView[] = [
+    {
+      type: "table",
+      name: "By Type",
+      groupBy: { property: "type", direction: "ASC" },
+      order: ["file.name", "title", "tags", "updated"],
+    },
+    {
+      type: "table",
+      name: "Recent",
+      order: ["file.name", "title", "type", "updated"],
+    },
+  ];
+  return renderBase(folder, properties, views);
+}
+
 export async function deployViews(vaultRoot: string, project: string): Promise<string[]> {
   const projectDir = join(vaultRoot, "projects", project);
   await mkdir(projectDir, { recursive: true });
@@ -169,6 +194,7 @@ export async function deployViews(vaultRoot: string, project: string): Promise<s
     { name: "Slices.base", fn: generateSlicesBase },
     { name: "PRDs.base", fn: generatePRDsBase },
     { name: "Decisions.base", fn: generateDecisionsBase },
+    { name: "Docs.base", fn: generateDocsBase },
   ];
 
   const vaultProjectPath = `projects/${project}`;

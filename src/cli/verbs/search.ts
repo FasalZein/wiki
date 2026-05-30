@@ -7,10 +7,11 @@
  * layout already gives a cheap, stable template mapping. If QMD JSON later
  * exposes richer frontmatter, this can move into runQuery.
  */
-import { join, relative, sep } from "node:path";
+import { join } from "node:path";
 
 import { ensureCollection, QmdError, runQuery, updateCollection, type QmdResult } from "../../integrations/qmd";
 import { artifactFolder } from "../../artifacts/paths";
+import { ARTIFACTS } from "../../artifacts/registry";
 import { assertProjectStructure, loadProjectConfig } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import type { TemplateType } from "../../schema/load";
@@ -19,7 +20,12 @@ import { buildStructuredQuery } from "../../search/query-builder";
 import { booleanValue, parseCommand, stringValue } from "../parse";
 import type { CliResult } from "../dispatch";
 
-const allowedTypes: readonly TemplateType[] = ["prd", "slice", "decision", "handover"];
+const allowedTypes: readonly TemplateType[] = Object.keys(ARTIFACTS) as TemplateType[];
+
+// qmd ranks and truncates to a default window (20 for --json) before we can
+// filter by artifact folder. When a --type filter is active we over-fetch so
+// matching artifacts that rank below that window aren't silently dropped.
+const TYPE_FILTER_FETCH = 50;
 
 export async function handleSearch(args: string[]): Promise<CliResult> {
   const parsed = parseCommand(args, ["project", "type"], [], ["include-research", "explain", "no-refresh"]);
@@ -35,7 +41,7 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
   }
   const type = parseSearchType(stringValue(parsed.values, "type"));
   if (type === null) {
-    console.error("invalid type: expected prd, slice, decision, or handover");
+    console.error(`invalid type: expected ${allowedTypes.join(", ")}`);
     return { code: 1 };
   }
   const explain = booleanValue(parsed.values, "explain");
@@ -65,8 +71,10 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
     const intent = classifyIntent(query);
     const queryDocument = buildStructuredQuery(query, { intent, project });
     const results = filterByType(
-      await runQuery(qmdCommand, queryDocument, collections, { explain }),
-      projectPath,
+      await runQuery(qmdCommand, queryDocument, collections, {
+        explain,
+        limit: type === undefined ? undefined : TYPE_FILTER_FETCH,
+      }),
       type,
     );
     writeResults(results);
@@ -88,12 +96,22 @@ function parseSearchType(value: string | undefined): TemplateType | undefined | 
   return allowedTypes.includes(value as TemplateType) ? (value as TemplateType) : null;
 }
 
-function filterByType(results: QmdResult[], projectPath: string, type: TemplateType | undefined): QmdResult[] {
+function filterByType(results: QmdResult[], type: TemplateType | undefined): QmdResult[] {
   if (type === undefined) {
     return results;
   }
-  const prefix = `${artifactFolder(type)}${sep}`;
-  return results.filter((result) => relative(projectPath, result.path).startsWith(prefix));
+  // qmd returns paths as "qmd://<collection>/<path>" URIs; the artifact folder is
+  // the first path segment within the collection (e.g. qmd://rift/docs/DOC-0017.md).
+  const prefix = `/${artifactFolder(type)}/`;
+  return results.filter((result) => uriPath(result.path).startsWith(prefix));
+}
+
+function uriPath(path: string): string {
+  try {
+    return new URL(path).pathname;
+  } catch {
+    return path;
+  }
 }
 
 function writeResults(results: QmdResult[]): void {

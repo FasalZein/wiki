@@ -18,8 +18,8 @@ Do NOT interview the user — synthesize what you already know from the
 conversation and codebase exploration.
 
 1. **Explore the codebase** to understand the current state. Use the project's
-   domain glossary vocabulary throughout the PRD, and respect any ADRs in the
-   area you're touching.
+   vocabulary from existing PRDs, ADRs, slices, and docs throughout the PRD, and
+   respect any ADRs in the area you're touching.
 
 2. **Sketch major modules** you will need to build or modify. Actively look for
    opportunities to extract deep modules — small interface, deep implementation,
@@ -55,8 +55,8 @@ Fill every section before publishing. Use `obsidian property:set` for each:
 
 ## Domain terms
 
-Every domain-specific term used in the PRD must exist in domain-language.md.
-If a term is missing, define it there before using it in the PRD.
+Use terms consistently with existing PRDs, ADRs, slices, and docs. If a reusable
+term or convention is missing, create or update a doc in `docs/` before relying on it.
 
 ## Publish
 

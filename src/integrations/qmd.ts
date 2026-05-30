@@ -7,9 +7,8 @@
  * Research path resolution is owned by project config: _project.md research_path,
  * then default `~/.pi/artifacts/research` with ~ expansion.
  *
- * Collection existence currently uses a substring search over
- * `qmd collection list` output. This is intentionally simple but fragile if QMD
- * changes that human-readable output shape.
+ * Collection existence parses exact names out of `qmd collection list` output.
+ * This depends on that human-readable output shape ("name (qmd://name/)").
  */
 
 export type QmdResult = {
@@ -24,8 +23,15 @@ export class QmdError extends Error {
   }
 }
 
-export async function listCollections(qmdCommand: string): Promise<string> {
-  return runQmd(qmdCommand, ["collection", "list"]);
+// Each collection prints as "name (qmd://name/)". Parse exact names so the
+// membership check can't false-positive on a name that is a substring of
+// another (e.g. "bayland" vs "bayland-portfolio-v1").
+export function parseCollectionNames(output: string): string[] {
+  return [...output.matchAll(/^(\S+) \(qmd:\/\//gm)].map((match) => match[1] ?? "").filter((name) => name.length > 0);
+}
+
+export async function listCollections(qmdCommand: string): Promise<string[]> {
+  return parseCollectionNames(await runQmd(qmdCommand, ["collection", "list"]));
 }
 
 export async function addCollection(qmdCommand: string, name: string, path: string, glob: string): Promise<void> {
@@ -51,12 +57,13 @@ export async function runQuery(
   qmdCommand: string,
   query: string,
   collections: string[],
-  options?: { explain?: boolean },
+  options?: { explain?: boolean; limit?: number },
 ): Promise<QmdResult[]> {
   const args = [
     "query",
     query,
     "--json",
+    ...(options?.limit !== undefined ? ["-n", String(options.limit)] : []),
     ...(options?.explain === true ? ["--explain"] : []),
     ...collections.flatMap((collection) => ["--collection", collection]),
   ];

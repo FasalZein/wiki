@@ -115,10 +115,11 @@ async function createFixtureVault(project: string): Promise<string> {
   await mkdir(join(projectPath, "slices"));
   await mkdir(join(projectPath, "adrs"));
   await mkdir(join(projectPath, "handovers"));
+  await mkdir(join(projectPath, "docs"));
   await writeFile(join(projectPath, "_project.md"), `# ${project}\n`);
   return vaultRoot;
 }
 
 async function readHandover(vaultRoot: string, id: string): Promise<string> {
-  return readFile(join(vaultRoot, "projects", "wiki-v2", "handovers", `${id}.md`), "utf8");
+  return readFile(join(vaultRoot, "projects", "wiki-v2", "handovers", `${id}-${id.toLowerCase()}.md`), "utf8");
 }

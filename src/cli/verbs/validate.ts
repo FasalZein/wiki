@@ -4,10 +4,9 @@ import { basename, relative } from "node:path";
 
 import { loadTemplate, type TemplateType } from "../../schema/load";
 import { validate } from "../../schema/validate";
+import { FOLDER_TO_TYPE } from "../../artifacts/registry";
 import { getVaultRoot } from "../../config/vault";
 import type { CliResult } from "../dispatch";
-
-const typeMap: Record<string, TemplateType> = { prds: "prd", slices: "slice", adrs: "decision", handovers: "handover" };
 
 export async function handleValidate(args: string[]): Promise<CliResult> {
   const filePath = args[0];
@@ -29,7 +28,7 @@ export async function handleValidate(args: string[]): Promise<CliResult> {
   const type = inferType(rel);
   if (type === undefined) {
     console.error(`cannot infer artifact type from path: ${rel}`);
-    console.error("expected path under projects/<name>/<prds|slices|adrs|handovers>/");
+    console.error("expected path under projects/<name>/<prds|slices|adrs|handovers|docs>/");
     return { code: 1 };
   }
 
@@ -51,7 +50,7 @@ function inferType(rel: string): TemplateType | undefined {
   const parts = rel.split("/");
   const dir = parts[2];
   if (parts[0] === "projects" && parts.length >= 4 && dir !== undefined) {
-    return typeMap[dir];
+    return FOLDER_TO_TYPE[dir];
   }
   return undefined;
 }

@@ -85,11 +85,11 @@ describe("all generators", () => {
 });
 
 describe("deployViews", () => {
-  test("writes 3 files to the correct paths", async () => {
+  test("writes a base file per artifact view to the correct paths", async () => {
     const vaultRoot = await makeTempDir();
     const written = await deployViews(vaultRoot, "wiki-v2");
 
-    expect(written).toHaveLength(3);
+    expect(written).toHaveLength(4);
     // All paths should be under projects/wiki-v2/
     for (const p of written) {
       expect(p).toContain(join("projects", "wiki-v2"));

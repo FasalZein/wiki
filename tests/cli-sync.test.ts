@@ -122,6 +122,7 @@ async function createSyncFixture(project: string, options: SyncFixtureOptions = 
   await mkdir(join(projectPath, "slices"));
   await mkdir(join(projectPath, "adrs"));
   await mkdir(join(projectPath, "handovers"));
+  await mkdir(join(projectPath, "docs"));
   const researchPath = join(root, "research");
   await mkdir(researchPath);
   await writeFile(
@@ -150,7 +151,8 @@ case "\${1:-}" in
         shift 2
         while [ $# -gt 0 ]; do
           if [ "$1" = "--name" ]; then
-            echo "$2" >> "$REGISTERED_FILE"
+            # mirror real qmd's "collection list" shape: "name (qmd://name/)"
+            echo "$2 (qmd://$2/)" >> "$REGISTERED_FILE"
             break
           fi
           shift

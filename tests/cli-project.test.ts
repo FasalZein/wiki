@@ -22,7 +22,8 @@ describe("project CLI", () => {
     expect(entries).toContain("slices");
     expect(entries).toContain("adrs");
     expect(entries).toContain("handovers");
-    expect(entries).toContain("architecture");
+    expect(entries).toContain("docs");
+    expect(entries).not.toContain("architecture");
   });
 
   test("project create creates _project.md with correct frontmatter", async () => {
@@ -36,18 +37,12 @@ describe("project CLI", () => {
     expect(content).toMatch(/created: \d{4}-\d{2}-\d{2}/);
   });
 
-  test("project create creates domain-language.md in architecture/", async () => {
+  test("project create does not scaffold architecture domain-language", async () => {
     const vaultRoot = await createBareVault();
 
     await runWiki(["project", "create", "acme"], vaultRoot);
 
-    const content = await readFile(join(vaultRoot, "projects", "acme", "architecture", "domain-language.md"), "utf8");
-    expect(content).toContain("project: acme");
-    expect(content).toContain("artifact: domain-language");
-    expect(content).toMatch(/updated: \d{4}-\d{2}-\d{2}/);
-    expect(content).toContain("## Storage and structure");
-    expect(content).toContain("## Delivery lifecycle");
-    expect(content).toContain("## Relationships");
+    await expect(readFile(join(vaultRoot, "projects", "acme", "architecture", "domain-language.md"), "utf8")).rejects.toThrow();
   });
 
   test("project create generates .base files", async () => {
@@ -60,6 +55,7 @@ describe("project CLI", () => {
     expect(entries).toContain("Slices.base");
     expect(entries).toContain("PRDs.base");
     expect(entries).toContain("Decisions.base");
+    expect(entries).toContain("Docs.base");
   });
 
   test("project create with existing project exits 1", async () => {

@@ -51,7 +51,7 @@ describe("template schemas", () => {
       next_phase: "green",
       active_prd: "PRD-001",
       active_slices: ["SLICE-001"],
-      decisions_made: ["DECISION-0001"],
+      decisions_made: ["ADR-0001"],
       suggested_skills: ["/wiki", "/tdd"],
       status: "open",
       created: "2026-05-25",
@@ -93,7 +93,7 @@ describe("template schemas", () => {
 
     expect(
       validate(schema, {
-        id: "DECISION-0001",
+        id: "ADR-0001",
         title: "Template schemas carry validation rules",
         project: "wiki-v2",
         status: "maybe",

@@ -135,7 +135,7 @@ describe("vault config", () => {
     await expect(assertProjectStructure(projectPath)).rejects.toThrow("Project structure missing _project.md");
 
     await writeFile(join(projectPath, "_project.md"), "# Project\n");
-    for (const folder of ["prds", "slices", "adrs", "handovers"]) {
+    for (const folder of ["prds", "slices", "adrs", "handovers", "docs"]) {
       await mkdir(join(projectPath, folder));
     }
 

@@ -77,16 +77,26 @@ describe("phase auto-doc CLI", () => {
     expect(result.stderr).not.toContain("phase doc");
   });
 
-  test("missing auto doc is non-fatal and reported on stderr", async () => {
+  test("transition phase auto-doc falls back to the bundled slice doc", async () => {
     const fixture = await createFixture();
     await createSliceWithAcceptance(fixture);
     await wantFail(fixture);
-
+    // No repo-seeded green doc: must fall back to the bundled slice/TDD doc.
     const result = await runWiki(["red", "SLICE-0001", "--project", "wiki-v2"], fixture);
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toContain("red captured");
-    expect(result.stderr).toContain("phase doc missing: green");
+    expect(result.stderr).toContain("--- phase doc: green ---");
+    expect(result.stderr).toContain("# Phase: slice");
+  });
+
+  test("a genuinely unmapped phase doc is non-fatal and reported on stderr", async () => {
+    const fixture = await createFixture();
+
+    const result = await runWiki(["handover", "--project", "wiki-v2", "--phase", "handover", "--doc-phase", "nonexistent-phase"], fixture);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toContain("phase doc missing: nonexistent-phase");
   });
 });
 
@@ -124,6 +134,7 @@ async function createFixture(): Promise<Fixture> {
   await mkdir(join(projectPath, "slices"));
   await mkdir(join(projectPath, "adrs"));
   await mkdir(join(projectPath, "handovers"));
+  await mkdir(join(projectPath, "docs"));
   await writeFile(
     join(projectPath, "_project.md"),
     `---\nproject: ${project}\nrepo: ${repoPath}\ntest_command: ${scriptPath} ${statePath}\nqmd_command: ${qmdCommand}\n---\n# ${project}\n`,
@@ -141,7 +152,7 @@ async function createSliceWithAcceptance(fixture: Fixture): Promise<void> {
 }
 
 async function appendSliceField(vaultRoot: string, field: string, value: unknown): Promise<void> {
-  const path = join(vaultRoot, "projects", "wiki-v2", "slices", "SLICE-0001.md");
+  const path = join(vaultRoot, "projects", "wiki-v2", "slices", "SLICE-0001-build-slice-authoring.md");
   const content = await readFile(path, "utf8");
   const parsed = matter(content);
   const current = parsed.data[field];

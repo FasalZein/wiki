@@ -1,12 +1,12 @@
 ---
 based-on: mattpocock/skills/engineering/grill-with-docs@b8be62f
-fork-rationale: Wiki-medium grill — questioning discipline writes ADRs to vault and refines domain-language.md instead of free-form docs.
+fork-rationale: Wiki-medium grill — questioning discipline writes ADRs and reusable context docs to the vault.
 ---
 # Phase: plan (grill)
 
 Goal: turn a vague request into bounded, well-understood work by grilling the
 user with focused questions, recording decisions as ADRs, and refining the
-project's domain language.
+project's documented vocabulary and decisions.
 
 ## When to enter plan phase
 
@@ -25,10 +25,10 @@ Ask one question at a time. Do not batch questions — each answer may
 invalidate the next question. If a question can be answered by exploring the
 codebase, explore the codebase instead of asking.
 
-### Challenge against the glossary
+### Challenge against existing docs
 
-When the user uses a term that conflicts with `domain-language.md`, call it out
-immediately. "Your glossary defines 'cancellation' as X, but you seem to mean
+When the user uses a term that conflicts with existing PRDs, ADRs, slices, or docs,
+call it out immediately. "This doc defines 'cancellation' as X, but you seem to mean
 Y — which is it?"
 
 ### Sharpen fuzzy language
@@ -50,13 +50,11 @@ When the user states how something works, check whether the code agrees. If you
 find a contradiction, surface it: "Your code does X, but you just said Y —
 which is right?"
 
-## Update domain-language.md
+## Capture reusable context in docs
 
-When a term is resolved, update `domain-language.md` right there — don't batch.
-Capture terms as they happen so the glossary stays current.
-
-`domain-language.md` should be totally devoid of implementation details. It is a
-glossary and nothing else.
+When a domain term, project convention, or reusable explanation is resolved, create or
+update a doc in `docs/` rather than maintaining a separate architecture glossary.
+Keep the doc focused and searchable; ADRs still record decisions.
 
 ### Entry format
 
@@ -132,7 +130,7 @@ wonder why. If there was no real alternative, there's nothing to record.
 - **Rejected alternatives when non-obvious.** Record it so someone doesn't
   suggest the same thing again in six months.
 
-## Example: domain-language.md entry produced during a grill
+## Example: docs entry produced during a grill
 
 ```md
 **Artifact**:
@@ -157,4 +155,4 @@ The PRD should reference the ADRs created during this phase in its
 - Success criteria are testable.
 - No unresolved open questions remain.
 - ADRs are recorded for all non-trivial decisions.
-- `domain-language.md` is updated with any new terms introduced.
+- Reusable terms or context are captured in docs when they matter beyond this artifact.
