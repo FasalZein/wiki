@@ -114,8 +114,8 @@ describe("status and session CLI", () => {
     const fixture = await createFixture();
     await runWiki(["session", "start", "--project", "wiki-v2", "--phase", "red"], fixture);
 
-    const phase = await runWiki(["session", "set", "--project", "wiki-v2", "--field", "phase", "green"], fixture);
-    const notes = await runWiki(["session", "set", "--project", "wiki-v2", "--field", "notes", "-"], fixture, "Working notes\n");
+    const phase = await runWiki(["session", "set", "--project", "wiki-v2", "phase", "green"], fixture);
+    const notes = await runWiki(["session", "set", "--project", "wiki-v2", "notes", "-"], fixture, "Working notes\n");
 
     expect(phase.exitCode).toBe(0);
     expect(notes.exitCode).toBe(0);

@@ -216,7 +216,7 @@ async function advisoryDedup(type: TemplateType, project: string, projectPath: s
       return;
     }
     if (error instanceof QmdError || error instanceof ProjectConfigError) {
-      const errorLine = error.message.split("\n").find(l => l.startsWith("Error:")) ?? error.message.split("\n")[0] ?? error.message;
+      const errorLine = error instanceof QmdError ? error.summary : error.message.split("\n")[0] ?? error.message;
       console.error(`dedup check skipped: ${errorLine}`);
       return;
     }

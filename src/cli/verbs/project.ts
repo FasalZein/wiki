@@ -9,6 +9,7 @@ import { getVaultRoot } from "../../config/vault";
 import { ensureObsidian, obsidianCreate } from "../../integrations/obsidian";
 import { ensureCollection } from "../../integrations/qmd";
 import type { CliResult } from "../dispatch";
+import { parseCommand, stringValue } from "../parse";
 import { unknownMessage } from "../usage";
 
 export async function handleProject(args: string[]): Promise<CliResult> {
@@ -37,11 +38,18 @@ async function listProjectsCommand(): Promise<CliResult> {
 }
 
 async function createProject(args: string[]): Promise<CliResult> {
-  const name = args[0];
+  const parsed = parseCommand(args, ["repo", "test-command"]);
+  const name = parsed.positionals[0];
   if (name === undefined) {
     console.error("missing project name");
     return { code: 1 };
   }
+  // A project needs repo + test_command to be usable by status/red/green; default
+  // them (repo = cwd, the usual case; test_command = bun test) so the project is
+  // complete on creation rather than failing the skill's first command. Both are
+  // overridable via flags and editable later in _project.md.
+  const repo = stringValue(parsed.values, "repo") ?? process.cwd();
+  const testCommand = stringValue(parsed.values, "test-command") ?? "bun test";
 
   await ensureObsidian();
   const vaultRoot = await getVaultRoot();
@@ -65,8 +73,8 @@ async function createProject(args: string[]): Promise<CliResult> {
 
   const today = new Date().toISOString().slice(0, 10);
 
-  // Create _project.md
-  const projectContent = `---\nproject: ${name}\nstatus: planning\ncreated: ${today}\n---\n# ${name}\n`;
+  // Create _project.md (complete: repo + test_command so status/red/green work immediately)
+  const projectContent = `---\nproject: ${name}\nstatus: planning\ncreated: ${today}\nrepo: ${repo}\ntest_command: ${testCommand}\n---\n# ${name}\n`;
   await obsidianCreate("_project", projectContent, `projects/${name}`);
 
   // Deploy .base view files
@@ -80,7 +88,8 @@ async function createProject(args: string[]): Promise<CliResult> {
     // QMD not available — proceed without it
   }
 
-  console.error(`created project ${name}`);
+  console.error(`created project ${name} (repo: ${repo}, test_command: ${testCommand})`);
+  console.error(`edit projects/${name}/_project.md to change repo/test_command; then: wiki session start --project ${name}`);
   console.log(projPath);
   return { code: 0 };
 }

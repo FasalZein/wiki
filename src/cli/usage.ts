@@ -234,8 +234,12 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
     subverbs: {
       create: {
         summary: "Create a new project directory structure under projects/.",
-        usage: "wiki project create <name>",
-        example: "wiki project create myproj",
+        usage: "wiki project create <name> [--repo <path>] [--test-command <cmd>]",
+        flags: {
+          "--repo": "path to the code repo this project tracks (default: current directory)",
+          "--test-command": "command the TDD gates run (default: bun test)",
+        },
+        example: "wiki project create myproj --repo ~/code/myproj --test-command 'npm test'",
       },
       list: {
         summary: "List existing projects.",

@@ -21,6 +21,16 @@ export class QmdError extends Error {
   constructor(message: string) {
     super(message);
   }
+
+  /**
+   * One-line summary for CLI output: the first `Error:` line if present, else the
+   * first non-empty line. qmd surfaces native-module/dlopen failures as a multi-line
+   * Node stack trace; callers should print this, not the full `message`.
+   */
+  get summary(): string {
+    const lines = this.message.split("\n");
+    return lines.find((l) => l.startsWith("Error:")) ?? lines.find((l) => l.trim().length > 0) ?? this.message;
+  }
 }
 
 // Each collection prints as "name (qmd://name/)". Parse exact names so the

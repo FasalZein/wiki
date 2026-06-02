@@ -34,7 +34,7 @@ export async function handleSync(args: string[]): Promise<CliResult> {
     return { code: 0 };
   } catch (error) {
     if (error instanceof QmdError) {
-      console.error(error.message);
+      console.error(error.summary);
       return { code: 10 };
     }
     throw error;

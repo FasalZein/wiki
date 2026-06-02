@@ -41,12 +41,12 @@ async function startSession(args: string[]): Promise<CliResult> {
 }
 
 async function setSession(args: string[]): Promise<CliResult> {
-  const parsed = parseCommand(args, ["project", "field"]);
+  const parsed = parseCommand(args, ["project"]);
   const project = stringValue(parsed.values, "project");
-  const field = stringValue(parsed.values, "field");
-  const rawValue = parsed.positionals[0];
+  const field = parsed.positionals[0];
+  const rawValue = parsed.positionals[1];
   if (field === undefined || rawValue === undefined) {
-    console.error("missing required field: field, value");
+    console.error("usage: wiki session set <field> <value>");
     return { code: 1 };
   }
   const normalizedField = field.replaceAll("-", "_");

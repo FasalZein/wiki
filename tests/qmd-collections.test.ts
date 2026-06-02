@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { parseCollectionNames } from "../src/integrations/qmd";
+import { parseCollectionNames, QmdError } from "../src/integrations/qmd";
 
 // Sample shaped like real `qmd collection list` output.
 const LIST_OUTPUT = `Collections (3):
@@ -41,5 +41,25 @@ describe("parseCollectionNames", () => {
 
   test("returns empty for output with no collections", () => {
     expect(parseCollectionNames("Collections (0):\n")).toEqual([]);
+  });
+});
+
+describe("QmdError.summary", () => {
+  // Regression: qmd surfaces a native-module/dlopen failure as a ~25-line Node stack
+  // trace. sync printed the full message; it must show one meaningful line instead.
+  test("extracts the Error: line from a multi-line stack trace", () => {
+    const stack = [
+      "node:internal/modules/cjs/loader:1996",
+      "  return process.dlopen(module, path.toNamespacedPath(filename));",
+      "Error: The module 'better_sqlite3.node' was compiled against a different Node version",
+      "    at Module._extensions..node (node:internal/modules/cjs/loader:1996:18)",
+    ].join("\n");
+    expect(new QmdError(stack).summary).toBe(
+      "Error: The module 'better_sqlite3.node' was compiled against a different Node version",
+    );
+  });
+
+  test("falls back to the first non-empty line when no Error: line exists", () => {
+    expect(new QmdError("\nqmd exited 1\n").summary).toBe("qmd exited 1");
   });
 });
