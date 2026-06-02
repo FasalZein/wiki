@@ -3,7 +3,8 @@ import { join } from "node:path";
 import { listProjects, loadProjectConfig, ProjectConfigError, projectErrorMessage } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import { readSession } from "../../state/session";
-import { loadPhaseDoc } from "../phase-docs";
+import { writePhaseDocToStdout } from "../phase-docs";
+import { nextActionForPhase } from "../guidance";
 import type { CliResult } from "../dispatch";
 import { booleanValue, parseCommand, stringValue } from "../parse";
 
@@ -41,32 +42,15 @@ export async function handleStatus(args: string[]): Promise<CliResult> {
   console.log(`Phase: ${session.phase}`);
   console.log(`Active PRD: ${session.active_prd ?? "(none)"}`);
   console.log(`Active slices: ${session.active_slices.length > 0 ? session.active_slices.join(", ") : "(none)"}`);
-  console.log(`Next: ${nextAction(session.project, session.phase, session.active_slices[0])}`);
+  console.log(`Next: ${nextActionForPhase(session.phase, { project: session.project, slice: session.active_slices[0] ?? "<slice>" })}`);
 
   if (booleanValue(parsed.values, "with-doc")) {
-    const doc = loadPhaseDoc(session.phase);
-    if (doc === null) {
+    if (!writePhaseDocToStdout(session.phase)) {
       console.error(`no phase guidance for: ${session.phase}`);
       return { code: 1 };
     }
-    console.log(`--- phase doc: ${session.phase} ---`);
-    process.stdout.write(doc.endsWith("\n") ? doc : `${doc}\n`);
   }
   return { code: 0 };
-}
-
-function nextAction(project: string, phase: string, activeSlice: string | undefined): string {
-  const slice = activeSlice ?? "<slice>";
-  if (phase === "plan") return "run wiki create prd ...";
-  if (phase === "prd") return "run wiki create slice ...";
-  if (phase === "slice") return `run wiki red ${slice} --project ${project}`;
-  if (phase === "red") return `write implementation, then run wiki green ${slice} --project ${project}`;
-  if (phase === "green" || phase === "review" || phase === "close") {
-    return `run wiki close ${slice} --project ${project} --review-verdict pass`;
-  }
-  if (phase === "handover") return "run wiki handover ...";
-  if (phase === "ad-hoc") return "set a phase to begin: wiki session set phase <plan|prd|slice|triage>, then rerun wiki status --with-doc";
-  return "no enforced next step";
 }
 
 /** Vault-wide summary: every project, its repo, and its active session phase if any. */

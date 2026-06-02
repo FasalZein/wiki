@@ -22,14 +22,34 @@ export function loadPhaseDoc(phase: string): string | null {
   return loadPhaseGuidance(phase);
 }
 
+/**
+ * Pure renderer: the labeled phase-doc block for a phase, or null when unmapped.
+ * Both emitters below (stdout for status' primary output, stderr for action-verb
+ * side-channel) render through this one function so the banner/newline/null policy
+ * lives in a single place — only the stream and fatality differ.
+ */
+export function renderPhaseDoc(phase: string): string | null {
+  const doc = loadPhaseDoc(phase);
+  if (doc === null) return null;
+  const body = doc.endsWith("\n") ? doc : `${doc}\n`;
+  return `--- phase doc: ${phase} ---\n${body}`;
+}
+
+/** Emit guidance to stdout (status --with-doc: the doc is primary, scriptable output). */
+export function writePhaseDocToStdout(phase: string): boolean {
+  const rendered = renderPhaseDoc(phase);
+  if (rendered === null) return false;
+  process.stdout.write(rendered);
+  return true;
+}
+
 export async function writePhaseDocToStderr(phase: string, options: PhaseDocOptions = { noDoc: false }): Promise<void> {
   if (options.noDoc) return;
   const selectedPhase = options.docPhase ?? phase;
-  const doc = loadPhaseDoc(selectedPhase);
-  if (doc === null) {
+  const rendered = renderPhaseDoc(selectedPhase);
+  if (rendered === null) {
     console.error(`no phase guidance for: ${selectedPhase}`);
     return;
   }
-  console.error(`--- phase doc: ${selectedPhase} ---`);
-  process.stderr.write(doc.endsWith("\n") ? doc : `${doc}\n`);
+  process.stderr.write(rendered);
 }

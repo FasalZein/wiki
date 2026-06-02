@@ -3,8 +3,8 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { loadPhaseDoc } from "../src/cli/phase-docs";
-import { GUIDED_PHASES, skillsForPhase } from "../src/cli/guidance";
+import { loadPhaseDoc, renderPhaseDoc } from "../src/cli/phase-docs";
+import { GUIDED_PHASES, skillsForPhase, nextActionForPhase } from "../src/cli/guidance";
 
 const repoRoot = import.meta.dir.replace(/\/tests$/, "");
 const skillDir = join(repoRoot, "skills", "wiki");
@@ -114,6 +114,30 @@ describe("wiki skill bundle", () => {
         expect(skillsForPhase(phase), `SKILL.md table drift for phase ${phase}`).toEqual(advertised);
       }
     }
+  });
+
+  // --- phase model: next-action contract + renderer parity (one model, thin emitters) ---
+
+  test("every guided phase has a non-empty next-action; ad-hoc routes to set-a-phase", () => {
+    for (const phase of GUIDED_PHASES) {
+      const next = nextActionForPhase(phase, { project: "demo", slice: "SLICE-0001" });
+      expect(next.length, `phase ${phase} next-action`).toBeGreaterThan(0);
+    }
+    expect(nextActionForPhase("slice", { project: "demo", slice: "SLICE-0001" })).toBe("run wiki red SLICE-0001 --project demo");
+    expect(nextActionForPhase("ad-hoc", { project: "demo", slice: "<slice>" })).toContain("set a phase");
+    // genuinely unmapped phase falls back, never throws
+    expect(nextActionForPhase("nope", { project: "demo", slice: "x" })).toBe("no enforced next step");
+  });
+
+  test("renderPhaseDoc is the single body source both emitters share (no drift)", () => {
+    for (const phase of GUIDED_PHASES) {
+      const rendered = renderPhaseDoc(phase);
+      expect(rendered, `phase ${phase} render`).not.toBeNull();
+      // the labeled block always contains the phase's own guidance body
+      expect(rendered).toContain(`--- phase doc: ${phase} ---`);
+      expect(rendered).toContain(loadPhaseDoc(phase) ?? "\u0000");
+    }
+    expect(renderPhaseDoc("nope")).toBeNull();
   });
 
   test("status --with-doc emits CLI-owned guidance after the forked files are gone", async () => {
