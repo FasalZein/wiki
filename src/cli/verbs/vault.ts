@@ -5,6 +5,7 @@ import { initVault } from "../../bootstrap/init";
 import { syncVault } from "../../bootstrap/sync";
 import { blessPlugin, resetPlugin } from "../../bootstrap/bless";
 import { parseCommand, stringValue } from "../parse";
+import { unknownMessage } from "../usage";
 import type { CliResult } from "../dispatch";
 
 export async function handleVault(args: string[]): Promise<CliResult> {
@@ -21,7 +22,7 @@ export async function handleVault(args: string[]): Promise<CliResult> {
   if (action === "doctor") {
     return vaultDoctor(rest);
   }
-  console.error(`unknown vault action: ${action ?? ""}`.trim());
+  console.error(unknownMessage("vault action", action ?? "", ["init", "sync", "doctor", "config"]));
   return { code: 1 };
 }
 

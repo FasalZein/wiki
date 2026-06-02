@@ -10,6 +10,7 @@ import { handleStatus } from "./verbs/status";
 import { handleSync } from "./verbs/sync";
 import { handleValidate } from "./verbs/validate";
 import { handleVault } from "./verbs/vault";
+import { USAGE_REGISTRY, renderHelp, renderVerbList, unknownMessage, wantsHelp } from "./usage";
 
 export type CliResult = {
   code: number;
@@ -17,6 +18,33 @@ export type CliResult = {
 
 export async function dispatch(args: string[]): Promise<CliResult> {
   const [verb, ...rest] = args;
+
+  // Top-level help: bare `wiki` or `wiki --help` lists all verbs.
+  if (verb === undefined || verb === "--help" || verb === "-h") {
+    console.log(renderVerbList());
+    return { code: 0 };
+  }
+
+  // Per-verb / per-subverb help, intercepted before argument validation so
+  // `wiki status --help` never reaches the positional parser (ADR-0023).
+  if (wantsHelp(rest)) {
+    const entry = USAGE_REGISTRY[verb];
+    if (entry === undefined) {
+      console.error(unknownMessage("verb", verb));
+      return { code: 1 };
+    }
+    const subverb = rest[0];
+    if (entry.subverbs !== undefined && subverb !== undefined && subverb !== "--help" && subverb !== "-h") {
+      const subEntry = entry.subverbs[subverb];
+      if (subEntry !== undefined) {
+        console.log(renderHelp(`${verb} ${subverb}`, subEntry));
+        return { code: 0 };
+      }
+    }
+    console.log(renderHelp(verb, entry));
+    return { code: 0 };
+  }
+
   if (verb === "create") return handleCreate(rest);
   if (verb === "doc") return handleDoc(rest);
   if (verb === "red") return handleRed(rest);
@@ -32,7 +60,6 @@ export async function dispatch(args: string[]): Promise<CliResult> {
   if (verb === "vault") return handleVault(rest);
   if (verb === "project") return handleProject(rest);
   if (verb === "handover") return handleCreate(["handover", ...rest]);
-  console.error(`unknown verb: ${verb ?? ""}`.trim());
-  console.error("verbs: create, doc, red, green, close, status, search, validate, next-id, doctor, sync, session, vault, project, handover");
+  console.error(unknownMessage("verb", verb ?? ""));
   return { code: 1 };
 }

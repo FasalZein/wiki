@@ -9,14 +9,14 @@ import { DOC_CATEGORIES, isDocCategory } from "../../artifacts/registry";
 import { assertProjectStructure, ProjectConfigError } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import { parseCommand, stringValue } from "../parse";
+import { unknownMessage } from "../usage";
 import type { CliResult } from "../dispatch";
 
 export async function handleDoc(args: string[]): Promise<CliResult> {
   const [sub, ...rest] = args;
   if (sub === "retitle") return retitleDoc(rest);
   if (sub === "recategorize") return recategorizeDoc(rest);
-  console.error(`unknown doc subcommand: ${sub ?? ""}`.trim());
-  console.error("usage: wiki doc <retitle|recategorize> <DOC-NNNN> --project <name> [--title <t>] [--category <c>]");
+  console.error(unknownMessage("doc subcommand", sub ?? "", ["retitle", "recategorize"]));
   return { code: 1 };
 }
 

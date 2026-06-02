@@ -1,5 +1,4 @@
-import { join } from "node:path";
-import { stat } from "node:fs/promises";
+import { join, relative } from "node:path";
 
 import {
   DedupBlockedError,
@@ -26,6 +25,7 @@ import { readSession } from "../../state/session";
 import type { CliResult } from "../dispatch";
 import { parseCommand, stringValue } from "../parse";
 import { phaseDocOptions, writePhaseDocToStderr } from "../phase-docs";
+import { unknownMessage, USAGE_REGISTRY } from "../usage";
 
 export async function handleCreate(args: string[]): Promise<CliResult> {
   const [type, ...rest] = args;
@@ -34,8 +34,7 @@ export async function handleCreate(args: string[]): Promise<CliResult> {
   if (type === "decision") return createDecision(rest);
   if (type === "handover") return createHandover(rest);
   if (type === "doc") return createDoc(rest);
-  console.error(`unknown artifact type: ${type ?? ""}`.trim());
-  console.error("usage: wiki create <prd|slice|decision|handover|doc> [flags]");
+  console.error(unknownMessage("artifact type", type ?? "", Object.keys(USAGE_REGISTRY.create?.subverbs ?? {})));
   return { code: 1 };
 }
 
@@ -145,7 +144,7 @@ async function createWithSupersede(
       await setFields({ type, vaultRoot, project, id: override.id, fields: { status: "superseded", superseded_by: artifact.id } });
     }
     console.log(artifact.id);
-    console.error(`created ${artifact.id}`);
+    console.error(`created ${artifact.id} at ${relative(vaultRoot, artifact.path)}`);
     return { code: 0 };
   } catch (error) {
     return handleCreateError(error);
@@ -192,8 +191,7 @@ async function createHandover(args: string[]): Promise<CliResult> {
     const artifact = await createArtifact({ type: "handover", vaultRoot, project, fields });
     console.log(artifact.id);
     console.error(`created ${artifact.id}`);
-    const config = await loadProjectConfig(join(vaultRoot, "projects", project));
-    await writePhaseDocToStderr(config.repo, stringValue(parsed.values, "next-phase") ?? "ad-hoc", phaseDocOptions(parsed));
+    await writePhaseDocToStderr(stringValue(parsed.values, "next-phase") ?? "ad-hoc", phaseDocOptions(parsed));
     return { code: 0 };
   } catch (error) {
     if (error instanceof ArtifactValidationError) {
@@ -251,14 +249,6 @@ function missingFields(fields: Record<string, unknown>): CliResult | null {
     return { code: 1 };
   }
   return null;
-}
-
-async function fileExists(path: string): Promise<boolean> {
-  try {
-    return (await stat(path)).isFile();
-  } catch {
-    return false;
-  }
 }
 
 function addStringField(fields: Record<string, unknown>, name: string, value: string | undefined): void {

@@ -84,20 +84,21 @@ describe("status and session CLI", () => {
     expect(JSON.parse(show.stdout).project).toBe("wiki-v2");
   });
 
-  test("status --with-doc appends seeded phase doc", async () => {
+  test("status --with-doc emits CLI-owned phase guidance (ADR-0024)", async () => {
     const fixture = await createFixture();
-    await mkdir(join(fixture.repoPath, "skills", "wiki"), { recursive: true });
-    await writeFile(join(fixture.repoPath, "skills", "wiki", "PHASE-GREEN.md"), "# Green\nShip it\n");
     await runWiki(["session", "start", "--project", "wiki-v2", "--phase", "green"], fixture);
 
     const result = await runWiki(["status", "--project", "wiki-v2", "--with-doc"], fixture);
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("--- phase doc: green ---\n# Green\nShip it\n");
+    // green aliases to the slice/TDD guidance; guidance is code-owned, not seeded from the repo.
+    expect(result.stdout).toContain("--- phase doc: green ---");
+    expect(result.stdout).toContain("# Phase: slice");
+    expect(result.stdout.toLowerCase()).toContain("output contract");
     expect(result.stderr).toBe("");
   });
 
-  test("status --with-doc falls back to the bundled doc when repo has none", async () => {
+  test("status --with-doc renders the slice guidance for a slice-phase session", async () => {
     const fixture = await createFixture();
     await runWiki(["session", "start", "--project", "wiki-v2", "--phase", "slice"], fixture);
 

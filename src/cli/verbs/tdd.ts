@@ -55,7 +55,7 @@ async function handleTdd(verb: TddVerb, args: string[]): Promise<CliResult> {
     await setFields({ type: "slice", vaultRoot, project, id, fields: { status: verb, [statusField]: logPath } });
     console.log(logPath);
     console.error(`${verb} captured at ${logPath}`);
-    await writePhaseDocToStderr(config.repo, nextPhase, phaseDocOptions(parsed));
+    await writePhaseDocToStderr(nextPhase, phaseDocOptions(parsed));
     return { code: 0 };
   } catch (error) {
     if (error instanceof ArtifactNotFoundError || error instanceof ArtifactValidationError) {

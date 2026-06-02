@@ -1,8 +1,6 @@
-import { join } from "node:path";
-
 import { decideTransition } from "../../artifacts/transitions";
 import { ArtifactNotFoundError, ArtifactValidationError, readArtifact, setFields, type Artifact } from "../../artifacts/store";
-import { loadProjectConfig, ProjectConfigError } from "../../config/project";
+import { ProjectConfigError } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import type { CliResult } from "../dispatch";
 import { parseCommand, stringValue } from "../parse";
@@ -34,8 +32,7 @@ export async function handleClose(args: string[]): Promise<CliResult> {
     }
     await setFields({ type: "slice", vaultRoot, project, id, fields: { status: "closed", review_verdict: verdict } });
     console.error(`closed with verdict ${verdict}`);
-    const config = await loadProjectConfig(join(vaultRoot, "projects", project));
-    await writePhaseDocToStderr(config.repo, "handover", phaseDocOptions(parsed));
+    await writePhaseDocToStderr("handover", phaseDocOptions(parsed));
     return { code: 0 };
   } catch (error) {
     if (error instanceof ArtifactNotFoundError || error instanceof ArtifactValidationError) {

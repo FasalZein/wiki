@@ -4,18 +4,36 @@ import { join } from "node:path";
 import { projectPath } from "../../artifacts/paths";
 import { ARTIFACT_FOLDERS, STRUCTURAL_FOLDERS } from "../../artifacts/registry";
 import { deployViews } from "../../bootstrap/views";
+import { listProjects } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import { ensureObsidian, obsidianCreate } from "../../integrations/obsidian";
 import { ensureCollection } from "../../integrations/qmd";
 import type { CliResult } from "../dispatch";
+import { unknownMessage } from "../usage";
 
 export async function handleProject(args: string[]): Promise<CliResult> {
   const [subverb, ...rest] = args;
   if (subverb === "create") {
     return createProject(rest);
   }
-  console.error(`unknown project subverb: ${subverb ?? ""}`.trim());
+  if (subverb === "list") {
+    return listProjectsCommand();
+  }
+  console.error(unknownMessage("project subverb", subverb ?? "", ["create", "list"]));
   return { code: 1 };
+}
+
+async function listProjectsCommand(): Promise<CliResult> {
+  const vaultRoot = await getVaultRoot();
+  const projects = await listProjects(vaultRoot);
+  if (projects.length === 0) {
+    console.log("No projects yet. Create one with: wiki project create <name>");
+    return { code: 0 };
+  }
+  for (const project of projects) {
+    console.log(project);
+  }
+  return { code: 0 };
 }
 
 async function createProject(args: string[]): Promise<CliResult> {
