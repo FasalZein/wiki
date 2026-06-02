@@ -5,6 +5,7 @@ import { getVaultRoot } from "../../config/vault";
 import { clearSession, readSession, sessionPath, updateSession, writeSession, type SessionState } from "../../state/session";
 import type { CliResult } from "../dispatch";
 import { parseCommand, stringValue } from "../parse";
+import { unknownMessage } from "../usage";
 
 const sessionFields = new Set(["project", "active_prd", "active_slices", "phase", "notes"]);
 
@@ -14,7 +15,7 @@ export async function handleSession(args: string[]): Promise<CliResult> {
   if (subverb === "set") return setSession(rest);
   if (subverb === "show") return showSession(rest);
   if (subverb === "clear") return clearCurrentSession(rest);
-  console.error(`unknown session subverb: ${subverb ?? ""}`.trim());
+  console.error(unknownMessage("session subverb", subverb ?? "", ["start", "set", "show", "clear"]));
   return { code: 1 };
 }
 

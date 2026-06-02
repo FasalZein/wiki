@@ -1,7 +1,5 @@
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
-
 import { booleanValue, stringValue, type ParsedCommand } from "./parse";
+import { loadPhaseGuidance } from "./guidance";
 
 export type PhaseDocOptions = {
   noDoc: boolean;
@@ -15,31 +13,23 @@ export function phaseDocOptions(parsed: ParsedCommand): PhaseDocOptions {
   };
 }
 
-export async function loadPhaseDoc(repo: string, phase: string): Promise<string | null> {
-  try {
-    return await readFile(phaseDocPath(repo, phase), "utf8");
-  } catch (error) {
-    if (isFileNotFound(error)) return null;
-    throw error;
-  }
+/**
+ * Resolve the inline guidance for a phase. Guidance is CLI-owned (src/cli/guidance.ts,
+ * ADR-0024/0026), not read from forked skill files. Returns null when a phase has
+ * no guidance (e.g. ad-hoc).
+ */
+export function loadPhaseDoc(phase: string): string | null {
+  return loadPhaseGuidance(phase);
 }
 
-export async function writePhaseDocToStderr(repo: string, phase: string, options: PhaseDocOptions = { noDoc: false }): Promise<void> {
+export async function writePhaseDocToStderr(phase: string, options: PhaseDocOptions = { noDoc: false }): Promise<void> {
   if (options.noDoc) return;
   const selectedPhase = options.docPhase ?? phase;
-  const doc = await loadPhaseDoc(repo, selectedPhase);
+  const doc = loadPhaseDoc(selectedPhase);
   if (doc === null) {
-    console.error(`phase doc missing: ${selectedPhase}`);
+    console.error(`no phase guidance for: ${selectedPhase}`);
     return;
   }
   console.error(`--- phase doc: ${selectedPhase} ---`);
   process.stderr.write(doc.endsWith("\n") ? doc : `${doc}\n`);
-}
-
-export function phaseDocPath(repo: string, phase: string): string {
-  return join(repo, "skills", "wiki", `PHASE-${phase.toUpperCase()}.md`);
-}
-
-function isFileNotFound(error: unknown): boolean {
-  return error instanceof Error && "code" in error && error.code === "ENOENT";
 }

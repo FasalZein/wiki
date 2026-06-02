@@ -1,14 +1,18 @@
 import { readdir } from "node:fs/promises";
+import { join } from "node:path";
 
 import type { TemplateType } from "../schema/load";
 import { artifactDirectory } from "./paths";
+import { ARTIFACTS } from "./registry";
 
 export async function nextId(type: TemplateType, vaultRoot: string, project: string): Promise<string> {
-  const prefix = idPrefix(type);
+  const prefix = ARTIFACTS[type].prefix;
   const directory = artifactDirectory(type, vaultRoot, project);
-  const entries = await readdir(directory);
+  // Docs may be organized into category subfolders; ids stay globally unique
+  // per project, so scan recursively for that type. Other types stay flat.
+  const entries = type === "doc" ? await readMarkdownNamesRecursive(directory) : await readdir(directory);
 
-  const prefixPattern = new RegExp(`^${prefix}-(\\d{3,})\\.md$`);
+  const prefixPattern = new RegExp(`^${prefix}-(\\d{3,})(?:-.+)?\\.md$`);
   const adrPattern = /^(\d{3,})-.+\.md$/;
 
   let highest = 0;
@@ -31,15 +35,20 @@ export async function nextId(type: TemplateType, vaultRoot: string, project: str
   return `${prefix}-${String(highest + 1).padStart(4, "0")}`;
 }
 
-function idPrefix(type: TemplateType): string {
-  switch (type) {
-    case "decision":
-      return "DECISION";
-    case "prd":
-      return "PRD";
-    case "slice":
-      return "SLICE";
-    case "handover":
-      return "HANDOVER";
+async function readMarkdownNamesRecursive(directory: string): Promise<string[]> {
+  const names: string[] = [];
+  let entries;
+  try {
+    entries = await readdir(directory, { withFileTypes: true });
+  } catch {
+    return names;
   }
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      names.push(...await readMarkdownNamesRecursive(join(directory, entry.name)));
+    } else if (entry.isFile()) {
+      names.push(entry.name);
+    }
+  }
+  return names;
 }

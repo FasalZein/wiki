@@ -16,11 +16,11 @@ describe("decision CLI", () => {
     const result = await runWiki(createArgs(), vaultRoot);
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe("DECISION-0001\n");
-    expect(result.stderr).toContain("created DECISION-0001");
+    expect(result.stdout).toBe("ADR-0001\n");
+    expect(result.stderr).toContain("created ADR-0001");
 
-    const file = await readFile(join(vaultRoot, "projects", "wiki-v2", "adrs", "DECISION-0001.md"), "utf8");
-    expect(file).toContain("id: DECISION-0001");
+    const file = await readFile(join(vaultRoot, "projects", "wiki-v2", "adrs", "ADR-0001-use-sqlite.md"), "utf8");
+    expect(file).toContain("id: ADR-0001");
     expect(file).toContain("# Use SQLite");
   });
 
@@ -99,6 +99,7 @@ async function createFixtureVault(project: string): Promise<string> {
   await mkdir(join(projectPath, "slices"));
   await mkdir(join(projectPath, "adrs"));
   await mkdir(join(projectPath, "handovers"));
+  await mkdir(join(projectPath, "docs"));
   const qmdCommand = join(vaultRoot, "fake-qmd");
   await writeFile(qmdCommand, "#!/usr/bin/env bash\nset -euo pipefail\ncase \"${1:-}\" in\n  collection) exit 0 ;;\n  query) echo '[]' ;;\nesac\n");
   await chmod(qmdCommand, 0o755);

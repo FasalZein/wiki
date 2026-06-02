@@ -16,7 +16,7 @@ describe("advisory dedup", () => {
     const result = await runWiki(decisionArgs(), fixture);
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe("DECISION-0001\n");
+    expect(result.stdout).toBe("ADR-0001\n");
     expect(await readFile(fixture.stateFile, "utf8")).toContain(
       "query Use SQLite Need a durable local index. Use SQLite for local persistence. --json --collection wiki-v2\n",
     );
@@ -73,7 +73,7 @@ describe("advisory dedup", () => {
     );
 
     expect(result.exitCode).toBe(0);
-    expect(await readFile(join(fixture.projectPath, "prds", "PRD-0001.md"), "utf8")).toContain(
+    expect(await readFile(join(fixture.projectPath, "prds", "PRD-0001-core-wiki-cli.md"), "utf8")).toContain(
       "force_new_reason: This is intentionally different from the existing PRD",
     );
   });
@@ -97,7 +97,7 @@ describe("advisory dedup", () => {
     const result = await runWiki(["create", "prd", "--title", "Core wiki CLI", "--project", "wiki-v2", "--related-to", "PRD-0007"], fixture);
 
     expect(result.exitCode).toBe(0);
-    expect(await readFile(join(fixture.projectPath, "prds", "PRD-0001.md"), "utf8")).toContain("related:\n  - PRD-0007");
+    expect(await readFile(join(fixture.projectPath, "prds", "PRD-0001-core-wiki-cli.md"), "utf8")).toContain("related:\n  - PRD-0007");
   });
 
   test("supersedes bypasses the gate and updates the old same-type artifact", async () => {
@@ -107,8 +107,8 @@ describe("advisory dedup", () => {
     const result = await runWiki(["create", "prd", "--title", "Core wiki CLI", "--project", "wiki-v2", "--supersedes", "PRD-0001"], fixture);
 
     expect(result.exitCode).toBe(0);
-    expect(await readFile(join(fixture.projectPath, "prds", "PRD-0002.md"), "utf8")).toContain("supersedes: PRD-0001");
-    const old = await readFile(join(fixture.projectPath, "prds", "PRD-0001.md"), "utf8");
+    expect(await readFile(join(fixture.projectPath, "prds", "PRD-0002-core-wiki-cli.md"), "utf8")).toContain("supersedes: PRD-0001");
+    const old = await readFile(join(fixture.projectPath, "prds", "PRD-0001-old-wiki-cli.md"), "utf8");
     expect(old).toContain("status: superseded");
     expect(old).toContain("superseded_by: PRD-0002");
   });
@@ -187,6 +187,7 @@ async function createDedupFixture(project: string, options: DedupFixtureOptions 
   await mkdir(join(projectPath, "slices"));
   await mkdir(join(projectPath, "adrs"));
   await mkdir(join(projectPath, "handovers"));
+  await mkdir(join(projectPath, "docs"));
 
   const stateFile = join(root, "qmd-state.log");
   const registeredFile = join(root, "qmd-registered.txt");

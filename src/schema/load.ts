@@ -12,7 +12,7 @@ export function resolveTemplatePath(filename: string): string {
   return fromDist;
 }
 
-export type TemplateType = "prd" | "slice" | "decision" | "handover";
+export type TemplateType = "prd" | "slice" | "decision" | "handover" | "doc";
 
 const fieldTypes: ReadonlySet<string> = new Set<FieldType>([
   "string",

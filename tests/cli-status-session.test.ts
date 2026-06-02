@@ -84,28 +84,30 @@ describe("status and session CLI", () => {
     expect(JSON.parse(show.stdout).project).toBe("wiki-v2");
   });
 
-  test("status --with-doc appends seeded phase doc", async () => {
+  test("status --with-doc emits CLI-owned phase guidance (ADR-0024)", async () => {
     const fixture = await createFixture();
-    await mkdir(join(fixture.repoPath, "skills", "wiki"), { recursive: true });
-    await writeFile(join(fixture.repoPath, "skills", "wiki", "PHASE-GREEN.md"), "# Green\nShip it\n");
     await runWiki(["session", "start", "--project", "wiki-v2", "--phase", "green"], fixture);
 
     const result = await runWiki(["status", "--project", "wiki-v2", "--with-doc"], fixture);
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("--- phase doc: green ---\n# Green\nShip it\n");
+    // green aliases to the slice/TDD guidance; guidance is code-owned, not seeded from the repo.
+    expect(result.stdout).toContain("--- phase doc: green ---");
+    expect(result.stdout).toContain("# Phase: slice");
+    expect(result.stdout.toLowerCase()).toContain("output contract");
     expect(result.stderr).toBe("");
   });
 
-  test("status --with-doc missing doc is non-fatal", async () => {
+  test("status --with-doc renders the slice guidance for a slice-phase session", async () => {
     const fixture = await createFixture();
-    await runWiki(["session", "start", "--project", "wiki-v2", "--phase", "green"], fixture);
+    await runWiki(["session", "start", "--project", "wiki-v2", "--phase", "slice"], fixture);
 
     const result = await runWiki(["status", "--project", "wiki-v2", "--with-doc"], fixture);
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("Project: wiki-v2");
-    expect(result.stderr).toContain("phase doc not found");
+    expect(result.stdout).toContain("--- phase doc: slice ---");
+    expect(result.stdout).toContain("# Phase: slice");
   });
 
   test("session set updates fields and supports stdin notes", async () => {
@@ -148,8 +150,8 @@ describe("status and session CLI", () => {
 
     expect(fromSession.exitCode).toBe(0);
     expect(override.exitCode).toBe(0);
-    const first = matter(await readFile(join(fixture.vaultRoot, "projects", "wiki-v2", "handovers", "HANDOVER-0001.md"), "utf8")).data;
-    const second = matter(await readFile(join(fixture.vaultRoot, "projects", "wiki-v2", "handovers", "HANDOVER-0002.md"), "utf8")).data;
+    const first = matter(await readFile(join(fixture.vaultRoot, "projects", "wiki-v2", "handovers", "HANDOVER-0001-handover-0001.md"), "utf8")).data;
+    const second = matter(await readFile(join(fixture.vaultRoot, "projects", "wiki-v2", "handovers", "HANDOVER-0002-handover-0002.md"), "utf8")).data;
     expect(first.phase).toBe("green");
     expect(first.active_prd).toBe("PRD-001");
     expect(first.active_slices).toEqual(["SLICE-011"]);
@@ -182,6 +184,7 @@ async function createFixture(): Promise<Fixture> {
   await mkdir(join(projectPath, "slices"));
   await mkdir(join(projectPath, "adrs"));
   await mkdir(join(projectPath, "handovers"));
+  await mkdir(join(projectPath, "docs"));
   await writeFile(join(projectPath, "_project.md"), `---\nproject: ${project}\nrepo: ${repoPath}\ntest_command: bun test\n---\n# ${project}\n`);
   return { vaultRoot, repoPath, cwd };
 }

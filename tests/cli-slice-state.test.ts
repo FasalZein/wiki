@@ -244,6 +244,7 @@ esac
   await mkdir(join(projectPath, "slices"));
   await mkdir(join(projectPath, "adrs"));
   await mkdir(join(projectPath, "handovers"));
+  await mkdir(join(projectPath, "docs"));
   await writeFile(
     join(projectPath, "_project.md"),
     options.projectConfig === undefined
@@ -269,7 +270,7 @@ async function createSliceWithAcceptance(fixture: Fixture): Promise<void> {
 }
 
 async function setSliceFields(vaultRoot: string, fields: Record<string, unknown>): Promise<void> {
-  const path = join(vaultRoot, "projects", "wiki-v2", "slices", "SLICE-0001.md");
+  const path = join(vaultRoot, "projects", "wiki-v2", "slices", "SLICE-0001-build-slice-authoring.md");
   const content = await readFile(path, "utf8");
   const parsed = matter(content);
   Object.assign(parsed.data, fields);
@@ -277,7 +278,7 @@ async function setSliceFields(vaultRoot: string, fields: Record<string, unknown>
 }
 
 async function appendSliceField(vaultRoot: string, field: string, value: unknown): Promise<void> {
-  const path = join(vaultRoot, "projects", "wiki-v2", "slices", "SLICE-0001.md");
+  const path = join(vaultRoot, "projects", "wiki-v2", "slices", "SLICE-0001-build-slice-authoring.md");
   const content = await readFile(path, "utf8");
   const parsed = matter(content);
   const current = parsed.data[field];
@@ -323,7 +324,7 @@ async function runWiki(args: string[], vaultRoot: string): Promise<CommandResult
 }
 
 async function readSlice(vaultRoot: string): Promise<string> {
-  return readFile(join(vaultRoot, "projects", "wiki-v2", "slices", "SLICE-0001.md"), "utf8");
+  return readFile(join(vaultRoot, "projects", "wiki-v2", "slices", "SLICE-0001-build-slice-authoring.md"), "utf8");
 }
 
 function sliceFields(content: string): Record<string, unknown> {

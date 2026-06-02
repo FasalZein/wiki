@@ -4,36 +4,23 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { loadPhaseDoc } from "../src/cli/phase-docs";
+import { GUIDED_PHASES } from "../src/cli/guidance";
 
 const repoRoot = import.meta.dir.replace(/\/tests$/, "");
 const skillDir = join(repoRoot, "skills", "wiki");
 
-const requiredFiles = [
-  "SKILL.md",
-  "PHASE-PLAN.md",
-  "PHASE-PRD.md",
-  "PHASE-SLICE.md",
-  "PHASE-TRIAGE.md",
-  "PHASE-HANDOVER.md",
-  "ADMIN-VAULT.md",
-  "ADMIN-MIGRATION.md",
-] as const;
-
-const triggerTerms = ["vault", "PRD", "slice", "decision", "TDD", "close", "handover", "init", "doctor", "migrate"] as const;
-const phaseDocs = ["plan", "prd", "slice", "triage", "handover"] as const;
+const triggerTerms = ["vault", "PRD", "slice", "decision", "TDD", "close", "handover", "init", "doctor"] as const;
 
 describe("wiki skill bundle", () => {
-  test("required source files are the only non-placeholder files in skills/wiki", async () => {
+  test("the skill collapses to a single SKILL.md (SLICE-0040: forked PHASE/ADMIN docs removed)", async () => {
     const entries = (await readdir(skillDir)).sort();
 
-    expect(entries).toEqual([...requiredFiles].sort());
+    expect(entries).toEqual(["SKILL.md"]);
   });
 
-  test("all required files are non-empty", async () => {
-    for (const file of requiredFiles) {
-      const content = await readFile(join(skillDir, file), "utf8");
-      expect(content.trim().length).toBeGreaterThan(0);
-    }
+  test("SKILL.md is non-empty", async () => {
+    const content = await readFile(join(skillDir, "SKILL.md"), "utf8");
+    expect(content.trim().length).toBeGreaterThan(0);
   });
 
   test("SKILL.md stays within the line cap and exposes trigger terms in its description", async () => {
@@ -47,16 +34,45 @@ describe("wiki skill bundle", () => {
     }
   });
 
-  test("phase docs carry lineage frontmatter and can be read by the phase doc loader", async () => {
-    for (const phase of phaseDocs) {
-      const doc = await loadPhaseDoc(repoRoot, phase);
+  test("SKILL.md is a thin router: no duplicated command syntax (ADR-0025)", async () => {
+    const skill = await readFile(join(skillDir, "SKILL.md"), "utf8");
 
-      expect(doc).not.toBeNull();
-      expect(doc).toMatch(/^---\n[\s\S]*(based-on:|source: wiki-v2)[\s\S]*---\n/);
+    // No fenced code blocks restating CLI syntax.
+    expect(skill).not.toContain("```");
+    // No flag-bearing command syntax — the CLI owns that via `wiki <verb> --help`.
+    // Inline router pointers like `wiki status --with-doc` are allowed; concrete
+    // create/transition syntax with required flags is not.
+    expect(skill).not.toMatch(/wiki create \w+ --\w+/);
+    expect(skill).not.toMatch(/--project <name> --title/);
+    // It must point the agent at the authoritative surfaces instead.
+    expect(skill).toContain("wiki <verb> --help");
+    expect(skill).toContain("wiki status");
+    // And it must state the hard output contract (ADR-0026).
+    expect(skill.toLowerCase()).toContain("output contract");
+    expect(skill).toContain("vault");
+  });
+
+  test("phase guidance is CLI-owned and resolves without any forked skill files (ADR-0024)", () => {
+    // The core SLICE-0040 guarantee: removing the forked PHASE-*.md files must NOT
+    // blank out --with-doc / auto-doc. Guidance now lives in src/cli/guidance.ts.
+    for (const phase of ["plan", "prd", "slice", "triage", "handover"]) {
+      const doc = loadPhaseDoc(phase);
+      expect(doc, `guidance missing for phase: ${phase}`).not.toBeNull();
+      expect(doc).toContain(`# Phase: ${phase === "plan" ? "plan (grill)" : phase}`);
+      // Every guided phase reprints the output contract — the integration seam.
+      expect(doc?.toLowerCase()).toContain("output contract");
     }
   });
 
-  test("status --with-doc reads the repo-owned phase docs", async () => {
+  test("transition phases alias to slice guidance; unmapped phases return null", () => {
+    expect(loadPhaseDoc("green")).toContain("# Phase: slice");
+    expect(loadPhaseDoc("close")).toContain("# Phase: slice");
+    expect(loadPhaseDoc("ad-hoc")).toBeNull();
+    expect(GUIDED_PHASES).toContain("plan");
+    expect(GUIDED_PHASES).toContain("handover");
+  });
+
+  test("status --with-doc emits CLI-owned guidance after the forked files are gone", async () => {
     const vaultRoot = await mkdtemp(join(tmpdir(), "wiki-vault-"));
     const sessionPath = join(repoRoot, ".wiki", "state", "session.json");
     const existingSession = await readFile(sessionPath, "utf8").catch((error: unknown) => {
@@ -76,8 +92,9 @@ describe("wiki skill bundle", () => {
       const result = await runWiki(["status", "--project", "wiki-v2", "--with-doc"], vaultRoot);
 
       expect(result.exitCode).toBe(0);
-      expect(result.stdout).toContain("--- phase doc: slice ---\n---\nbased-on:");
+      expect(result.stdout).toContain("--- phase doc: slice ---");
       expect(result.stdout).toContain("# Phase: slice");
+      expect(result.stdout.toLowerCase()).toContain("output contract");
     } finally {
       if (existingSession === null) {
         await rm(sessionPath, { force: true });

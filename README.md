@@ -12,10 +12,10 @@ All architectural decisions live in the vault, not this repo:
 
 - **Planning project:** `~/Knowledge/projects/wiki-v2/`
 - **ADRs (16):** `~/Knowledge/projects/wiki-v2/adrs/`
-- **Domain glossary:** `~/Knowledge/projects/wiki-v2/architecture/domain-language.md`
+- **Docs:** `~/Knowledge/projects/wiki-v2/docs/`
 - **Templates:** `~/Knowledge/_templates/` (source of truth — this repo's `templates/` is the bundled-with-CLI copy)
 
-Read the ADRs in order before changing the architecture. Read `domain-language.md` before writing prose about the system.
+Read the ADRs in order before changing the architecture. Read relevant docs before writing prose about the system.
 
 ## Predecessor (v1)
 
@@ -43,6 +43,8 @@ Read the ADRs in order before changing the architecture. Read `domain-language.m
 - **Templates carry schema in frontmatter.** Don't write artifacts without going through a schema. (ADR-0004)
 - **TDD is structurally enforced.** Slice cannot close without recorded red→green logs. (ADR-0005)
 - **Dedup gate runs before every PRD/slice/decision create.** No silent overwrites. (ADR-0010)
+- **Artifact filenames are human-readable.** New artifacts use `ID-title-slug.md`; resolve by frontmatter ID, not by assuming `ID.md`.
+- **Docs are nested by category.** Docs live in `docs/<category>/` where category is a locked set: `architecture`, `research`, `runbooks`, `specs`, `notes`, `legacy`. DOC ids stay globally unique per project. `wiki create doc --category <cat>` (defaults from `--type`).
 
 ## Development
 

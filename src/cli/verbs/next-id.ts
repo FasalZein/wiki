@@ -4,7 +4,7 @@ import { getVaultRoot } from "../../config/vault";
 import type { CliResult } from "../dispatch";
 import { parseCommand, stringValue } from "../parse";
 
-const validTypes = new Set<string>(["prd", "slice", "decision", "handover"]);
+const validTypes = new Set<string>(["prd", "slice", "decision", "doc", "handover"]);
 
 export async function handleNextId(args: string[]): Promise<CliResult> {
   const parsed = parseCommand(args, ["project"]);

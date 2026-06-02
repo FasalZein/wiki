@@ -2,19 +2,38 @@ import { mkdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 import { projectPath } from "../../artifacts/paths";
+import { ARTIFACT_FOLDERS, STRUCTURAL_FOLDERS } from "../../artifacts/registry";
 import { deployViews } from "../../bootstrap/views";
+import { listProjects } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import { ensureObsidian, obsidianCreate } from "../../integrations/obsidian";
 import { ensureCollection } from "../../integrations/qmd";
 import type { CliResult } from "../dispatch";
+import { unknownMessage } from "../usage";
 
 export async function handleProject(args: string[]): Promise<CliResult> {
   const [subverb, ...rest] = args;
   if (subverb === "create") {
     return createProject(rest);
   }
-  console.error(`unknown project subverb: ${subverb ?? ""}`.trim());
+  if (subverb === "list") {
+    return listProjectsCommand();
+  }
+  console.error(unknownMessage("project subverb", subverb ?? "", ["create", "list"]));
   return { code: 1 };
+}
+
+async function listProjectsCommand(): Promise<CliResult> {
+  const vaultRoot = await getVaultRoot();
+  const projects = await listProjects(vaultRoot);
+  if (projects.length === 0) {
+    console.log("No projects yet. Create one with: wiki project create <name>");
+    return { code: 0 };
+  }
+  for (const project of projects) {
+    console.log(project);
+  }
+  return { code: 0 };
 }
 
 async function createProject(args: string[]): Promise<CliResult> {
@@ -41,7 +60,7 @@ async function createProject(args: string[]): Promise<CliResult> {
   }
 
   // Create directory structure
-  const dirs = ["prds", "slices", "adrs", "handovers", "architecture"];
+  const dirs = [...ARTIFACT_FOLDERS, ...STRUCTURAL_FOLDERS];
   await Promise.all(dirs.map((dir) => mkdir(join(projPath, dir), { recursive: true })));
 
   const today = new Date().toISOString().slice(0, 10);
@@ -49,24 +68,6 @@ async function createProject(args: string[]): Promise<CliResult> {
   // Create _project.md
   const projectContent = `---\nproject: ${name}\nstatus: planning\ncreated: ${today}\n---\n# ${name}\n`;
   await obsidianCreate("_project", projectContent, `projects/${name}`);
-
-  // Create architecture/domain-language.md
-  const domainContent = [
-    `---`,
-    `project: ${name}`,
-    `artifact: domain-language`,
-    `updated: ${today}`,
-    `---`,
-    `# Domain Language`,
-    ``,
-    `## Storage and structure`,
-    ``,
-    `## Delivery lifecycle`,
-    ``,
-    `## Relationships`,
-    ``,
-  ].join("\n");
-  await obsidianCreate("domain-language", domainContent, `projects/${name}/architecture`);
 
   // Deploy .base view files
   await deployViews(vaultRoot, name);
