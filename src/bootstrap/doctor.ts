@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import { loadPluginManifest, requiredPlugins, loadDefaultConfig } from "./manifest";
 import { readLockfile } from "./plugins";
+import { DOC_CATEGORIES } from "../artifacts/registry";
 
 export type DriftIssue = {
   type:
@@ -10,9 +11,11 @@ export type DriftIssue = {
     | "version-mismatch"
     | "config-drift"
     | "missing-template"
-    | "community-plugins-mismatch";
+    | "community-plugins-mismatch"
+    | "docs-structure";
   plugin?: string;
   template?: string;
+  project?: string;
   expected?: string;
   actual?: string;
   message: string;
@@ -200,5 +203,43 @@ export async function runDoctor(
     }
   }
 
+  // 6. Docs structure: docs/ holds only the locked category subfolders (ADR superseding
+  //    0021/0022 — categorized model). Flag any out-of-set subfolder (the out-of-CLI
+  //    folder-invention leak the CLI write paths cannot catch) and any loose file sitting
+  //    directly under docs/ instead of inside a category folder.
+  await checkDocsStructure(vaultPath, issues);
+
   return { issues, clean: issues.length === 0 };
+}
+
+async function checkDocsStructure(vaultPath: string, issues: DriftIssue[]): Promise<void> {
+  const projectsDir = join(vaultPath, "projects");
+  if (!(await exists(projectsDir))) return;
+  const locked = new Set<string>(DOC_CATEGORIES);
+
+  const projects = (await readdir(projectsDir, { withFileTypes: true }))
+    .filter((e) => e.isDirectory() && !e.name.startsWith("_"));
+  for (const project of projects) {
+    const docsDir = join(projectsDir, project.name, "docs");
+    if (!(await exists(docsDir))) continue;
+    for (const entry of await readdir(docsDir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        if (!locked.has(entry.name)) {
+          issues.push({
+            type: "docs-structure",
+            project: project.name,
+            actual: entry.name,
+            message: `${project.name}: docs/${entry.name}/ is not a locked category — docs must live in one of: ${DOC_CATEGORIES.join(", ")}. Move its docs with 'wiki doc recategorize' or remove the folder.`,
+          });
+        }
+      } else if (entry.name.endsWith(".md")) {
+        issues.push({
+          type: "docs-structure",
+          project: project.name,
+          actual: entry.name,
+          message: `${project.name}: docs/${entry.name} sits directly under docs/ — docs belong inside a locked category folder, not loose. Recreate via 'wiki create doc' or move it into a category.`,
+        });
+      }
+    }
+  }
 }

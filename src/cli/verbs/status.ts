@@ -65,6 +65,7 @@ function nextAction(project: string, phase: string, activeSlice: string | undefi
     return `run wiki close ${slice} --project ${project} --review-verdict pass`;
   }
   if (phase === "handover") return "run wiki handover ...";
+  if (phase === "ad-hoc") return "set a phase to begin: wiki session set phase <plan|prd|slice|triage>, then rerun wiki status --with-doc";
   return "no enforced next step";
 }
 

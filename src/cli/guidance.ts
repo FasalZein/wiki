@@ -108,6 +108,28 @@ Next action:
 
 Close stale open handovers once the next agent resumes.
 
+Sync before you hand off: once all writes for this session are done, run
+\`wiki sync --project <name>\` (add \`--include-research\` if relevant) so semantic
+search reflects them. \`wiki search\` auto-updates the index but does NOT re-embed,
+so new/edited artifacts stay invisible to ranked search until a sync.
+
+${OUTPUT_CONTRACT}`;
+
+const AD_HOC = `# Phase: ad-hoc
+
+You are in an ad-hoc session: no workflow phase is set, so there is no enforced
+next step. This is the default for a freshly started session.
+
+To enter the delivery workflow, set a phase, then rerun \`wiki status --with-doc\`:
+- \`wiki session set phase plan\` — fuzzy scope, multiple approaches (grill first).
+- \`wiki session set phase prd\` — scope is clear; write the requirement.
+- \`wiki session set phase slice\` — a PRD exists; break it into slices and deliver.
+- \`wiki session set phase triage\` — state is unclear; restore a trustworthy next step.
+(You can also pass \`--phase <phase>\` to \`wiki session start\` up front.)
+
+Ad-hoc is fine for one-off reads, searches, or admin (\`wiki search\`, \`wiki doctor\`,
+\`wiki vault --help\`). Set a phase only when you are doing delivery work.
+
 ${OUTPUT_CONTRACT}`;
 
 /** Phase name → guidance payload. Transition/gate phases alias to the slice doc. */
@@ -121,12 +143,39 @@ const PHASE_GUIDANCE: Record<string, string> = {
   close: SLICE,
   triage: TRIAGE,
   handover: HANDOVER,
+  "ad-hoc": AD_HOC,
 };
 
-/** Return the CLI-owned guidance for a phase, or null when none applies (e.g. ad-hoc). */
+/** Return the CLI-owned guidance for a phase, or null when the phase is genuinely unmapped. */
 export function loadPhaseGuidance(phase: string): string | null {
   return PHASE_GUIDANCE[phase.toLowerCase()] ?? null;
 }
 
 /** Phases that have guidance — used by tests and tooling. */
 export const GUIDED_PHASES: string[] = Object.keys(PHASE_GUIDANCE);
+
+/**
+ * Single source of truth for the phase→upstream-skill mapping (the one value this
+ * subsystem exists to communicate). The CLI EMITS these names so the agent loads
+ * them; it never reads or executes skill files (ADR-0024/0026). The payload prose
+ * above and the routing table in skills/wiki/SKILL.md are human-facing restatements
+ * of this map and are pinned to it by tests (tests/skill-bundle.test.ts) so they
+ * cannot drift. `ad-hoc` intentionally maps to no skill — it only routes to a phase.
+ */
+const PHASE_SKILLS: Record<string, string[]> = {
+  plan: ["grill-with-docs"],
+  prd: ["to-prd"],
+  slice: ["to-issues", "tdd"],
+  red: ["to-issues", "tdd"],
+  green: ["to-issues", "tdd"],
+  review: ["to-issues", "tdd"],
+  close: ["to-issues", "tdd"],
+  triage: ["triage"],
+  handover: ["handoff"],
+  "ad-hoc": [],
+};
+
+/** The upstream skill(s) the agent should load for a phase. Empty when none applies. */
+export function skillsForPhase(phase: string): string[] {
+  return PHASE_SKILLS[phase.toLowerCase()] ?? [];
+}

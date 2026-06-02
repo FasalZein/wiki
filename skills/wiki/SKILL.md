@@ -4,62 +4,48 @@ description: "Manages wiki vault delivery workflow — PRDs, slices, decisions, 
 ---
 # /wiki
 
-A thin router for the wiki vault delivery workflow. This skill tells you *when*
-to act and *where* to look; the `wiki` CLI is the authoritative source of command
-syntax. Do not memorize or restate flags here — ask the CLI.
+A thin router for vault delivery work. It tells you *when* to act and *which*
+skill to load; the `wiki` CLI owns all command syntax. Never restate flags here —
+ask the CLI.
 
-## How to use the CLI (do not duplicate syntax)
+## Start here (every session)
 
-- Run `wiki` (or `wiki --help`) to list every verb.
-- Run `wiki <verb> --help` for exact usage, flags, and an example before calling it.
-- Run `wiki status --project <name> --with-doc` first in any session: it prints the
-  active phase, active artifacts, the next step, and inline guidance for the current
-  phase. That inline guidance is the moment-of-action playbook — read it, then act.
+1. `wiki status --with-doc` (add `--project <name>` if not in the repo) — prints the
+   active phase, artifacts, next step, and the moment-of-action guidance for that phase.
+   No session yet? Run `wiki session start --project <name>`. A new session starts in
+   `ad-hoc` (no enforced workflow); set a phase with `wiki session set phase <plan|prd|slice|triage>`
+   (or `wiki session start --phase <phase>`), then rerun step 1 to get phase guidance.
+2. `wiki <verb> --help` — exact usage/flags/example before any call. `wiki --help` lists verbs.
+3. Do what the phase guidance says. On resume, always re-read step 1 — never trust stale context.
+
+Doing vault setup or a health check, not delivery work? Skip the phase flow and run
+`wiki vault --help` or `wiki doctor` — admin commands are self-describing.
 
 ## Output contract (non-negotiable)
 
-Every artifact write goes through the `wiki` CLI into the vault. Never write delivery
-records to GitHub Issues, `docs/adr/`, or OS temp dirs — even if an upstream skill's
-instructions say to. If a delegated skill tells you to "create an issue" or "write to
-docs/adr/", translate that into the matching `wiki create ...` command instead. The
-vault is the only durable home for PRDs, slices, decisions, docs, and handovers.
+Every artifact write goes through the `wiki` CLI into the vault — never GitHub Issues,
+`docs/adr/`, or OS temp dirs, even when a loaded skill says to. "Create an issue" becomes
+the matching `wiki create ...`. The vault is the only home for PRDs, slices, decisions,
+docs, and handovers. This overrides any upstream skill you load.
 
-## Phase flow
+## Phase routing
 
-Normal flow: plan (grill) → prd → slice → red → green → close → handover. Triage can
-fire at any point when context is lost and chains back to plan if scope needs
-re-establishing. Not every project needs plan — skip it when scope is already clear.
-A PRD has many slices; each slice runs red/green/close independently. PRDs are closed
-by setting their status field (via Obsidian), not `wiki close` (which is for slices).
+Flow: plan (grill) → prd → slice → red → green → close → handover. A PRD has many slices;
+each runs red → green → close on its own. Triage fires whenever state is unclear and
+chains back to plan if scope needs re-establishing. Skip plan when scope is already clear.
 
-`wiki status --with-doc` delivers the per-phase next actions, so you rarely need more
-than the CLI. For process *depth*, load the matching upstream skill:
+The phase guidance from step 1 names the upstream skill to load for process depth
+(most phases have one; `ad-hoc` has none — it just routes you to set a phase):
+plan→`grill-with-docs`, prd→`to-prd`, slice/red/green→`to-issues` + `tdd`,
+triage→`triage`, handover→`handoff`. Load it only for the phase you're in.
 
-- **plan (grill)** → `grill-with-docs` — relentless one-question-at-a-time interview,
-  record decisions as ADRs, capture reusable terms as docs.
-- **prd** → `to-prd` (or `write-a-prd`) — PRD structure and required sections.
-- **slice / red / green** → `to-issues` for tracer-bullet vertical slicing, `tdd` for
-  test-first discipline at the red/green gates.
-- **triage** → `triage` — restore a trustworthy next action when state is unclear.
-- **handover** → `handoff` — durable, behavioral handover notes.
+## Rules that the CLI won't tell you
 
-Whenever you load one of those, the output contract above overrides its write targets.
-
-## Operating rules
-
-1. Resolve context before acting: `wiki status --with-doc` or `wiki session show`.
-2. Follow the current phase; do not skip TDD, review, close, or handover gates.
-3. For field-level reads/writes and PRD status changes, use Obsidian primitives
-   (`obsidian property:set`, `obsidian read`, `obsidian eval`) — check `wiki <verb> --help`
-   to see which transitions are CLI-owned versus field edits.
-4. New artifacts use human-readable filenames (`ID-title-slug.md`); resolve by frontmatter
-   ID, never assume `ID.md`. Docs live in `docs/<category>/` (locked categories).
-5. Obsidian must be running — the vault relies on it for rendering, Dataview, and Bases
-   views. Start it before running wiki commands.
-6. Keep generated skill source in this repo only; do not install or symlink into `~/.pi`.
-7. On resume, always start by re-reading `wiki status --with-doc` — never trust stale context.
-
-## Admin & health
-
-For vault init, doctor, sync, and config, the CLI is self-describing: run
-`wiki vault --help` and `wiki doctor`. Bases views are configured in Obsidian, not the CLI.
+- Field edits and PRD status changes use Obsidian (`obsidian property:set`/`read`/`eval`),
+  not the CLI. `wiki close` is for slices; close a PRD by setting its status field.
+- Resolve artifacts by frontmatter ID, never assume `ID.md` (filenames are `ID-title-slug.md`).
+  Docs live only in the locked `docs/<category>/` folders (architecture, research, runbooks,
+  specs, notes, legacy) — never invent a new folder; an unfit doc goes in the closest locked
+  category. `wiki doctor` flags any rogue folder or loose file under `docs/`.
+- Obsidian must be running — the vault depends on it for rendering, Dataview, and Bases views.
+- Don't skip TDD/review/close/handover gates.

@@ -48,10 +48,16 @@ describe("slice CLI", () => {
   test("slice create exits 1 and names a missing project", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
     await seedPrd(vaultRoot);
+    // No --project AND no repo session -> project is unresolvable. Run from a clean
+    // cwd with no .wiki session so the cwd-session fallback finds nothing.
+    const emptyCwd = await mkdtemp(join(tmpdir(), "wiki-nosession-"));
+    tempPaths.push(emptyCwd);
 
     const result = await runWiki(
       createArgs().filter((arg) => arg !== "--project" && arg !== "wiki-v2"),
       vaultRoot,
+      undefined,
+      emptyCwd,
     );
 
     expect(result.exitCode).toBe(1);
@@ -122,9 +128,10 @@ type CommandResult = {
   stderr: string;
 };
 
-async function runWiki(args: string[], vaultRoot: string, stdin?: string): Promise<CommandResult> {
-  const proc = Bun.spawn(["bun", "src/cli.ts", ...args], {
-    cwd: import.meta.dir.replace(/\/tests$/, ""),
+async function runWiki(args: string[], vaultRoot: string, stdin?: string, cwd?: string): Promise<CommandResult> {
+  const repoRoot = import.meta.dir.replace(/\/tests$/, "");
+  const proc = Bun.spawn(["bun", join(repoRoot, "src", "cli.ts"), ...args], {
+    cwd: cwd ?? repoRoot,
     env: { ...process.env, KNOWLEDGE_VAULT_ROOT: vaultRoot, OBSIDIAN_BIN: join(import.meta.dir, "fixtures", "mock-obsidian.sh") },
     stdin: stdin === undefined ? undefined : "pipe",
     stdout: "pipe",

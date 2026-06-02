@@ -173,9 +173,14 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
     subverbs: {
       start: {
         summary: "Start a session for a project in the current repo.",
-        usage: "wiki session start --project <name>",
-        flags: { "--project": "project name (required)" },
-        example: "wiki session start --project myproj",
+        usage: "wiki session start --project <name> [--phase <phase>] [--active-prd <id>] [--active-slice <id>]",
+        flags: {
+          "--project": "project name (required)",
+          "--phase": "initial phase: plan|prd|slice|red|green|review|close|handover|triage (default: ad-hoc)",
+          "--active-prd": "PRD this session is working on",
+          "--active-slice": "slice in progress (repeatable)",
+        },
+        example: "wiki session start --project myproj --phase slice",
       },
       set: {
         summary: "Set a field on the current session (phase, active_prd, active_slices, project).",

@@ -344,4 +344,43 @@ describe("vault doctor", () => {
     expect(types).toContain("missing-template");
     expect(types).toContain("community-plugins-mismatch");
   });
+
+  test("docs-structure: a clean vault with only locked category folders reports no docs issues", async () => {
+    const { vault, repoRoot } = await makeCleanVault();
+    const docs = join(vault, "projects", "demo", "docs");
+    await mkdir(join(docs, "architecture"), { recursive: true });
+    await mkdir(join(docs, "research"));
+    await writeFile(join(docs, "architecture", "DOC-0001-x.md"), "---\nid: DOC-0001\n---\n# x\n");
+
+    const result = await runDoctor(vault, repoRoot);
+
+    expect(result.issues.filter((i) => i.type === "docs-structure")).toHaveLength(0);
+  });
+
+  test("docs-structure: a rogue (non-locked) folder under docs/ is flagged", async () => {
+    const { vault, repoRoot } = await makeCleanVault();
+    const docs = join(vault, "projects", "demo", "docs");
+    await mkdir(join(docs, "cracking"), { recursive: true });
+    await writeFile(join(docs, "cracking", "note.md"), "# raw\n");
+
+    const result = await runDoctor(vault, repoRoot);
+
+    const docsIssues = result.issues.filter((i) => i.type === "docs-structure");
+    expect(docsIssues.length).toBeGreaterThanOrEqual(1);
+    expect(docsIssues[0]?.project).toBe("demo");
+    expect(docsIssues[0]?.message).toContain("cracking");
+  });
+
+  test("docs-structure: a loose .md directly under docs/ is flagged", async () => {
+    const { vault, repoRoot } = await makeCleanVault();
+    const docs = join(vault, "projects", "demo", "docs");
+    await mkdir(docs, { recursive: true });
+    await writeFile(join(docs, "DOC-0009-loose.md"), "---\nid: DOC-0009\n---\n# loose\n");
+
+    const result = await runDoctor(vault, repoRoot);
+
+    const docsIssues = result.issues.filter((i) => i.type === "docs-structure");
+    expect(docsIssues.length).toBeGreaterThanOrEqual(1);
+    expect(docsIssues[0]?.message).toContain("loose");
+  });
 });

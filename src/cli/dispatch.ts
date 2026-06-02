@@ -11,10 +11,30 @@ import { handleSync } from "./verbs/sync";
 import { handleValidate } from "./verbs/validate";
 import { handleVault } from "./verbs/vault";
 import { USAGE_REGISTRY, renderHelp, renderVerbList, unknownMessage, wantsHelp } from "./usage";
+import { resolveVaultRootForDisplay } from "../config/vault";
+import { readSession } from "../state/session";
 
 export type CliResult = {
   code: number;
 };
+
+/**
+ * Print a deterministic one-line context banner to stderr before any command runs:
+ * where the vault is (so artifacts are never written into the project's own folder)
+ * and, when this repo has a session, which project it is linked to (so an agent
+ * knows the repo is already on the wiki without running discovery tools). stderr
+ * keeps the scriptable stdout (ids, log paths, search hits) clean.
+ */
+async function printContextBanner(): Promise<void> {
+  const vault = await resolveVaultRootForDisplay();
+  if (vault === null) {
+    console.error("wiki vault: (unconfigured — set KNOWLEDGE_VAULT_ROOT or ~/.config/wiki/config.toml vault.root)");
+    return;
+  }
+  const session = await readSession(process.cwd()).catch(() => null);
+  const linked = session === null ? "this repo has no session — run wiki session start --project <name>" : `project ${session.project} (phase ${session.phase})`;
+  console.error(`wiki vault: ${vault}  |  ${linked}`);
+}
 
 export async function dispatch(args: string[]): Promise<CliResult> {
   const [verb, ...rest] = args;
@@ -44,6 +64,9 @@ export async function dispatch(args: string[]): Promise<CliResult> {
     console.log(renderHelp(verb, entry));
     return { code: 0 };
   }
+
+  // Deterministic context banner (vault + linked project) for every real command.
+  await printContextBanner();
 
   if (verb === "create") return handleCreate(rest);
   if (verb === "doc") return handleDoc(rest);

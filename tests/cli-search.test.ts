@@ -37,7 +37,7 @@ describe("search CLI", () => {
       `${join(fixture.projectPath, "prds", "PRD-001.md")}\t0.9\tFirst result\n` +
         `${join(fixture.projectPath, "slices", "SLICE-001.md")}\t0.72\tSecond result\n`,
     );
-    expect(result.stderr).toBe("");
+    expect(result.stderr).toContain("wiki vault:");
     const log = await readFile(fixture.stateFile, "utf8");
     expect(log).toContain("collection list");
     expect(log).toContain(`collection add ${fixture.projectPath} --name wiki-v2 --mask **/*.md`);
@@ -53,7 +53,7 @@ describe("search CLI", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("");
-    expect(result.stderr).toBe("");
+    expect(result.stderr).toContain("wiki vault:");
   });
 
   test("search registers the project collection only once across repeated calls", async () => {

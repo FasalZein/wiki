@@ -95,7 +95,7 @@ describe("status and session CLI", () => {
     expect(result.stdout).toContain("--- phase doc: green ---");
     expect(result.stdout).toContain("# Phase: slice");
     expect(result.stdout.toLowerCase()).toContain("output contract");
-    expect(result.stderr).toBe("");
+    expect(result.stderr).toContain("wiki vault:");
   });
 
   test("status --with-doc renders the slice guidance for a slice-phase session", async () => {

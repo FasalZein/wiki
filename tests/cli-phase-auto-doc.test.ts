@@ -52,7 +52,7 @@ describe("phase auto-doc CLI", () => {
     expect(close.stderr).toContain("# Phase: handover");
   });
 
-  test("handover uses the next-phase guidance and defaults to ad-hoc (unmapped)", async () => {
+  test("handover uses the next-phase guidance and defaults to ad-hoc bootstrap guidance", async () => {
     const fixture = await createFixture();
 
     const write = await runWiki(["handover", "--project", "wiki-v2", "--phase", "handover", "--next-phase", "slice"], fixture);
@@ -64,8 +64,10 @@ describe("phase auto-doc CLI", () => {
     expect(write.stderr).toContain("# Phase: slice");
     expect(create.exitCode).toBe(0);
     expect(create.stdout).toBe("HANDOVER-0002\n");
-    // ad-hoc has no CLI guidance; the miss is non-fatal and reported on stderr.
-    expect(create.stderr).toContain("no phase guidance for: ad-hoc");
+    // ad-hoc now carries bootstrap guidance (cold-start fix), not a miss.
+    expect(create.stderr).toContain("--- phase doc: ad-hoc ---");
+    expect(create.stderr).toContain("# Phase: ad-hoc");
+    expect(create.stderr).toContain("wiki session set phase");
   });
 
   test("--no-doc suppresses auto doc on red", async () => {

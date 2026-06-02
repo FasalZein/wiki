@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { readFile, writeFile } from "node:fs/promises";
 
 import { loadProjectConfig, ProjectConfigError } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
@@ -27,6 +28,7 @@ async function startSession(args: string[]): Promise<CliResult> {
     return { code: 1 };
   }
   const repo = await repoForProject(project);
+  await ensureWikiGitignored(repo);
   const session = await writeSession(repo, {
     project,
     active_prd: stringValue(parsed.values, "active-prd"),
@@ -91,6 +93,27 @@ async function clearCurrentSession(args: string[]): Promise<CliResult> {
   await clearSession(repo);
   console.error("session cleared");
   return { code: 0 };
+}
+
+/**
+ * Ensure the repo's .gitignore ignores the whole .wiki/ folder. wiki is single-user
+ * tooling, so its repo-local state (sessions, gate logs) should never be committed.
+ * Best-effort: failures (e.g. unwritable dir) must not block starting a session.
+ */
+async function ensureWikiGitignored(repo: string): Promise<void> {
+  try {
+    const gitignorePath = join(repo, ".gitignore");
+    const existing = await readFile(gitignorePath, "utf8").catch((error: unknown) => {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") return "";
+      throw error;
+    });
+    const ignored = existing.split("\n").some((line) => line.trim() === ".wiki/" || line.trim() === ".wiki");
+    if (ignored) return;
+    const prefix = existing.length > 0 && !existing.endsWith("\n") ? "\n" : "";
+    await writeFile(gitignorePath, `${existing}${prefix}.wiki/\n`);
+  } catch {
+    // best-effort; never block the session on gitignore maintenance
+  }
 }
 
 async function repoForProject(project: string): Promise<string> {

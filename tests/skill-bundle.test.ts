@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { loadPhaseDoc } from "../src/cli/phase-docs";
-import { GUIDED_PHASES } from "../src/cli/guidance";
+import { GUIDED_PHASES, skillsForPhase } from "../src/cli/guidance";
 
 const repoRoot = import.meta.dir.replace(/\/tests$/, "");
 const skillDir = join(repoRoot, "skills", "wiki");
@@ -64,12 +64,56 @@ describe("wiki skill bundle", () => {
     }
   });
 
-  test("transition phases alias to slice guidance; unmapped phases return null", () => {
+  test("transition phases alias to slice guidance; genuinely unmapped phases return null", () => {
     expect(loadPhaseDoc("green")).toContain("# Phase: slice");
     expect(loadPhaseDoc("close")).toContain("# Phase: slice");
-    expect(loadPhaseDoc("ad-hoc")).toBeNull();
+    expect(loadPhaseDoc("nonexistent-phase")).toBeNull();
     expect(GUIDED_PHASES).toContain("plan");
     expect(GUIDED_PHASES).toContain("handover");
+  });
+
+  test("ad-hoc has bootstrap guidance so a fresh session is never a dead-end (cold-start)", () => {
+    const doc = loadPhaseDoc("ad-hoc");
+    expect(doc).not.toBeNull();
+    expect(doc).toContain("# Phase: ad-hoc");
+    expect(doc).toContain("wiki session set phase");
+  });
+
+  // --- phase→skill mapping is a first-class, pinned value (no prose/table drift) ---
+
+  test("every guided phase (except ad-hoc) names at least one upstream skill", () => {
+    for (const phase of GUIDED_PHASES) {
+      const skills = skillsForPhase(phase);
+      if (phase === "ad-hoc") {
+        expect(skills).toEqual([]);
+      } else {
+        expect(skills.length, `phase ${phase} has no skill`).toBeGreaterThanOrEqual(1);
+      }
+    }
+  });
+
+  test("each phase payload prose names exactly its skillsForPhase skills (prose pinned to map)", () => {
+    for (const phase of GUIDED_PHASES) {
+      if (phase === "ad-hoc") continue;
+      const doc = loadPhaseDoc(phase) ?? "";
+      for (const skill of skillsForPhase(phase)) {
+        expect(doc, `phase ${phase} payload omits skill ${skill}`).toContain(`\`${skill}\``);
+      }
+    }
+  });
+
+  test("SKILL.md routing table matches skillsForPhase (table pinned to map)", async () => {
+    const skill = await readFile(join(skillDir, "SKILL.md"), "utf8");
+    // Parse the routing line, e.g.: plan→`grill-with-docs`, prd→`to-prd`,
+    // slice/red/green→`to-issues` + `tdd`, triage→`triage`, handover→`handoff`.
+    const pairs = [...skill.matchAll(/([a-z/]+)→((?:`[a-z-]+`(?:\s*\+\s*)?)+)/g)];
+    expect(pairs.length, "no phase→skill routing pairs found in SKILL.md").toBeGreaterThan(0);
+    for (const [, phaseGroup, skillGroup] of pairs) {
+      const advertised = [...(skillGroup ?? "").matchAll(/`([a-z-]+)`/g)].map((m) => m[1] ?? "");
+      for (const phase of (phaseGroup ?? "").split("/")) {
+        expect(skillsForPhase(phase), `SKILL.md table drift for phase ${phase}`).toEqual(advertised);
+      }
+    }
   });
 
   test("status --with-doc emits CLI-owned guidance after the forked files are gone", async () => {

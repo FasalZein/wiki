@@ -23,7 +23,7 @@ import { getVaultRoot } from "../../config/vault";
 import type { TemplateType } from "../../schema/load";
 import { readSession } from "../../state/session";
 import type { CliResult } from "../dispatch";
-import { parseCommand, stringValue } from "../parse";
+import { parseCommand, stringValue, type ParsedCommand } from "../parse";
 import { phaseDocOptions, writePhaseDocToStderr } from "../phase-docs";
 import { unknownMessage, USAGE_REGISTRY } from "../usage";
 
@@ -40,18 +40,18 @@ export async function handleCreate(args: string[]): Promise<CliResult> {
 
 async function createPrd(args: string[]): Promise<CliResult> {
   const parsed = parseCommand(args, ["title", "project", "force-new", "related-to", "supersedes"]);
-  const project = stringValue(parsed.values, "project");
+  const project = await resolveProject(parsed);
   const title = stringValue(parsed.values, "title");
   const missing = missingFields({ project, title });
   if (missing) return missing;
   if (project === undefined || title === undefined) return { code: 1 };
 
-  return createWithSupersede("prd", project, title, { title }, parsed.values);
+  return createWithSupersede({ type: "prd", project, dedupQuery: title, fields: { title }, rawValues: parsed.values });
 }
 
 async function createSlice(args: string[]): Promise<CliResult> {
   const parsed = parseCommand(args, ["title", "project", "parent-prd", "force-new", "related-to", "supersedes"]);
-  const project = stringValue(parsed.values, "project");
+  const project = await resolveProject(parsed);
   const title = stringValue(parsed.values, "title");
   const parentPrd = stringValue(parsed.values, "parent-prd");
   const missing = missingFields({ project, title, "parent-prd": parentPrd });
@@ -71,12 +71,12 @@ async function createSlice(args: string[]): Promise<CliResult> {
     throw error;
   }
 
-  return createWithSupersede("slice", project, `${title} ${parentPrd}`, { title, parent_prd: parentPrd, acceptance: [] }, parsed.values);
+  return createWithSupersede({ type: "slice", project, dedupQuery: `${title} ${parentPrd}`, fields: { title, parent_prd: parentPrd, acceptance: [] }, rawValues: parsed.values });
 }
 
 async function createDecision(args: string[]): Promise<CliResult> {
   const parsed = parseCommand(args, ["title", "context", "decision", "consequences", "project", "force-new", "related-to", "supersedes"]);
-  const project = stringValue(parsed.values, "project");
+  const project = await resolveProject(parsed);
   const title = stringValue(parsed.values, "title");
   const context = stringValue(parsed.values, "context");
   const decision = stringValue(parsed.values, "decision");
@@ -85,12 +85,12 @@ async function createDecision(args: string[]): Promise<CliResult> {
   if (missing) return missing;
   if (project === undefined || title === undefined || context === undefined || decision === undefined || consequences === undefined) return { code: 1 };
 
-  return createWithSupersede("decision", project, `${title} ${context} ${decision}`, { title, context, decision, consequences }, parsed.values);
+  return createWithSupersede({ type: "decision", project, dedupQuery: `${title} ${context} ${decision}`, fields: { title, context, decision, consequences }, rawValues: parsed.values });
 }
 
 async function createDoc(args: string[]): Promise<CliResult> {
   const parsed = parseCommand(args, ["title", "project", "type", "category", "tags", "source-url", "force-new", "related-to", "supersedes"]);
-  const project = stringValue(parsed.values, "project");
+  const project = await resolveProject(parsed);
   const title = stringValue(parsed.values, "title");
   const docType = stringValue(parsed.values, "type");
   const missing = missingFields({ project, title, type: docType });
@@ -111,17 +111,20 @@ async function createDoc(args: string[]): Promise<CliResult> {
   const sourceUrl = stringValue(parsed.values, "source-url");
   if (sourceUrl !== undefined) fields.source_url = sourceUrl;
 
-  return createWithSupersede("doc", project, `${title} ${docType}`, fields, parsed.values, category);
+  return createWithSupersede({ type: "doc", project, dedupQuery: `${title} ${docType}`, fields, rawValues: parsed.values, category });
 }
 
-async function createWithSupersede(
-  type: TemplateType,
-  project: string,
-  dedupQuery: string,
-  fields: Record<string, unknown>,
-  rawValues: Record<string, string | string[] | boolean | undefined>,
-  category?: string,
-): Promise<CliResult> {
+type CreateRequest = {
+  type: TemplateType;
+  project: string;
+  dedupQuery: string;
+  fields: Record<string, unknown>;
+  rawValues: Record<string, string | string[] | boolean | undefined>;
+  category?: string;
+};
+
+async function createWithSupersede(req: CreateRequest): Promise<CliResult> {
+  const { type, project, dedupQuery, fields, rawValues, category } = req;
   const override = parseOverride(rawValues);
   if (typeof override === "string") { console.error(override); return { code: 1 }; }
 
@@ -162,8 +165,7 @@ async function createHandover(args: string[]): Promise<CliResult> {
   const explicitProject = stringValue(parsed.values, "project");
   const session = explicitProject === undefined ? await readSessionFromCwd() : await readSessionForProject(vaultRoot, explicitProject);
   const project = explicitProject ?? session?.project;
-  const phase = stringValue(parsed.values, "phase") ?? session?.phase;
-  const missing = missingFields({ project, phase });
+  const phase = stringValue(parsed.values, "phase") ?? session?.phase;  const missing = missingFields({ project, phase });
   if (missing) return missing;
   if (project === undefined || phase === undefined) return { code: 1 };
 
@@ -276,6 +278,19 @@ async function readSessionFromCwd() {
   } catch {
     return null;
   }
+}
+
+/**
+ * Resolve the target project for a create verb: an explicit --project wins,
+ * otherwise fall back to the project of the repo's active session. This lets
+ * create commands run without repeating --project once a session is started,
+ * matching how status/handover already default. Returns undefined when neither
+ * an explicit flag nor a valid repo session is present.
+ */
+async function resolveProject(parsed: ParsedCommand): Promise<string | undefined> {
+  const explicit = stringValue(parsed.values, "project");
+  if (explicit !== undefined) return explicit;
+  return (await readSessionFromCwd())?.project;
 }
 
 async function readSessionForProject(vaultRoot: string, project: string) {
