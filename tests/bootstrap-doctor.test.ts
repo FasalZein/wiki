@@ -383,4 +383,22 @@ describe("vault doctor", () => {
     expect(docsIssues.length).toBeGreaterThanOrEqual(1);
     expect(docsIssues[0]?.message).toContain("loose");
   });
+
+  test("doctor degrades gracefully without a plugin lockfile and still runs docs-structure", async () => {
+    // A vault that was never `wiki vault init`'d: no .wiki/plugin-lock.json. Doctor used to
+    // throw here, skipping the docs-structure check entirely. It must instead report the
+    // missing setup and still flag a rogue docs folder.
+    const base = await mkdtemp(join(tmpdir(), "wiki-nolock-"));
+    tempPaths.push(base);
+    const vault = join(base, "vault");
+    await mkdir(join(vault, "projects", "demo", "docs", "cracking"), { recursive: true });
+    await writeFile(join(vault, "projects", "demo", "docs", "cracking", "x.md"), "# raw\n");
+
+    const result = await runDoctor(vault, base);
+
+    expect(result.issues.some((i) => i.type === "plugin-checks-skipped")).toBe(true);
+    const docsIssues = result.issues.filter((i) => i.type === "docs-structure");
+    expect(docsIssues.length).toBeGreaterThanOrEqual(1);
+    expect(docsIssues[0]?.message).toContain("cracking");
+  });
 });

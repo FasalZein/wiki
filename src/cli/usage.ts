@@ -24,7 +24,7 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
         summary: "Create a PRD.",
         usage: "wiki create prd --project <name> --title <title>",
         flags: {
-          "--project": "project name (required)",
+          "--project": "project name (required if no active session)",
           "--title": "PRD title (required)",
           "--supersedes": "id this PRD supersedes (marks the old one superseded)",
           "--related-to": "acknowledge a near-duplicate and link it instead of blocking",
@@ -36,7 +36,7 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
         summary: "Create a slice under a parent PRD.",
         usage: "wiki create slice --project <name> --title <title> --parent-prd <PRD-NNNN>",
         flags: {
-          "--project": "project name (required)",
+          "--project": "project name (required if no active session)",
           "--title": "slice title (required)",
           "--parent-prd": "parent PRD id (required; must exist)",
           "--supersedes": "id this slice supersedes",
@@ -49,7 +49,7 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
         summary: "Create an ADR (architecture decision record).",
         usage: "wiki create decision --project <name> --title <t> --context <c> --decision <d> --consequences <q>",
         flags: {
-          "--project": "project name (required)",
+          "--project": "project name (required if no active session)",
           "--title": "decision title (required)",
           "--context": "what forces the decision (required)",
           "--decision": "the decision taken (required)",
@@ -62,7 +62,7 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
         summary: "Create a knowledge doc in a locked category subfolder.",
         usage: "wiki create doc --project <name> --title <title> --type <type> [--category <cat>]",
         flags: {
-          "--project": "project name (required)",
+          "--project": "project name (required if no active session)",
           "--title": "doc title (required)",
           "--type": "doc type (required): runbook|research|guide|learning|reference",
           "--category": "locked category (defaults from --type): architecture|research|runbooks|specs|notes|legacy",

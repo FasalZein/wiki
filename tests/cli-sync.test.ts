@@ -10,6 +10,20 @@ afterEach(async () => {
 });
 
 describe("sync CLI", () => {
+  test("sync refuses (exit 1) when docs/ has a rogue folder, before embedding", async () => {
+    const fixture = await createSyncFixture("wiki-v2");
+    await mkdir(join(fixture.projectPath, "docs", "cracking"), { recursive: true });
+    await writeFile(join(fixture.projectPath, "docs", "cracking", "note.md"), "# raw\n");
+
+    const result = await runWiki(["sync", "--project", "wiki-v2"], fixture);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("not a locked category");
+    expect(result.stderr).toContain("refusing to sync");
+    // gate runs before qmd: no embed should have happened
+    expect(await readFile(fixture.stateFile, "utf8").catch(() => "")).not.toContain("embed -c wiki-v2");
+  });
+
   test("sync ensures the project collection, updates, and embeds without stdout", async () => {
     const fixture = await createSyncFixture("wiki-v2");
 

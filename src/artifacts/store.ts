@@ -7,6 +7,7 @@ import { obsidianCreate } from "../integrations/obsidian";
 import { loadTemplate, resolveTemplatePath, type TemplateType } from "../schema/load";
 import { validate } from "../schema/validate";
 import type { NormalizedRecord, Schema, ValidationError } from "../schema/types";
+import { type DocCategory, isDocCategory } from "./registry";
 import { nextId } from "./id";
 import { artifactDirectory } from "./paths";
 import { applyDefaults, renderArtifact } from "./render";
@@ -16,8 +17,8 @@ export type CreateArtifactInput = {
   vaultRoot: string;
   project: string;
   fields: Record<string, unknown>;
-  /** Optional category subfolder for docs, e.g. docs/research/. */
-  category?: string;
+  /** Optional category subfolder for docs, e.g. docs/research/. Must be a locked category. */
+  category?: DocCategory;
 };
 
 export type ReadArtifactInput = {
@@ -39,8 +40,8 @@ export type SetFieldsInput = ReadArtifactInput & {
 export type RelocateArtifactInput = ReadArtifactInput & {
   /** New title; updates the `title` field and re-slugs the filename. */
   title?: string;
-  /** New doc category subfolder, e.g. "architecture". Docs only. */
-  category?: string;
+  /** New doc category subfolder, e.g. "architecture". Docs only. Must be a locked category. */
+  category?: DocCategory;
 };
 
 export type AppendFieldInput = SetFieldInput;
@@ -174,7 +175,20 @@ export async function relocateArtifact(input: RelocateArtifactInput): Promise<Ar
   const directory = artifactDirectory(input.type, input.vaultRoot, input.project);
   const fileName = `${input.id}-${slugifyTitle(nextTitle)}.md`;
   // Preserve the doc's current category subfolder unless an explicit move is requested.
+  // If the doc currently sits in a NON-locked (rogue) folder and no explicit target is
+  // given, refuse rather than silently keep it there — enforces ADR-0028 at the store seam
+  // (the caller must pass a locked --category to relocate it out).
   const currentCategory = input.type === "doc" ? existingCategory(directory, existing.path) : undefined;
+  if (
+    input.type === "doc" &&
+    input.category === undefined &&
+    currentCategory !== undefined &&
+    !isDocCategory(currentCategory)
+  ) {
+    throw new ArtifactValidationError([
+      { field: "category", reason: `doc is in non-locked folder "${currentCategory}"; pass an explicit locked category to relocate it` },
+    ]);
+  }
   const category = input.type === "doc" ? (input.category ?? currentCategory) : undefined;
   const destination = category !== undefined && category.length > 0
     ? join(directory, category, fileName)

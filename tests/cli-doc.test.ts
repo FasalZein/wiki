@@ -51,6 +51,21 @@ describe("doc CLI", () => {
     expect(await readFile(path, "utf8")).toContain("id: DOC-0001");
   });
 
+  test("doc create routes an unmapped type to notes (the catch-all), not specs", async () => {
+    const vaultRoot = await createFixtureVault("test-project");
+
+    // `reference` has no explicit category mapping -> should land in notes/, not specs/.
+    await runWiki([
+      "create", "doc",
+      "--title", "Some reference doc title",
+      "--project", "test-project",
+      "--type", "reference",
+    ], vaultRoot);
+
+    const notesPath = join(vaultRoot, "projects", "test-project", "docs", "notes", "DOC-0001-some-reference-doc-title.md");
+    expect(await readFile(notesPath, "utf8")).toContain("id: DOC-0001");
+  });
+
   test("doc create exits 1 for an unknown category", async () => {
     const vaultRoot = await createFixtureVault("test-project");
 

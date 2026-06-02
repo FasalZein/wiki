@@ -12,6 +12,7 @@ export type DriftIssue = {
     | "config-drift"
     | "missing-template"
     | "community-plugins-mismatch"
+    | "plugin-checks-skipped"
     | "docs-structure";
   plugin?: string;
   template?: string;
@@ -43,8 +44,22 @@ export async function runDoctor(
 
   const manifest = await loadPluginManifest();
   const required = requiredPlugins(manifest);
-  const lockfile = await readLockfile(vaultPath);
+  // The plugin/template checks need the vault's plugin lockfile. On a vault that was
+  // never `wiki vault init`'d (no .wiki/plugin-lock.json) this read throws — which used
+  // to abort doctor entirely, silently skipping the docs-structure check below. Degrade
+  // gracefully: report the missing setup as one issue and skip only the plugin/template
+  // checks, so docs-structure (and any future vault-content check) still runs.
+  const lockfile = await readLockfile(vaultPath).catch((error: unknown) => {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return null;
+    throw error;
+  });
 
+  if (lockfile === null) {
+    issues.push({
+      type: "plugin-checks-skipped",
+      message: "plugin/template checks skipped: no .wiki/plugin-lock.json (run 'wiki vault init' to provision plugins). Docs-structure check still ran.",
+    });
+  } else {
   // 1. Missing required plugins
   const installedRequired: string[] = [];
   for (const entry of required) {
@@ -202,44 +217,57 @@ export async function runDoctor(
       });
     }
   }
+  } // end plugin/template checks (skipped when no lockfile)
 
   // 6. Docs structure: docs/ holds only the locked category subfolders (ADR superseding
   //    0021/0022 — categorized model). Flag any out-of-set subfolder (the out-of-CLI
   //    folder-invention leak the CLI write paths cannot catch) and any loose file sitting
   //    directly under docs/ instead of inside a category folder.
-  await checkDocsStructure(vaultPath, issues);
+  for (const project of await listVaultProjects(vaultPath)) {
+    issues.push(...(await checkProjectDocsStructure(vaultPath, project)));
+  }
 
   return { issues, clean: issues.length === 0 };
 }
 
-async function checkDocsStructure(vaultPath: string, issues: DriftIssue[]): Promise<void> {
+/** Project directories under the vault (excludes _-prefixed structural dirs). */
+export async function listVaultProjects(vaultPath: string): Promise<string[]> {
   const projectsDir = join(vaultPath, "projects");
-  if (!(await exists(projectsDir))) return;
-  const locked = new Set<string>(DOC_CATEGORIES);
+  if (!(await exists(projectsDir))) return [];
+  return (await readdir(projectsDir, { withFileTypes: true }))
+    .filter((e) => e.isDirectory() && !e.name.startsWith("_"))
+    .map((e) => e.name);
+}
 
-  const projects = (await readdir(projectsDir, { withFileTypes: true }))
-    .filter((e) => e.isDirectory() && !e.name.startsWith("_"));
-  for (const project of projects) {
-    const docsDir = join(projectsDir, project.name, "docs");
-    if (!(await exists(docsDir))) continue;
-    for (const entry of await readdir(docsDir, { withFileTypes: true })) {
-      if (entry.isDirectory()) {
-        if (!locked.has(entry.name)) {
-          issues.push({
-            type: "docs-structure",
-            project: project.name,
-            actual: entry.name,
-            message: `${project.name}: docs/${entry.name}/ is not a locked category — docs must live in one of: ${DOC_CATEGORIES.join(", ")}. Move its docs with 'wiki doc recategorize' or remove the folder.`,
-          });
-        }
-      } else if (entry.name.endsWith(".md")) {
+/**
+ * Docs-structure invariant (ADR-0028) for one project: docs/ may contain only the locked
+ * category subfolders, and every doc must live inside one (no loose files directly under
+ * docs/). Returns the violations as DriftIssues. Reused by `wiki doctor` (audit) and
+ * `wiki sync` (gate before re-embedding) so the rule has one implementation.
+ */
+export async function checkProjectDocsStructure(vaultPath: string, project: string): Promise<DriftIssue[]> {
+  const issues: DriftIssue[] = [];
+  const locked = new Set<string>(DOC_CATEGORIES);
+  const docsDir = join(vaultPath, "projects", project, "docs");
+  if (!(await exists(docsDir))) return issues;
+  for (const entry of await readdir(docsDir, { withFileTypes: true })) {
+    if (entry.isDirectory()) {
+      if (!locked.has(entry.name)) {
         issues.push({
           type: "docs-structure",
-          project: project.name,
+          project,
           actual: entry.name,
-          message: `${project.name}: docs/${entry.name} sits directly under docs/ — docs belong inside a locked category folder, not loose. Recreate via 'wiki create doc' or move it into a category.`,
+          message: `${project}: docs/${entry.name}/ is not a locked category — docs must live in one of: ${DOC_CATEGORIES.join(", ")}. Move its docs with 'wiki doc recategorize' or remove the folder.`,
         });
       }
+    } else if (entry.name.endsWith(".md")) {
+      issues.push({
+        type: "docs-structure",
+        project,
+        actual: entry.name,
+        message: `${project}: docs/${entry.name} sits directly under docs/ — docs belong inside a locked category folder, not loose. Recreate via 'wiki create doc' or move it into a category.`,
+      });
     }
   }
+  return issues;
 }

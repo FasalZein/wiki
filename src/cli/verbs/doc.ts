@@ -5,7 +5,7 @@ import {
   ArtifactValidationError,
   relocateArtifact,
 } from "../../artifacts/store";
-import { DOC_CATEGORIES, isDocCategory } from "../../artifacts/registry";
+import { DOC_CATEGORIES, isDocCategory, type DocCategory } from "../../artifacts/registry";
 import { assertProjectStructure, ProjectConfigError } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import { parseCommand, stringValue } from "../parse";
@@ -49,7 +49,7 @@ async function recategorizeDoc(args: string[]): Promise<CliResult> {
   return relocate(project, id, { category });
 }
 
-async function relocate(project: string, id: string, change: { title?: string; category?: string }): Promise<CliResult> {
+async function relocate(project: string, id: string, change: { title?: string; category?: DocCategory }): Promise<CliResult> {
   const vaultRoot = await getVaultRoot();
   const projectPath = join(vaultRoot, "projects", project);
   try {

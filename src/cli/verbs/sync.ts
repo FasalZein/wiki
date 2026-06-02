@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { embedCollection, ensureCollection, QmdError, updateCollection } from "../../integrations/qmd";
 import { assertProjectStructure, loadProjectConfig } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
+import { checkProjectDocsStructure } from "../../bootstrap/doctor";
 import { booleanValue, parseCommand, stringValue } from "../parse";
 import type { CliResult } from "../dispatch";
 
@@ -16,6 +17,17 @@ export async function handleSync(args: string[]): Promise<CliResult> {
 
   const vaultRoot = await getVaultRoot();
   const projectPath = join(vaultRoot, "projects", project);
+
+  // Gate: don't embed a project whose docs/ violates the locked-category invariant
+  // (ADR-0028). sync is the natural chokepoint — catch rogue folders / loose docs here
+  // before they get indexed, and point the user at the fix. Same check `wiki doctor` runs.
+  const docsIssues = await checkProjectDocsStructure(vaultRoot, project);
+  if (docsIssues.length > 0) {
+    for (const issue of docsIssues) console.error(issue.message);
+    console.error(`refusing to sync: fix the ${docsIssues.length} docs-structure issue(s) above, then retry.`);
+    return { code: 1 };
+  }
+
   try {
     await assertProjectStructure(projectPath);
     const config = await loadProjectConfig(projectPath);

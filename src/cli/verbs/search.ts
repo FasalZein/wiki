@@ -130,8 +130,7 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
     return { code: 0 };
   } catch (error) {
     if (error instanceof QmdError) {
-      const errorLine = error.message.split("\n").find(l => l.startsWith("Error:")) ?? error.message.split("\n")[0] ?? error.message;
-      console.error(errorLine);
+      console.error(error.summary);
       return { code: 10 };
     }
     throw error;

@@ -36,17 +36,17 @@ export function isDocCategory(value: string): value is DocCategory {
   return (DOC_CATEGORIES as readonly string[]).includes(value);
 }
 
-/** Default doc category derived from the doc's `type` enum when none is given. */
+/** Default doc category derived from the doc's `type` enum when none is given.
+ *  Unmapped types fall to `notes` — the intended catch-all — not `specs`, so `specs`
+ *  stays "specifications" rather than an accidental junk drawer (ADR-0028). */
 export function defaultCategoryForDocType(docType: string | undefined): DocCategory {
   switch (docType) {
     case "runbook":
       return "runbooks";
     case "research":
       return "research";
-    case "learning":
-      return "notes";
     default:
-      return "specs";
+      return "notes";
   }
 }
 

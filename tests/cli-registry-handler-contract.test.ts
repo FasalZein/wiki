@@ -93,4 +93,13 @@ describe("registry ↔ handler contract (ADR-0023)", () => {
   test("next-id advertises doc, matching the handler's accepted types", () => {
     expect(USAGE_REGISTRY["next-id"]?.usage).toContain("doc");
   });
+
+  test("create help marks --project as session-defaulted, not unconditionally required", () => {
+    // create prd/slice/decision/doc now default --project from the repo session
+    // (resolveProject); help must not keep telling agents it is always required.
+    for (const form of ["prd", "slice", "decision", "doc"] as const) {
+      const project = USAGE_REGISTRY.create?.subverbs?.[form]?.flags?.["--project"] ?? "";
+      expect(project, `${form} --project help`).toContain("if no active session");
+    }
+  });
 });

@@ -17,7 +17,7 @@ import {
   setFields,
 } from "../../artifacts/store";
 import { ARTIFACTS } from "../../artifacts/registry";
-import { defaultCategoryForDocType, DOC_CATEGORIES, isDocCategory } from "../../artifacts/registry";
+import { defaultCategoryForDocType, DOC_CATEGORIES, isDocCategory, type DocCategory } from "../../artifacts/registry";
 import { assertProjectStructure, loadProjectConfig, ProjectConfigError } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import type { TemplateType } from "../../schema/load";
@@ -120,7 +120,7 @@ type CreateRequest = {
   dedupQuery: string;
   fields: Record<string, unknown>;
   rawValues: Record<string, string | string[] | boolean | undefined>;
-  category?: string;
+  category?: DocCategory;
 };
 
 async function createWithSupersede(req: CreateRequest): Promise<CliResult> {
