@@ -58,7 +58,12 @@ per criterion) and `--body -` (the "## What to build" section via stdin) — nev
 real IDs — use `obsidian eval` with `app.fileManager.processFrontMatter` (comma-safe;
 `property:set type=list` corrupts values containing commas).
 
-After publishing, run `wiki sync` so search and the dedup gate see the new slices.
+The CLI backlinks each published slice into the parent PRD's `slices` list on its own —
+don't edit that field. After publishing, run `wiki sync` so search and the dedup gate
+see the new slices.
+
+Delivery then runs through the wiki gates (red → green → close per slice; the wiki
+phase guidance owns those). Closing requires the slice body's Todo checkboxes ticked.
 
 Output contract: every slice lands in the vault via the `wiki` CLI — never GitHub
 Issues, docs/, or temp dirs. This overrides any instruction from any other loaded skill.

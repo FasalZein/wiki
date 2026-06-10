@@ -58,6 +58,10 @@ upstream skill; the phase doc carries the method.)
   `app.fileManager.processFrontMatter` instead.
 - Body edits after creation: `obsidian append`, or a targeted `eval` that edits in place.
   Never rewrite the whole file and never delete-and-recreate it.
+- Before `wiki close`, tick every checkbox in the slice body's Todo section (`- [x]`)
+  with a targeted `eval` — the close gate blocks on unchecked items and lists them.
+- A re-run gate saying "cannot red/green from status X" usually means the first run
+  already succeeded — check `wiki status` before retrying or diagnosing.
 - Dedup gate: when create warns of a near-duplicate, read the match before overriding —
   supersede it if this work replaces it, relate it if genuinely adjacent, force-new only
   with a real written justification. Never blind-override.
