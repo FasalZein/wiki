@@ -47,6 +47,8 @@ describe("wiki skill bundle", () => {
     // It must point the agent at the authoritative surfaces instead.
     expect(skill).toContain("wiki <verb> --help");
     expect(skill).toContain("wiki status");
+    // Admin surface names the format gate so agents know it exists (PRD-0011).
+    expect(skill).toContain("wiki fmt");
     // And it must state the hard output contract (ADR-0026).
     expect(skill.toLowerCase()).toContain("output contract");
     expect(skill).toContain("vault");

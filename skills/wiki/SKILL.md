@@ -22,8 +22,9 @@ Cold start — no session AND no `<!-- wiki:begin … -->` pointer block in AGEN
 check `wiki project list`, then bind the repo with `wiki project link` (create the project
 first if it doesn't exist). Never guess a project name.
 
-Doing vault setup or a health check, not delivery work? Skip the phase flow and run
-`wiki vault --help` or `wiki doctor` — admin commands are self-describing.
+Doing vault setup, a health check, or format cleanup, not delivery work? Skip the
+phase flow and run `wiki vault --help`, `wiki doctor`, or `wiki fmt` — admin commands
+are self-describing.
 
 ## Output contract (non-negotiable)
 
