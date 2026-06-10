@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import matter from "gray-matter";
 
 const tempPaths: string[] = [];
 
@@ -88,6 +89,17 @@ describe("slice CLI", () => {
     expect(result.stderr).toContain("parent PRD not found");
     expect(result.stderr).toContain("PRD-0001");
     expect(result.stdout).toBe("");
+  });
+
+  test("slice create leaves no literal template syntax in the body", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    await seedPrd(vaultRoot);
+
+    const result = await runWiki(createArgs(), vaultRoot);
+    expect(result.exitCode).toBe(0);
+
+    const file = await readSlice(vaultRoot, "SLICE-0001");
+    expect(matter(file).content).not.toContain("{{");
   });
 
   test("slice create exits 1 and names a schema-invalid title", async () => {

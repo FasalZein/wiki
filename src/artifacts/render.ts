@@ -5,7 +5,8 @@ import type { NormalizedRecord, Schema } from "../schema/types";
 
 export function renderArtifact(template: string, values: NormalizedRecord): string {
   const parsed = matter(normalizeInlineMaps(template));
-  const body = parsed.content.replace(/{{([A-Za-z0-9_]+)}}/g, (_placeholder: string, name: string) => {
+  const withLists = renderEachBlocks(parsed.content, values);
+  const body = withLists.replace(/{{([A-Za-z0-9_]+)}}/g, (_placeholder: string, name: string) => {
     if (name === "date") {
       const updated = values.updated;
       return typeof updated === "string" ? updated : "";
@@ -21,6 +22,23 @@ export function renderArtifact(template: string, values: NormalizedRecord): stri
   });
 
   return `${matter.stringify(body.trimStart(), values)}\n`;
+}
+
+/**
+ * Expand `{{#each field}}…{{else}}…{{/each}}` blocks: the each branch repeats
+ * per list item with `{{this}}` substituted; the else branch renders when the
+ * field is missing, not a list, or empty. Runs before the plain-placeholder
+ * pass so `{{this}}` never leaks into it.
+ */
+function renderEachBlocks(body: string, values: NormalizedRecord): string {
+  const blockRe = /{{#each ([A-Za-z0-9_]+)}}([\s\S]*?)(?:{{else}}([\s\S]*?))?{{\/each}}/g;
+  return body.replace(blockRe, (_block: string, name: string, item: string, elseBranch: string | undefined) => {
+    const value = values[name];
+    if (Array.isArray(value) && value.length > 0) {
+      return value.map((entry) => item.replace(/{{this}}/g, String(entry))).join("");
+    }
+    return elseBranch ?? "";
+  });
 }
 
 export function applyDefaults(schema: Schema, template: string, input: Record<string, unknown>): NormalizedRecord {
