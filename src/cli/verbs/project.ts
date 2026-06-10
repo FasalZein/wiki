@@ -1,5 +1,6 @@
-import { mkdir, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import matter from "gray-matter";
 
 import { projectPath } from "../../artifacts/paths";
 import { ARTIFACT_FOLDERS, STRUCTURAL_FOLDERS } from "../../artifacts/registry";
@@ -8,6 +9,7 @@ import { listProjects } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import { ensureObsidian, obsidianCreate } from "../../integrations/obsidian";
 import { ensureCollection } from "../../integrations/qmd";
+import { stampRepo } from "../repo-link";
 import type { CliResult } from "../dispatch";
 import { parseCommand, stringValue } from "../parse";
 import { unknownMessage } from "../usage";
@@ -20,7 +22,10 @@ export async function handleProject(args: string[]): Promise<CliResult> {
   if (subverb === "list") {
     return listProjectsCommand();
   }
-  console.error(unknownMessage("project subverb", subverb ?? "", ["create", "list"]));
+  if (subverb === "link") {
+    return linkProject(rest);
+  }
+  console.error(unknownMessage("project subverb", subverb ?? "", ["create", "list", "link"]));
   return { code: 1 };
 }
 
@@ -91,5 +96,55 @@ async function createProject(args: string[]): Promise<CliResult> {
   console.error(`created project ${name} (repo: ${repo}, test_command: ${testCommand})`);
   console.error(`edit projects/${name}/_project.md to change repo/test_command; then: wiki session start --project ${name}`);
   console.log(projPath);
+  return { code: 0 };
+}
+
+async function linkProject(args: string[]): Promise<CliResult> {
+  const parsed = parseCommand(args, ["repo", "project"]);
+  const repoArg = stringValue(parsed.values, "repo");
+  const projectName = stringValue(parsed.values, "project");
+
+  if (repoArg === undefined) {
+    console.error("missing required flag: --repo <path>");
+    return { code: 1 };
+  }
+  if (projectName === undefined) {
+    console.error("missing required flag: --project <name>");
+    return { code: 1 };
+  }
+
+  const repoDir = resolve(repoArg);
+  const vaultRoot = await getVaultRoot();
+  const projDir = join(vaultRoot, "projects", projectName);
+  const projectMdPath = join(projDir, "_project.md");
+
+  // Verify project exists
+  try {
+    await stat(projectMdPath);
+  } catch (error) {
+    if (error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT") {
+      console.error(`project '${projectName}' not found — create it with: wiki project create ${projectName}`);
+      return { code: 1 };
+    }
+    throw error;
+  }
+
+  // Stamp the pointer block into AGENTS.md and CLAUDE.md
+  await stampRepo(repoDir, projectName);
+
+  // Record repo in _project.md linked_repos list (idempotent)
+  const raw = await readFile(projectMdPath, "utf8");
+  const parsed2 = matter(raw);
+  const existing: string[] = Array.isArray(parsed2.data.linked_repos) ? parsed2.data.linked_repos : [];
+  if (!existing.includes(repoDir)) {
+    existing.push(repoDir);
+    parsed2.data.linked_repos = existing;
+    // Reconstruct frontmatter, preserving body
+    const newFrontmatter = matter.stringify(parsed2.content, parsed2.data);
+    await writeFile(projectMdPath, newFrontmatter, "utf8");
+  }
+
+  console.error(`linked repo ${repoDir} to project ${projectName}`);
+  console.log(repoDir);
   return { code: 0 };
 }
