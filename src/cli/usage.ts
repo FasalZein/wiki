@@ -228,8 +228,8 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
     },
   },
   project: {
-    summary: "Manage projects (create, list).",
-    usage: "wiki project <create|list> [name]",
+    summary: "Manage projects (create, list, link).",
+    usage: "wiki project <create|list|link> [name]",
     example: "wiki project create myproj",
     subverbs: {
       create: {
@@ -245,6 +245,15 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
         summary: "List existing projects.",
         usage: "wiki project list",
         example: "wiki project list",
+      },
+      link: {
+        summary: "Bind a code repo to a project: stamp the wiki pointer block into its AGENTS.md/CLAUDE.md.",
+        usage: "wiki project link --project <name> --repo <path>",
+        flags: {
+          "--project": "project name (required)",
+          "--repo": "path to the code repo to bind (required)",
+        },
+        example: "wiki project link --project myproj --repo ~/code/myproj",
       },
     },
   },
