@@ -212,6 +212,11 @@ describe("wiki skill bundle", () => {
     expect(skill.toLowerCase()).not.toMatch(/temp (dir|directory|file)|tmpdir|\/tmp\//);
     // Thin router discipline (ADR-0025): no fenced syntax restated.
     expect(skill).not.toContain("```");
+    // SLICE-0056: the CLI advances the phase and prints the resume prompt —
+    // the skill relays it verbatim instead of a manual set-phase workaround.
+    expect(skill).not.toContain("wiki session set phase");
+    expect(skill).toContain("verbatim");
+    expect(skill).toContain("next session prompt");
   });
 
   // --- phase model: next-action contract + renderer parity (one model, thin emitters) ---

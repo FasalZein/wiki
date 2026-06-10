@@ -37,9 +37,10 @@ Sync first so search reflects this session's writes: `wiki sync --project <name>
 command — check `wiki handover --help` for flags; `-` reads a value from stdin.
 Close stale open handovers once their content is absorbed.
 
-The session phase does not advance on its own: after publishing, run
-`wiki session set phase <phase>` to match your `--next-phase`, so the next agent
-resumes in the right phase instead of a stale `handover`.
+The CLI finishes the loop itself: it advances the session phase to your
+`--next-phase` and prints a delimited "next session prompt" block. Relay that
+printed prompt to the user verbatim — it is what they paste into the fresh
+session to resume.
 
 Output contract: the handover lands in the vault via the `wiki` CLI — never GitHub
 Issues, repo files, or anywhere else, even if another loaded skill says otherwise.

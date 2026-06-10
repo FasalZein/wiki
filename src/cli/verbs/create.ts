@@ -22,7 +22,7 @@ import { defaultCategoryForDocType, DOC_CATEGORIES, isDocCategory, type DocCateg
 import { assertProjectStructure, loadProjectConfig, ProjectConfigError } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import type { TemplateType } from "../../schema/load";
-import { readSession } from "../../state/session";
+import { readSession, updateSession } from "../../state/session";
 import type { CliResult } from "../dispatch";
 import { parseCommand, stringValue } from "../parse";
 import { readSessionFromCwd, resolveProject } from "../resolve-project";
@@ -200,21 +200,37 @@ async function createHandover(args: string[]): Promise<CliResult> {
   await assertProjectStructure(join(vaultRoot, "projects", project));
   try {
     const explicitSlices = stringListValue(parsed.values["active-slice"]);
+    const nextPhase = stringValue(parsed.values, "next-phase");
+    const activeSlices = explicitSlices.length > 0 ? explicitSlices : session?.active_slices ?? [];
+    const suggestedSkills = stringListValue(parsed.values["suggested-skill"]);
+    const openText = await stdinOrValue(open);
     const fields: Record<string, unknown> = {
       phase,
-      active_slices: explicitSlices.length > 0 ? explicitSlices : session?.active_slices ?? [],
+      active_slices: activeSlices,
       decisions_made: stringListValue(parsed.values.decision),
-      suggested_skills: stringListValue(parsed.values["suggested-skill"]),
+      suggested_skills: suggestedSkills,
     };
-    addStringField(fields, "next_phase", stringValue(parsed.values, "next-phase"));
+    addStringField(fields, "next_phase", nextPhase);
     addStringField(fields, "active_prd", stringValue(parsed.values, "active-prd") ?? session?.active_prd);
     addStringField(fields, "produced", await stdinOrValue(produced));
-    addStringField(fields, "open", await stdinOrValue(open));
+    addStringField(fields, "open", openText);
 
     const artifact = await createArtifact({ type: "handover", vaultRoot, project, fields });
     console.log(artifact.id);
     console.error(`created ${artifact.id}`);
-    await writePhaseDocToStderr(stringValue(parsed.values, "next-phase") ?? "ad-hoc", phaseDocOptions(parsed));
+
+    // Finish the loop (SLICE-0055): the next agent resumes in the handover's
+    // next phase, not a stale `handover`. Only after a successful write, and
+    // only when a session already exists — handover never invents one.
+    if (nextPhase !== undefined && session !== null) {
+      const sessionRepo = explicitProject === undefined ? process.cwd() : await repoForProject(vaultRoot, explicitProject);
+      if (sessionRepo !== null) {
+        await updateSession(sessionRepo, { phase: nextPhase });
+      }
+    }
+
+    await writePhaseDocToStderr(nextPhase ?? "ad-hoc", phaseDocOptions(parsed));
+    emitResumePrompt({ project, handoverId: artifact.id, nextPhase, activeSlices, suggestedSkills, open: openText });
     return { code: 0 };
   } catch (error) {
     if (error instanceof ArtifactValidationError) {
@@ -302,11 +318,39 @@ async function backlinkSliceToPrd(vaultRoot: string, project: string, prdId: str
   await appendField({ type: "prd", vaultRoot, project, id: prdId, field: "slices", value: sliceId });
 }
 
-async function readSessionForProject(vaultRoot: string, project: string) {
+// SLICE-0056: the human carries the baton between sessions — print the exact
+// prompt to paste into the next one. stderr only; stdout stays the bare ID.
+function emitResumePrompt(input: {
+  project: string;
+  handoverId: string;
+  nextPhase?: string;
+  activeSlices: string[];
+  suggestedSkills: string[];
+  open?: string;
+}): void {
+  const lines = [
+    "--- next session prompt (copy everything between the markers) ---",
+    `Continue delivery on wiki project "${input.project}".`,
+    `Load the \`wiki\` skill, then run: wiki status --project ${input.project} --with-doc`,
+    `Read ${input.handoverId} first — it records what was produced and what is open (resolve it by frontmatter ID, not filename).`,
+  ];
+  if (input.nextPhase !== undefined) lines.push(`Resume in phase: ${input.nextPhase}.`);
+  if (input.activeSlices.length > 0) lines.push(`Active slices: ${input.activeSlices.join(", ")}.`);
+  if (input.suggestedSkills.length > 0) lines.push(`Suggested skills: ${input.suggestedSkills.join(", ")}.`);
+  if (input.open !== undefined) lines.push(`Open work: ${input.open}`);
+  lines.push("--- end next session prompt ---");
+  console.error(lines.join("\n"));
+}
+
+async function repoForProject(vaultRoot: string, project: string): Promise<string | null> {
   try {
-    const config = await loadProjectConfig(join(vaultRoot, "projects", project));
-    return readSession(config.repo);
+    return (await loadProjectConfig(join(vaultRoot, "projects", project))).repo;
   } catch {
     return null;
   }
+}
+
+async function readSessionForProject(vaultRoot: string, project: string) {
+  const repo = await repoForProject(vaultRoot, project);
+  return repo === null ? null : readSession(repo);
 }
