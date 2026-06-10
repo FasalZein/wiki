@@ -93,6 +93,32 @@ describe("stampPointerBlock", () => {
     expect(beginCount).toBe(1);
   });
 
+  test("preserves content above an existing block on restamp", async () => {
+    const repoDir = await makeTempDir();
+    const filePath = join(repoDir, "AGENTS.md");
+
+    const withContentAbove = [
+      "# Hand-written header",
+      "",
+      "<!-- wiki:begin v0 project=my-project -->",
+      "Old block body.",
+      "<!-- wiki:end -->",
+      "",
+      "# Trailing content",
+    ].join("\n");
+    await writeFile(filePath, withContentAbove);
+
+    await stampPointerBlock(filePath, "my-project");
+
+    const content = await readFile(filePath, "utf8");
+    expect(content).toContain("# Hand-written header");
+    expect(content).toContain("# Trailing content");
+    expect(content).not.toContain("Old block body.");
+    expect(content).toContain(`v${BLOCK_VERSION}`);
+    const beginCount = (content.match(/<!-- wiki:begin/g) ?? []).length;
+    expect(beginCount).toBe(1);
+  });
+
   test("block body names the project and states vault-only policy", async () => {
     const repoDir = await makeTempDir();
     const filePath = join(repoDir, "AGENTS.md");

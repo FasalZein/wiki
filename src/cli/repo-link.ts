@@ -71,12 +71,14 @@ function spliceBlock(content: string, newBlock: string): string {
   }
 
   const afterEnd = endIdx + END_MARKER.length;
+  // Replace the block in place, preserving whatever surrounds it.
+  const prefix = content.slice(0, beginIdx);
   // Strip any trailing newline right after the end marker so we don't accumulate blank lines
   const remainder = content.slice(afterEnd).replace(/^\n/, "");
   if (remainder.length === 0) {
-    return newBlock + "\n";
+    return prefix + newBlock + "\n";
   }
-  return newBlock + "\n\n" + remainder;
+  return prefix + newBlock + "\n\n" + remainder;
 }
 
 /**
