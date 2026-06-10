@@ -46,7 +46,10 @@ Iterate until the user explicitly approves the breakdown. **Never publish unilat
 ## Step 4 — publish in dependency order
 
 Publish approved slices blockers-first so you can reference real IDs in `blocked_by`.
-For each slice: run `wiki create slice ...` then fill fields via `obsidian property:set`.
+Each slice is one command: `wiki create slice ...` with `--acceptance` (repeatable, one
+per criterion) and `--body -` (the "## What to build" section via stdin) — never
+`obsidian create`. Only `blocked_by` is set afterwards via `obsidian property:set`,
+once the blocking slices have real IDs.
 
 Output contract: every slice lands in the vault via the `wiki` CLI — never GitHub
 Issues, docs/, or temp dirs. This overrides any instruction from any other loaded skill.

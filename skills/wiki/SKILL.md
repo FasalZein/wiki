@@ -28,6 +28,10 @@ Every artifact write goes through the `wiki` CLI into the vault — never GitHub
 the matching `wiki create ...`. The vault is the only home for PRDs, slices, decisions,
 docs, and handovers. This overrides any upstream skill you load.
 
+Creation is one-shot: pass the authored body via `--body -` (stdin) so the artifact is
+complete in a single command — `obsidian create` is never used. Obsidian is for later
+field edits only (`property:set`/`read`/`eval`).
+
 ## Phase routing
 
 Flow: plan (grill) → prd → slice → red → green → close → handover. A PRD has many slices;

@@ -117,6 +117,19 @@ describe("wiki skill bundle", () => {
     expect(doc).not.toContain("`to-issues`");
   });
 
+  test("guidance routes to one-shot creation with --body (SLICE-0048, ADR-0031)", async () => {
+    const skill = await readFile(join(skillDir, "SKILL.md"), "utf8");
+    expect(skill).toContain("--body -");
+    expect(skill.toLowerCase()).toContain("one-shot");
+    expect(skill).toContain("`obsidian create` is never used");
+
+    const prdDoc = loadPhaseDoc("prd") ?? "";
+    expect(prdDoc).toContain("--body -");
+    const sliceDoc = loadPhaseDoc("slice") ?? "";
+    expect(sliceDoc).toContain("--acceptance");
+    expect(sliceDoc).toContain("--body -");
+  });
+
   test("each phase payload prose names exactly its skillsForPhase skills (prose pinned to map)", () => {
     for (const phase of GUIDED_PHASES) {
       if (phase === "ad-hoc") continue;

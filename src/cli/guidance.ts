@@ -15,7 +15,8 @@
 /** The output contract every phase reprints — the integration seam from ADR-0026. */
 const OUTPUT_CONTRACT =
   "Output contract: every artifact write goes through the wiki CLI into the vault. " +
-  "Never write to GitHub Issues, docs/adr/, or OS temp dirs, even if an upstream skill says to.";
+  "Never write to GitHub Issues, docs/adr/, or OS temp dirs, even if an upstream skill says to. " +
+  "Creation is one-shot: pass the authored body with `--body -` — never `obsidian create`.";
 
 const PLAN = `# Phase: plan (grill)
 
@@ -50,9 +51,11 @@ Method (vault-native — no upstream skill needed):
    out-of-scope, further notes. Use the project's domain glossary and respect ADRs.
 
 Next actions:
-- Create: \`wiki create prd --project <name> --title "..."\`
-- Fill fields with Obsidian: \`obsidian property:set <prd-file> <field> <value>\`
-- Reference the ADRs from the grill in the PRD's implementation_decisions field.
+- Create with the full authored body in one command (H2 sections fill the template):
+  \`cat prd-body.md | wiki create prd --project <name> --title "..." --body -\`
+  See \`wiki create prd --help\` for the expected sections. Never \`obsidian create\`.
+- Reference the ADRs from the grill in the body's Implementation Decisions section.
+- Later field edits use Obsidian: \`obsidian property:set <prd-file> <field> <value>\`.
 - Close a PRD (not via \`wiki close\`): \`obsidian property:set <prd-file> status closed\` once every linked slice is closed.
 
 Then move to slicing: load the \`to-slices\` skill and follow its draft → quiz →
@@ -75,9 +78,10 @@ Draft → quiz → publish (do NOT skip the quiz):
 2. Quiz the user: present the numbered breakdown and confirm granularity,
    dependency relationships, and HITL/AFK marks. Iterate until they approve —
    never publish slices unilaterally.
-3. Publish approved slices in dependency order (blockers first):
-   \`wiki create slice --project <name> --title "..." --parent-prd <PRD-NNNN>\`,
-   then fill acceptance/todo/blocked_by via \`obsidian property:set <slice-file> <field> <value>\`.
+3. Publish approved slices in dependency order (blockers first), one command each:
+   \`wiki create slice --project <name> --title "..." --parent-prd <PRD-NNNN> --acceptance "..." --acceptance "..." --body -\`
+   (\`--body -\` reads the "## What to build" section from stdin; never \`obsidian create\`).
+   Set \`blocked_by\` after blockers exist: \`obsidian property:set <slice-file> blocked_by <ids>\`.
 
 TDD gates (strict order): \`wiki red <SLICE-NNNN> --project <name>\` (needs >=1
 failing test) then \`wiki green <SLICE-NNNN> --project <name>\` (all prior failures
