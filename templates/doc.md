@@ -3,6 +3,7 @@ template: doc
 version: 1
 schema:
   id:           { type: string,    required: true,  pattern: "DOC-\\d{4,}", description: "Canonical doc identifier" }
+  aliases:         { type: list,      default: [] }
   title:        { type: string,    required: true,  min: 5, max: 120 }
   project:      { type: string,    required: true,  description: "Project name; must match project folder" }
   type:         { type: enum,      required: true,  values: [runbook, research, guide, learning, reference], description: "Knowledge artifact type" }

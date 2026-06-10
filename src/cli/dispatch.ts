@@ -1,6 +1,7 @@
 import { handleClose } from "./verbs/close";
 import { handleCreate } from "./verbs/create";
 import { handleDoc } from "./verbs/doc";
+import { handleFmt } from "./verbs/fmt";
 import { handleNextId } from "./verbs/next-id";
 import { handleProject } from "./verbs/project";
 import { handleRed, handleGreen } from "./verbs/tdd";
@@ -78,6 +79,7 @@ export async function dispatch(args: string[]): Promise<CliResult> {
   if (verb === "validate") return handleValidate(rest);
   if (verb === "next-id") return handleNextId(rest);
   if (verb === "doctor") return handleVault(["doctor", ...rest]);
+  if (verb === "fmt") return handleFmt(rest);
   if (verb === "sync") return handleSync(rest);
   if (verb === "session") return handleSession(rest);
   if (verb === "vault") return handleVault(rest);

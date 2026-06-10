@@ -90,6 +90,15 @@ export async function obsidianCreate(
   return output;
 }
 
+/** Rename via fileManager so Obsidian-managed wikilinks survive the move. */
+export async function obsidianRename(from: string, to: string): Promise<void> {
+  const code = `(async()=>{const o="${from}";const n="${to}";const f=app.vault.getAbstractFileByPath(o);if(!f){return "Error: not found: "+o}await app.fileManager.renameFile(f,n);return n})()`;
+  const output = await obsidianEval(code);
+  if (output.startsWith("Error:")) {
+    throw new ObsidianError(output);
+  }
+}
+
 export async function obsidianRead(path: string): Promise<string> {
   return runObsidian(["read", `path=${path}`]);
 }

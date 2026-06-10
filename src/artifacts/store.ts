@@ -11,7 +11,7 @@ import type { NormalizedRecord, Schema, ValidationError } from "../schema/types"
 import { type DocCategory, isDocCategory } from "./registry";
 import { nextId } from "./id";
 import { artifactDirectory } from "./paths";
-import { applyDefaults, renderArtifact } from "./render";
+import { applyDefaults, orderBySchema, renderArtifact } from "./render";
 
 export type CreateArtifactInput = {
   type: TemplateType;
@@ -161,7 +161,7 @@ export async function createArtifact(input: CreateArtifactInput): Promise<Artifa
     }
   }
 
-  const content = renderArtifact(template, result.value, bodySections);
+  const content = renderArtifact(template, orderBySchema(schema, result.value), bodySections);
   const path = artifactPath(input.type, input.vaultRoot, input.project, id, String(result.value.title ?? id), input.category);
   await writeArtifact(input.vaultRoot, path, content);
 

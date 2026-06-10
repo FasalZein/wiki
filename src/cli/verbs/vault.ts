@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { existsSync } from "node:fs";
 
 import { runDoctor } from "../../bootstrap/doctor";
 import { initVault } from "../../bootstrap/init";
@@ -7,6 +8,14 @@ import { blessPlugin, resetPlugin } from "../../bootstrap/bless";
 import { parseCommand, stringValue } from "../parse";
 import { unknownMessage } from "../usage";
 import type { CliResult } from "../dispatch";
+
+function resolveRepoRoot(): string {
+  const bundledRoot = resolve(import.meta.dir, "..");
+  if (existsSync(resolve(bundledRoot, "templates"))) {
+    return bundledRoot;
+  }
+  return resolve(import.meta.dir, "../../..");
+}
 
 export async function handleVault(args: string[]): Promise<CliResult> {
   const [action, ...rest] = args;
@@ -100,7 +109,7 @@ async function vaultSync(args: string[]): Promise<CliResult> {
   }
 
   const vaultPath = resolve(rawPath);
-  const repoRoot = resolve(import.meta.dir, "../../..");
+  const repoRoot = resolveRepoRoot();
   const pluginSource = stringValue(parsed.values, "plugin-source");
   const result = await syncVault(
     vaultPath,
@@ -141,7 +150,7 @@ async function vaultDoctor(args: string[]): Promise<CliResult> {
   const parsed = parseCommand(args, []);
   const rawPath = parsed.positionals[0] ?? ".";
   const vaultPath = resolve(rawPath);
-  const repoRoot = resolve(import.meta.dir, "../../..");
+  const repoRoot = resolveRepoRoot();
 
   const result = await runDoctor(vaultPath, repoRoot);
 

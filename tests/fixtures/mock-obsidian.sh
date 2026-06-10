@@ -97,7 +97,17 @@ case "$CMD" in
       esac
     done
     # Handle vault.create/modify calls from obsidianCreate
-    if echo "$code" | grep -q 'app.vault.create\|app.vault.modify'; then
+    if echo "$code" | grep -q 'renameFile'; then
+      opath=$(echo "$code" | grep -o 'const o="[^"]*"' | sed 's/const o="//;s/"//')
+      npath=$(echo "$code" | grep -o 'const n="[^"]*"' | sed 's/const n="//;s/"//')
+      if [ -n "$KNOWLEDGE_VAULT_ROOT" ] && [ -f "$KNOWLEDGE_VAULT_ROOT/$opath" ]; then
+        mkdir -p "$(dirname "$KNOWLEDGE_VAULT_ROOT/$npath")"
+        mv "$KNOWLEDGE_VAULT_ROOT/$opath" "$KNOWLEDGE_VAULT_ROOT/$npath"
+        echo "=> ${npath}"
+      else
+        echo "=> Error: not found: ${opath}"
+      fi
+    elif echo "$code" | grep -q 'app.vault.create\|app.vault.modify'; then
       # Extract path between const p=" and ";
       vpath=$(echo "$code" | grep -o 'const p="[^"]*"' | sed 's/const p="//;s/"//')
       # Extract content between const c=` and `;

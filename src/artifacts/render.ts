@@ -9,7 +9,10 @@ export function renderArtifact(
   bodySections?: Record<string, string>,
 ): string {
   const parsed = matter(normalizeInlineMaps(template));
-  const stripped = stripGuidanceForFilled(parsed.content, bodySections);
+  // Templater scripts are for manual creation inside Obsidian only — leaked
+  // into a rendered artifact they execute on file creation and prompt the user.
+  const noTemplater = parsed.content.replace(/<!--\s*<%\*[\s\S]*?-->\n*/g, "");
+  const stripped = stripGuidanceForFilled(noTemplater, bodySections);
   const withLists = renderEachBlocks(stripped, values);
   const body = withLists.replace(/{{([A-Za-z0-9_]+)}}/g, (_placeholder: string, name: string) => {
     const section = bodySections?.[name];
@@ -65,6 +68,23 @@ function renderEachBlocks(body: string, values: NormalizedRecord): string {
     }
     return elseBranch ?? "";
   });
+}
+
+/**
+ * Canonical frontmatter order: schema declaration order first (id leads),
+ * then any unknown fields in their original relative order.
+ */
+export function orderBySchema(schema: Schema, record: NormalizedRecord): NormalizedRecord {
+  const schemaNames = schema.fields.map((field) => field.name);
+  const known = new Set(schemaNames);
+  const ordered: NormalizedRecord = {};
+  for (const name of schemaNames) {
+    if (record[name] !== undefined) ordered[name] = record[name];
+  }
+  for (const name of Object.keys(record)) {
+    if (!known.has(name)) ordered[name] = record[name];
+  }
+  return ordered;
 }
 
 export function applyDefaults(schema: Schema, template: string, input: Record<string, unknown>): NormalizedRecord {

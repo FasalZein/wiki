@@ -3,6 +3,7 @@ template: slice
 version: 1
 schema:
   id:              { type: string,    required: true,  pattern: "SLICE-\\d{3,}" }
+  aliases:         { type: list,      default: [] }
   title:           { type: string,    required: true,  min: 5, max: 80 }
   project:         { type: string,    required: true }
   parent_prd:      { type: link,      required: true, target: prd }

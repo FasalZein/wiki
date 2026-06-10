@@ -163,6 +163,15 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
     usage: "wiki doctor",
     example: "wiki doctor",
   },
+  fmt: {
+    summary: "Format vault artifacts. Default mode is check: report format drift and exit 1 if any; --write applies the mechanical fixes idempotently.",
+    usage: "wiki fmt [--project <name>] [--write]",
+    flags: {
+      "--project": "project name (required if no active session)",
+      "--write": "apply fixes (without it, check mode only reports)",
+    },
+    example: "wiki fmt --project myproj --write",
+  },
   sync: {
     summary: "Re-index a project into the QMD search collections.",
     usage: "wiki sync [--project <name>] [--include-research] [--pull] [--force-embed]",

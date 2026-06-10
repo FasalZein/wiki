@@ -3,6 +3,7 @@ template: prd
 version: 1
 schema:
   id:           { type: string,    required: true,  pattern: "PRD-\\d{3,}", description: "Canonical PRD identifier" }
+  aliases:         { type: list,      default: [] }
   title:        { type: string,    required: true,  min: 5, max: 100 }
   project:      { type: string,    required: true,  description: "Project name; must match project folder" }
   status:       { type: enum,      required: true,  values: [draft, ready, in-progress, closed, superseded], default: draft }

@@ -3,6 +3,7 @@ template: handover
 version: 1
 schema:
   id:             { type: string,    required: true,  pattern: "HANDOVER-\\d{4,}" }
+  aliases:         { type: list,      default: [] }
   project:        { type: string,    required: true }
   session_date:   { type: date,      required: true, auto: true }
   phase:          { type: enum,      required: true,  values: [plan, prd, slice, red, green, review, close, handover, ad-hoc] }
