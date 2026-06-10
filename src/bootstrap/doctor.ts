@@ -17,7 +17,8 @@ export type DriftIssue = {
     | "plugin-checks-skipped"
     | "docs-structure"
     | "repo-binding"
-    | "repo-binding-warning";
+    | "repo-binding-warning"
+    | "contract-drift";
   plugin?: string;
   template?: string;
   project?: string;
@@ -365,6 +366,39 @@ export async function checkProjectRepoBindings(vaultPath: string, project: strin
           message: `${project}: ${file} in repo '${repoPath}' has a stale wiki block (v${blockVersion}, current is v${BLOCK_VERSION}) — run: wiki project link --project ${project} --repo ${repoPath}`,
         });
       }
+    }
+
+    issues.push(...(await checkRepoContractDrift(project, repoPath)));
+  }
+
+  return issues;
+}
+
+/**
+ * Contract-drift check (ADR-0032 Layer 2): a bound repo must not carry the artifacts
+ * upstream skills try to write locally — a root CONTEXT.md (glossary) or docs/adr/.
+ * Prevention via guidance is probabilistic; this is the detection net.
+ */
+async function checkRepoContractDrift(project: string, repoPath: string): Promise<DriftIssue[]> {
+  const issues: DriftIssue[] = [];
+
+  if (await exists(join(repoPath, "CONTEXT.md"))) {
+    issues.push({
+      type: "contract-drift",
+      project,
+      message: `${project}: repo '${repoPath}' contains CONTEXT.md — glossary terms belong in the vault. Recreate each term via 'wiki create doc --project ${project} --type reference', then delete the repo file.`,
+    });
+  }
+
+  const adrDir = join(repoPath, "docs", "adr");
+  if (await exists(adrDir)) {
+    const adrFiles = (await readdir(adrDir)).filter((name) => name.endsWith(".md")).sort();
+    if (adrFiles.length > 0) {
+      issues.push({
+        type: "contract-drift",
+        project,
+        message: `${project}: repo '${repoPath}' contains docs/adr/ files (${adrFiles.join(", ")}) — decisions belong in the vault. Recreate each via 'wiki create decision --project ${project}', then delete the repo files.`,
+      });
     }
   }
 

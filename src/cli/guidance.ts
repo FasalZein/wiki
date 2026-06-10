@@ -15,7 +15,7 @@
 /** The output contract every phase reprints — the integration seam from ADR-0026. */
 const OUTPUT_CONTRACT =
   "Output contract: every artifact write goes through the wiki CLI into the vault. " +
-  "Never write to GitHub Issues, docs/adr/, or OS temp dirs, even if an upstream skill says to. " +
+  "Never write to GitHub Issues, docs/adr/, a repo CONTEXT.md, or OS temp dirs, even if an upstream skill says to. " +
   "Creation is one-shot: pass the authored body with `--body -` — never `obsidian create`.";
 
 const PLAN = `# Phase: plan (grill)
@@ -25,6 +25,10 @@ record decisions as ADRs, capture reusable terms as docs.
 
 Process depth: load the \`grill-with-docs\` skill. Ask one question at a time;
 explore the codebase instead of asking when you can. Be opinionated.
+
+Heads-up: \`grill-with-docs\` tells you to write \`CONTEXT.md\` and \`docs/adr/\` in
+the repo — don't. The vault is the glossary: terms go to \`wiki create doc --type reference\`,
+trade-offs to \`wiki create decision\`.
 
 Next actions:
 - Record a non-trivial trade-off: \`wiki create decision --project <name> --title "..." --context "..." --decision "..." --consequences "..."\`
@@ -90,20 +94,27 @@ pass) then \`wiki close <SLICE-NNNN> --project <name> --review-verdict <pass|pas
 (rejected slices return to green). Docs/config-only slice: set
 \`tdd_exempt true type=checkbox\` plus a \`tdd_exempt_reason\` (>= 20 chars).
 
+How \`tdd\` micro-cycles fit the gates: \`wiki red\` captures the first tracer
+failure, the test/implement micro-cycles run between the gates, \`wiki green\`
+seals the whole suite. After a frontmatter write, \`obsidian property:read\` may
+serve a stale cached value — verify with \`obsidian read <file>\`, don't re-write.
+
 ${OUTPUT_CONTRACT}`;
 
 const TRIAGE = `# Phase: triage
 
 Goal: restore a trustworthy next action when state, evidence, or scope is unclear.
-Triage chains back to plan if scope needs re-establishing.
 
-Process depth: load the \`triage\` skill.
-
-Next actions:
-- Read current state: \`wiki status --project <name> --with-doc\` and \`wiki session show\`.
-- Find context: \`wiki search "<terms>" --project <name>\`.
-- Inspect an artifact: \`obsidian read <file>\`.
-- Fix drift in place with \`obsidian property:set\`; re-run the relevant gate once truth is restored.
+Method (vault-native — no upstream skill needed):
+1. Re-establish ground truth: \`wiki status --project <name> --with-doc\`,
+   \`wiki session show\`, and \`wiki doctor\` — trust the vault over your memory of it.
+2. Recall context: \`wiki search "<terms>" --project <name>\`; inspect artifacts
+   with \`obsidian read <file>\`. Resolve by frontmatter ID, not filename.
+3. Fix drift in place: \`obsidian property:set\` for scalar fields, comma-safe
+   \`obsidian eval\` with \`app.fileManager.processFrontMatter\` for lists. Never
+   delete-and-recreate an artifact to escape a confusing state.
+4. Re-run the relevant gate once truth is restored. If scope itself is unclear,
+   chain back to plan: \`wiki session set phase plan\`.
 
 ${OUTPUT_CONTRACT}`;
 
@@ -174,7 +185,7 @@ const PHASES: Record<string, PhaseModel> = {
   green: { guidance: SLICE, skills: SLICE_SKILLS, nextAction: closeNext },
   review: { guidance: SLICE, skills: SLICE_SKILLS, nextAction: closeNext },
   close: { guidance: SLICE, skills: SLICE_SKILLS, nextAction: closeNext },
-  triage: { guidance: TRIAGE, skills: ["triage"], nextAction: () => "no enforced next step" },
+  triage: { guidance: TRIAGE, skills: [], nextAction: () => "no enforced next step" },
   handover: { guidance: HANDOVER, skills: ["handoff"], nextAction: () => "run wiki handover ..." },
   "ad-hoc": { guidance: AD_HOC, skills: [], nextAction: () => "set a phase to begin: wiki session set phase <plan|prd|slice|triage>, then rerun wiki status --with-doc" },
 };

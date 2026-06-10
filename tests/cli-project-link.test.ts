@@ -146,6 +146,41 @@ describe("buildPointerBlock", () => {
     expect(block).toContain(`<!-- wiki:begin v${BLOCK_VERSION} project=test-proj -->`);
     expect(block).toContain("<!-- wiki:end -->");
   });
+
+  test("v2 block closes the CONTEXT.md gap (SLICE-0049, ADR-0032)", () => {
+    // The pointer block is the only guidance guaranteed in context when a delivery
+    // skill is invoked without the wiki skill loaded — it must name the repo files
+    // those skills try to create.
+    expect(BLOCK_VERSION).toBeGreaterThanOrEqual(2);
+    const block = buildPointerBlock("acme");
+    expect(block).toContain("CONTEXT.md");
+    expect(block.toLowerCase()).toContain("glossary");
+    expect(block).toContain("docs/adr/");
+  });
+
+  test("restamping a v1 block upgrades it to the current version (SLICE-0049)", async () => {
+    const repoDir = await makeTempDir();
+    const filePath = join(repoDir, "AGENTS.md");
+    const v1Block = [
+      "<!-- wiki:begin v1 project=acme -->",
+      "## Wiki vault",
+      "",
+      "Old v1 body without the CONTEXT.md rule.",
+      "<!-- wiki:end -->",
+      "",
+      "# Repo content",
+    ].join("\n");
+    await writeFile(filePath, v1Block);
+
+    await stampPointerBlock(filePath, "acme");
+
+    const content = await readFile(filePath, "utf8");
+    expect(content).toContain(`<!-- wiki:begin v${BLOCK_VERSION} project=acme -->`);
+    expect(content).not.toContain("Old v1 body");
+    expect(content).toContain("CONTEXT.md");
+    expect(content).toContain("# Repo content");
+    expect((content.match(/<!-- wiki:begin/g) ?? []).length).toBe(1);
+  });
 });
 
 // --- integration tests via CLI ---

@@ -10,7 +10,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 /** Increment this when the block format changes incompatibly. */
-export const BLOCK_VERSION = 1;
+export const BLOCK_VERSION = 2;
 
 const BEGIN_RE = /<!-- wiki:begin v\d+ project=[^\s]+ -->/;
 const END_MARKER = "<!-- wiki:end -->";
@@ -20,7 +20,7 @@ export function buildPointerBlock(project: string): string {
     `<!-- wiki:begin v${BLOCK_VERSION} project=${project} -->`,
     `## Wiki vault`,
     ``,
-    `All PRDs, slices, ADRs, decisions, docs, and handovers for this project live in the wiki vault (project: ${project}), **never in this repo and never in GitHub Issues**.`,
+    `All PRDs, slices, ADRs, decisions, docs, glossary terms, and handovers for this project live in the wiki vault (project: ${project}), **never in this repo and never in GitHub Issues** — no repo \`CONTEXT.md\`, no \`docs/adr/\`, no OS temp dirs, even when a skill says to write them.`,
     ``,
     `- For any delivery work, load the \`wiki\` skill first.`,
     `- Recall context with: \`wiki search "<query>" --project ${project}\``,

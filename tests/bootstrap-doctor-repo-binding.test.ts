@@ -193,3 +193,80 @@ describe("doctor repo-binding checks", () => {
     expect(repoIssues).toHaveLength(0);
   });
 });
+
+// --- contract-drift detection (SLICE-0050, ADR-0032 Layer 2) ---
+// Prevention is probabilistic: an agent following grill-with-docs can still land
+// a CONTEXT.md or docs/adr/ in a bound repo. Doctor is the detection net.
+
+describe("doctor contract-drift checks", () => {
+  test("flags a CONTEXT.md at the root of a bound repo with a migration hint", async () => {
+    const repoDir = await makeTempDir();
+    const block = buildPointerBlock("acme");
+    await writeFile(join(repoDir, "CONTEXT.md"), "# Glossary\n\nOrder: a thing.\n");
+    const vaultRoot = await makeVaultWithLinkedRepo({
+      projectName: "acme",
+      repoDir,
+      agentsMd: block + "\n",
+      claudeMd: block + "\n",
+    });
+
+    const result = await runDoctor(vaultRoot, DUMMY_REPO_ROOT);
+
+    const drift = result.issues.filter((i) => i.type === "contract-drift");
+    expect(drift).toHaveLength(1);
+    expect(drift[0]?.message).toContain("CONTEXT.md");
+    expect(drift[0]?.message).toContain("wiki create doc");
+  });
+
+  test("flags markdown files under docs/adr/ in a bound repo with a migration hint", async () => {
+    const repoDir = await makeTempDir();
+    const block = buildPointerBlock("acme");
+    await mkdir(join(repoDir, "docs", "adr"), { recursive: true });
+    await writeFile(join(repoDir, "docs", "adr", "0001-use-x.md"), "# Use X\n");
+    const vaultRoot = await makeVaultWithLinkedRepo({
+      projectName: "acme",
+      repoDir,
+      agentsMd: block + "\n",
+      claudeMd: block + "\n",
+    });
+
+    const result = await runDoctor(vaultRoot, DUMMY_REPO_ROOT);
+
+    const drift = result.issues.filter((i) => i.type === "contract-drift");
+    expect(drift).toHaveLength(1);
+    expect(drift[0]?.message).toContain("0001-use-x.md");
+    expect(drift[0]?.message).toContain("wiki create decision");
+  });
+
+  test("clean bound repo produces no contract-drift issues", async () => {
+    const repoDir = await makeTempDir();
+    const block = buildPointerBlock("acme");
+    const vaultRoot = await makeVaultWithLinkedRepo({
+      projectName: "acme",
+      repoDir,
+      agentsMd: block + "\n",
+      claudeMd: block + "\n",
+    });
+
+    const result = await runDoctor(vaultRoot, DUMMY_REPO_ROOT);
+
+    expect(result.issues.filter((i) => i.type === "contract-drift")).toHaveLength(0);
+  });
+
+  test("a CONTEXT.md in a repo that is not linked produces no contract-drift issues", async () => {
+    const strayDir = await makeTempDir();
+    await writeFile(join(strayDir, "CONTEXT.md"), "# Not bound to any project\n");
+    const vaultRoot = await makeTempDir();
+    const projDir = join(vaultRoot, "projects", "nolinks");
+    await mkdir(projDir, { recursive: true });
+    const today = new Date().toISOString().slice(0, 10);
+    await writeFile(
+      join(projDir, "_project.md"),
+      `---\nproject: nolinks\nstatus: planning\ncreated: ${today}\nrepo: /tmp/x\ntest_command: bun test\n---\n# nolinks\n`,
+    );
+
+    const result = await runDoctor(vaultRoot, DUMMY_REPO_ROOT);
+
+    expect(result.issues.filter((i) => i.type === "contract-drift")).toHaveLength(0);
+  });
+});

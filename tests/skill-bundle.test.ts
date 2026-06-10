@@ -81,9 +81,10 @@ describe("wiki skill bundle", () => {
 
   // --- phase→skill mapping is a first-class, pinned value (no prose/table drift) ---
 
-  test("every guided phase (except ad-hoc and vault-native prd) names at least one upstream skill", () => {
-    // prd is vault-native (ADR-0030): no upstream skill needed; method lives in the phase doc itself.
-    const vaultNativePhases = new Set(["ad-hoc", "prd"]);
+  test("every guided phase (except ad-hoc and vault-native prd/triage) names at least one skill", () => {
+    // prd (ADR-0030) and triage (ADR-0032) are vault-native: no upstream skill needed;
+    // the method lives in the phase doc itself.
+    const vaultNativePhases = new Set(["ad-hoc", "prd", "triage"]);
     for (const phase of GUIDED_PHASES) {
       const skills = skillsForPhase(phase);
       if (vaultNativePhases.has(phase)) {
@@ -130,6 +131,32 @@ describe("wiki skill bundle", () => {
     expect(sliceDoc).toContain("--body -");
   });
 
+  test("contract names a repo CONTEXT.md on every surface (SLICE-0049, ADR-0032)", async () => {
+    // Layer 1 prevention: grill-with-docs and improve-codebase-architecture instruct
+    // agents to create a repo CONTEXT.md / docs/adr/ — every contract surface must
+    // name CONTEXT.md so following them is a visible violation, not a loophole.
+    const skill = await readFile(join(skillDir, "SKILL.md"), "utf8");
+    expect(skill).toContain("CONTEXT.md");
+
+    for (const phase of GUIDED_PHASES) {
+      const doc = loadPhaseDoc(phase) ?? "";
+      expect(doc, `phase ${phase} contract omits CONTEXT.md`).toContain("CONTEXT.md");
+    }
+
+    // Plan phase names the conflict and redirects both outputs into the vault.
+    const plan = loadPhaseDoc("plan") ?? "";
+    expect(plan).toContain("`grill-with-docs`");
+    expect(plan).toContain("wiki create doc");
+    expect(plan).toContain("wiki create decision");
+  });
+
+  test("slice phase doc reconciles tdd micro-cycles with the gates and warns on property:read staleness (SLICE-0049)", () => {
+    const doc = loadPhaseDoc("slice") ?? "";
+    expect(doc.toLowerCase()).toContain("micro-cycle");
+    expect(doc).toContain("property:read");
+    expect(doc.toLowerCase()).toContain("stale");
+  });
+
   test("each phase payload prose names exactly its skillsForPhase skills (prose pinned to map)", () => {
     for (const phase of GUIDED_PHASES) {
       if (phase === "ad-hoc") continue;
@@ -152,6 +179,39 @@ describe("wiki skill bundle", () => {
         expect(skillsForPhase(phase), `SKILL.md table drift for phase ${phase}`).toEqual(advertised);
       }
     }
+  });
+
+  // --- SLICE-0051: handoff fork + triage retirement (ADR-0032 Layer 3) ---
+
+  test("triage is vault-native: no upstream skill, phase doc carries the method (SLICE-0051, ADR-0032)", () => {
+    expect(skillsForPhase("triage")).toEqual([]);
+    const doc = loadPhaseDoc("triage") ?? "";
+    // The retired upstream skill must not be routed to anymore.
+    expect(doc).not.toContain("`triage`");
+    expect(doc).not.toContain("Process depth: load");
+    // Method keywords now carried inline: ground truth, recall, fix drift, chain to plan.
+    expect(doc).toContain("wiki status");
+    expect(doc).toContain("wiki search");
+    expect(doc.toLowerCase()).toContain("drift");
+    expect(doc).toContain("phase plan");
+  });
+
+  test("bundled handoff skill is a single vault-native SKILL.md with no temp-dir instruction (SLICE-0051, ADR-0032)", async () => {
+    const handoffDir = join(repoRoot, "skills", "handoff");
+    const entries = (await readdir(handoffDir)).sort();
+    expect(entries).toEqual(["SKILL.md"]);
+
+    const skill = await readFile(join(handoffDir, "SKILL.md"), "utf8");
+    expect(skill.split("\n").length).toBeLessThanOrEqual(100);
+    const description = skill.match(/^description:\s*(.+)$/m)?.[1] ?? "";
+    expect(description.toLowerCase()).toContain("handover");
+    expect(description).toContain("Use when");
+    // Vault-native: publishes via wiki handover, never temp dirs or repo files.
+    expect(skill).toContain("wiki handover");
+    expect(skill).toContain("vault");
+    expect(skill.toLowerCase()).not.toMatch(/temp (dir|directory|file)|tmpdir|\/tmp\//);
+    // Thin router discipline (ADR-0025): no fenced syntax restated.
+    expect(skill).not.toContain("```");
   });
 
   // --- phase model: next-action contract + renderer parity (one model, thin emitters) ---

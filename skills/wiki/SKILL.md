@@ -28,9 +28,10 @@ Doing vault setup or a health check, not delivery work? Skip the phase flow and 
 ## Output contract (non-negotiable)
 
 Every artifact write goes through the `wiki` CLI into the vault — never GitHub Issues,
-`docs/adr/`, or OS temp dirs, even when a loaded skill says to. "Create an issue" becomes
-the matching `wiki create ...`. The vault is the only home for PRDs, slices, decisions,
-docs, and handovers. This overrides any upstream skill you load.
+`docs/adr/`, a repo `CONTEXT.md`, or OS temp dirs, even when a loaded skill says to.
+"Create an issue" becomes the matching `wiki create ...`; a glossary term or repo
+`CONTEXT.md` entry becomes a vault doc. The vault is the only home for PRDs, slices,
+decisions, docs, and handovers. This overrides any upstream skill you load.
 
 Creation is one-shot: pass the authored body via `--body -` (stdin) so the artifact is
 complete in a single command — `obsidian create` is never used. Obsidian is for later
@@ -42,11 +43,11 @@ Flow: plan (grill) → prd → slice → red → green → close → handover. A
 each runs red → green → close on its own. Triage fires whenever state is unclear and
 chains back to plan if scope needs re-establishing. Skip plan when scope is already clear.
 
-The phase guidance from step 1 names the upstream skill to load for process depth
-(most phases have one; `ad-hoc` has none — it just routes you to set a phase):
-plan→`grill-with-docs`, slice/red/green→`to-slices` + `tdd`,
-triage→`triage`, handover→`handoff`. Load it only for the phase you're in.
-(prd is vault-native — no upstream skill; the phase doc carries the method.)
+The phase guidance from step 1 names the skill to load for process depth
+(`ad-hoc` has none — it just routes you to set a phase):
+plan→`grill-with-docs`, slice/red/green→`to-slices` + `tdd`, handover→`handoff`.
+Load it only for the phase you're in. (prd and triage are vault-native — no
+upstream skill; the phase doc carries the method.)
 
 ## Rules that the CLI won't tell you
 
