@@ -4,7 +4,8 @@ import { basename, dirname, join, relative } from "node:path";
 
 import { obsidianCreate } from "../integrations/obsidian";
 
-import { loadTemplate, resolveTemplatePath, type TemplateType } from "../schema/load";
+import { loadTemplate, normalizeInlineMaps, resolveTemplatePath, type TemplateType } from "../schema/load";
+import { BodyParseError, parseBodySections } from "./body";
 import { validate } from "../schema/validate";
 import type { NormalizedRecord, Schema, ValidationError } from "../schema/types";
 import { type DocCategory, isDocCategory } from "./registry";
@@ -19,6 +20,8 @@ export type CreateArtifactInput = {
   fields: Record<string, unknown>;
   /** Optional category subfolder for docs, e.g. docs/research/. Must be a locked category. */
   category?: DocCategory;
+  /** Authored body markdown; parsed by H2 headings into template sections (ADR-0031). */
+  body?: string;
 };
 
 export type ReadArtifactInput = {
@@ -145,7 +148,20 @@ export async function createArtifact(input: CreateArtifactInput): Promise<Artifa
     throw new ArtifactValidationError(result.errors);
   }
 
-  const content = renderArtifact(template, result.value);
+  let bodySections: Record<string, string> | undefined;
+  if (input.body !== undefined) {
+    const fieldNames = new Set(schema.fields.map((field) => field.name));
+    try {
+      bodySections = parseBodySections(matter(normalizeInlineMaps(template)).content, fieldNames, input.body);
+    } catch (error) {
+      if (error instanceof BodyParseError) {
+        throw new ArtifactValidationError([{ field: "body", reason: error.message }]);
+      }
+      throw error;
+    }
+  }
+
+  const content = renderArtifact(template, result.value, bodySections);
   const path = artifactPath(input.type, input.vaultRoot, input.project, id, String(result.value.title ?? id), input.category);
   await writeArtifact(input.vaultRoot, path, content);
 

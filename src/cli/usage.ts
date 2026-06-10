@@ -22,28 +22,31 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
     subverbs: {
       prd: {
         summary: "Create a PRD.",
-        usage: "wiki create prd --project <name> --title <title>",
+        usage: "wiki create prd --project <name> --title <title> [--body -]",
         flags: {
           "--project": "project name (required if no active session)",
           "--title": "PRD title (required)",
+          "--body": "authored body markdown ('-' reads stdin); H2 sections fill the template (## Problem Statement, ## Solution, ## User Stories, ## Implementation Decisions, ## Testing Decisions, ## Out of Scope, ## Further Notes)",
           "--supersedes": "id this PRD supersedes (marks the old one superseded)",
           "--related-to": "acknowledge a near-duplicate and link it instead of blocking",
           "--force-new": "bypass the advisory dedup gate",
         },
-        example: 'wiki create prd --project myproj --title "Short descriptive title"',
+        example: 'cat prd-body.md | wiki create prd --project myproj --title "Short descriptive title" --body -',
       },
       slice: {
         summary: "Create a slice under a parent PRD.",
-        usage: "wiki create slice --project <name> --title <title> --parent-prd <PRD-NNNN>",
+        usage: "wiki create slice --project <name> --title <title> --parent-prd <PRD-NNNN> [--acceptance <c>]... [--body -]",
         flags: {
           "--project": "project name (required if no active session)",
           "--title": "slice title (required)",
           "--parent-prd": "parent PRD id (required; must exist)",
+          "--acceptance": "acceptance criterion (repeatable); the red gate requires at least one",
+          "--body": "authored body markdown ('-' reads stdin); only the ## What to build section — Todo/Evidence/Acceptance are rendered by the CLI",
           "--supersedes": "id this slice supersedes",
           "--related-to": "link a near-duplicate instead of blocking",
           "--force-new": "bypass the advisory dedup gate",
         },
-        example: 'wiki create slice --project myproj --title "End-to-end behavior" --parent-prd PRD-0001',
+        example: 'wiki create slice --project myproj --title "End-to-end behavior" --parent-prd PRD-0001 --acceptance "first criterion" --body -',
       },
       decision: {
         summary: "Create an ADR (architecture decision record).",
@@ -60,7 +63,7 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
       },
       doc: {
         summary: "Create a knowledge doc in a locked category subfolder.",
-        usage: "wiki create doc --project <name> --title <title> --type <type> [--category <cat>]",
+        usage: "wiki create doc --project <name> --title <title> --type <type> [--category <cat>] [--body -]",
         flags: {
           "--project": "project name (required if no active session)",
           "--title": "doc title (required)",
@@ -68,8 +71,9 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
           "--category": "locked category (defaults from --type): architecture|research|runbooks|specs|notes|legacy",
           "--tags": "comma-separated tags",
           "--source-url": "source URL for research docs",
+          "--body": "authored body markdown ('-' reads stdin); the ## Content section",
         },
-        example: 'wiki create doc --project myproj --title "How auth works" --type reference',
+        example: 'cat findings.md | wiki create doc --project myproj --title "How auth works" --type reference --body -',
       },
       handover: {
         summary: "Create a handover artifact capturing session state and next-phase routing.",

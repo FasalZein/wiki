@@ -39,18 +39,23 @@ export async function handleCreate(args: string[]): Promise<CliResult> {
 }
 
 async function createPrd(args: string[]): Promise<CliResult> {
-  const parsed = parseCommand(args, ["title", "project", "force-new", "related-to", "supersedes"]);
+  const parsed = parseCommand(args, ["title", "project", "body", "force-new", "related-to", "supersedes"]);
   const project = await resolveProject(parsed);
   const title = stringValue(parsed.values, "title");
   const missing = missingFields({ project, title });
   if (missing) return missing;
   if (project === undefined || title === undefined) return { code: 1 };
 
-  return createWithSupersede({ type: "prd", project, dedupQuery: title, fields: { title }, rawValues: parsed.values });
+  const body = await stdinOrValue(stringValue(parsed.values, "body"));
+  return createWithSupersede({ type: "prd", project, dedupQuery: title, fields: { title }, rawValues: parsed.values, body });
 }
 
 async function createSlice(args: string[]): Promise<CliResult> {
-  const parsed = parseCommand(args, ["title", "project", "parent-prd", "force-new", "related-to", "supersedes"]);
+  const parsed = parseCommand(
+    args,
+    ["title", "project", "parent-prd", "body", "acceptance", "force-new", "related-to", "supersedes"],
+    ["acceptance"],
+  );
   const project = await resolveProject(parsed);
   const title = stringValue(parsed.values, "title");
   const parentPrd = stringValue(parsed.values, "parent-prd");
@@ -71,7 +76,15 @@ async function createSlice(args: string[]): Promise<CliResult> {
     throw error;
   }
 
-  return createWithSupersede({ type: "slice", project, dedupQuery: `${title} ${parentPrd}`, fields: { title, parent_prd: parentPrd, acceptance: [] }, rawValues: parsed.values });
+  const body = await stdinOrValue(stringValue(parsed.values, "body"));
+  return createWithSupersede({
+    type: "slice",
+    project,
+    dedupQuery: `${title} ${parentPrd}`,
+    fields: { title, parent_prd: parentPrd, acceptance: stringListValue(parsed.values.acceptance) },
+    rawValues: parsed.values,
+    body,
+  });
 }
 
 async function createDecision(args: string[]): Promise<CliResult> {
@@ -89,7 +102,7 @@ async function createDecision(args: string[]): Promise<CliResult> {
 }
 
 async function createDoc(args: string[]): Promise<CliResult> {
-  const parsed = parseCommand(args, ["title", "project", "type", "category", "tags", "source-url", "force-new", "related-to", "supersedes"]);
+  const parsed = parseCommand(args, ["title", "project", "type", "category", "tags", "source-url", "body", "force-new", "related-to", "supersedes"]);
   const project = await resolveProject(parsed);
   const title = stringValue(parsed.values, "title");
   const docType = stringValue(parsed.values, "type");
@@ -111,7 +124,8 @@ async function createDoc(args: string[]): Promise<CliResult> {
   const sourceUrl = stringValue(parsed.values, "source-url");
   if (sourceUrl !== undefined) fields.source_url = sourceUrl;
 
-  return createWithSupersede({ type: "doc", project, dedupQuery: `${title} ${docType}`, fields, rawValues: parsed.values, category });
+  const body = await stdinOrValue(stringValue(parsed.values, "body"));
+  return createWithSupersede({ type: "doc", project, dedupQuery: `${title} ${docType}`, fields, rawValues: parsed.values, category, body });
 }
 
 type CreateRequest = {
@@ -121,10 +135,11 @@ type CreateRequest = {
   fields: Record<string, unknown>;
   rawValues: Record<string, string | string[] | boolean | undefined>;
   category?: DocCategory;
+  body?: string;
 };
 
 async function createWithSupersede(req: CreateRequest): Promise<CliResult> {
-  const { type, project, dedupQuery, fields, rawValues, category } = req;
+  const { type, project, dedupQuery, fields, rawValues, category, body } = req;
   const override = parseOverride(rawValues);
   if (typeof override === "string") { console.error(override); return { code: 1 }; }
 
@@ -141,6 +156,7 @@ async function createWithSupersede(req: CreateRequest): Promise<CliResult> {
       vaultRoot,
       project,
       category,
+      body,
       fields: { ...fields, ...fieldsForDedupOverride(override) },
     });
     if (override.kind === "supersedes") {

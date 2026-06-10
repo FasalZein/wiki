@@ -3,10 +3,19 @@ import matter from "gray-matter";
 import { normalizeInlineMaps } from "../schema/load";
 import type { NormalizedRecord, Schema } from "../schema/types";
 
-export function renderArtifact(template: string, values: NormalizedRecord): string {
+export function renderArtifact(
+  template: string,
+  values: NormalizedRecord,
+  bodySections?: Record<string, string>,
+): string {
   const parsed = matter(normalizeInlineMaps(template));
-  const withLists = renderEachBlocks(parsed.content, values);
+  const stripped = stripGuidanceForFilled(parsed.content, bodySections);
+  const withLists = renderEachBlocks(stripped, values);
   const body = withLists.replace(/{{([A-Za-z0-9_]+)}}/g, (_placeholder: string, name: string) => {
+    const section = bodySections?.[name];
+    if (section !== undefined) {
+      return section;
+    }
     if (name === "date") {
       const updated = values.updated;
       return typeof updated === "string" ? updated : "";
@@ -22,6 +31,23 @@ export function renderArtifact(template: string, values: NormalizedRecord): stri
   });
 
   return `${matter.stringify(body.trimStart(), values)}\n`;
+}
+
+/**
+ * Remove the authoring-guidance blockquote that follows a `{{placeholder}}`
+ * line for every placeholder that received body content — the guidance is
+ * for an author filling the section in, not for a filled artifact.
+ */
+function stripGuidanceForFilled(body: string, bodySections?: Record<string, string>): string {
+  if (bodySections === undefined) {
+    return body;
+  }
+  let result = body;
+  for (const name of Object.keys(bodySections)) {
+    const guidanceRe = new RegExp(`({{${name}}})\\n\\n(?:>.*\\n?)+`);
+    result = result.replace(guidanceRe, "$1\n");
+  }
+  return result;
 }
 
 /**
