@@ -38,6 +38,7 @@ describe("phase auto-doc CLI", () => {
 
     const green = await runWiki(["green", "SLICE-0001", "--project", "wiki-v2"], fixture);
     await appendSliceField(fixture.vaultRoot, "todo", { id: "t1", text: "Done", done: true });
+    await checkAllBodyTodos(fixture.vaultRoot);
     const close = await runWiki(["close", "SLICE-0001", "--project", "wiki-v2", "--review-verdict", "pass"], fixture);
 
     expect(green.exitCode).toBe(0);
@@ -140,6 +141,13 @@ async function createSliceWithAcceptance(fixture: Fixture): Promise<void> {
       .exitCode,
   ).toBe(0);
   await appendSliceField(fixture.vaultRoot, "acceptance", "First criterion");
+}
+
+/** Tick every markdown checkbox in the slice body so the close gate passes. */
+async function checkAllBodyTodos(vaultRoot: string): Promise<void> {
+  const path = join(vaultRoot, "projects", "wiki-v2", "slices", "SLICE-0001-build-slice-authoring.md");
+  const content = await readFile(path, "utf8");
+  await writeFile(path, content.replaceAll("- [ ]", "- [x]"));
 }
 
 async function appendSliceField(vaultRoot: string, field: string, value: unknown): Promise<void> {

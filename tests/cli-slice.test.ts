@@ -116,6 +116,56 @@ describe("slice CLI", () => {
   });
 });
 
+// --- SLICE-0054: PRD backlinks its slices ---
+
+describe("slice create backlinks the parent PRD", () => {
+  test("creating a slice appends its ID to the PRD slices list (SLICE-0054)", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    await seedPrd(vaultRoot);
+
+    expect((await runWiki(createArgs(), vaultRoot)).exitCode).toBe(0);
+
+    expect(await readPrdSlices(vaultRoot)).toEqual(["SLICE-0001"]);
+  });
+
+  test("a second slice appends without clobbering or duplicating (SLICE-0054)", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    await seedPrd(vaultRoot);
+
+    expect((await runWiki(createArgs(), vaultRoot)).exitCode).toBe(0);
+    const second = createArgs().map((arg) => (arg === "Build slice authoring" ? "Second slice" : arg));
+    expect((await runWiki(second, vaultRoot)).exitCode).toBe(0);
+
+    expect(await readPrdSlices(vaultRoot)).toEqual(["SLICE-0001", "SLICE-0002"]);
+  });
+
+  test("a PRD lacking the slices field gains one (SLICE-0054)", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    await seedPrd(vaultRoot);
+    const prdPath = await prdFilePath(vaultRoot);
+    const parsed = matter(await readFile(prdPath, "utf8"));
+    delete parsed.data.slices;
+    await writeFile(prdPath, matter.stringify(parsed.content, parsed.data));
+
+    expect((await runWiki(createArgs(), vaultRoot)).exitCode).toBe(0);
+
+    expect(await readPrdSlices(vaultRoot)).toEqual(["SLICE-0001"]);
+  });
+});
+
+async function prdFilePath(vaultRoot: string): Promise<string> {
+  const dir = join(vaultRoot, "projects", "wiki-v2", "prds");
+  const { readdir } = await import("node:fs/promises");
+  const entries = (await readdir(dir)).filter((name) => name.startsWith("PRD-0001"));
+  expect(entries.length).toBe(1);
+  return join(dir, entries[0]!);
+}
+
+async function readPrdSlices(vaultRoot: string): Promise<unknown> {
+  const parsed = matter(await readFile(await prdFilePath(vaultRoot), "utf8"));
+  return parsed.data.slices;
+}
+
 function createArgs(): string[] {
   return [
     "create",

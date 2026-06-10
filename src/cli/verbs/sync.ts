@@ -4,14 +4,15 @@ import { embedCollection, ensureCollection, QmdError, updateCollection } from ".
 import { assertProjectStructure, loadProjectConfig } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import { checkProjectDocsStructure } from "../../bootstrap/doctor";
-import { booleanValue, parseCommand, stringValue } from "../parse";
+import { booleanValue, parseCommand } from "../parse";
+import { resolveProject } from "../resolve-project";
 import type { CliResult } from "../dispatch";
 
 export async function handleSync(args: string[]): Promise<CliResult> {
   const parsed = parseCommand(args, ["project"], [], ["include-research", "pull", "force-embed"]);
-  const project = stringValue(parsed.values, "project");
+  const project = await resolveProject(parsed);
   if (project === undefined) {
-    console.error("missing required field: project");
+    console.error("missing required field: project (pass --project or start a session with wiki session start)");
     return { code: 1 };
   }
 

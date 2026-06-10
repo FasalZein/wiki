@@ -114,7 +114,9 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
     },
   },
   red: {
-    summary: "TDD red gate: run tests, require at least one failure, record the log.",
+    summary:
+      "TDD red gate: run tests, require at least one failure, record the log. " +
+      "The run executes the test_command field from the project's _project.md.",
     usage: "wiki red <SLICE-NNNN> --project <name>",
     flags: { "--project": "project name (required)" },
     example: "wiki red SLICE-0001 --project myproj",
@@ -126,7 +128,9 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
     example: "wiki green SLICE-0001 --project myproj",
   },
   close: {
-    summary: "Close a slice after todos, evidence, and review verdict are satisfied.",
+    summary:
+      "Close a slice after todos, evidence, and review verdict are satisfied. " +
+      "Every checkbox in the slice body's ## Todo section must be checked (- [x]) or removed; the gate lists any unchecked items.",
     usage: "wiki close <SLICE-NNNN> --project <name> --review-verdict <pass|pass-with-notes|reject>",
     flags: { "--project": "project name (required)", "--review-verdict": "pass|pass-with-notes|reject" },
     example: "wiki close SLICE-0001 --project myproj --review-verdict pass",
@@ -161,9 +165,9 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
   },
   sync: {
     summary: "Re-index a project into the QMD search collections.",
-    usage: "wiki sync --project <name> [--include-research] [--pull] [--force-embed]",
+    usage: "wiki sync [--project <name>] [--include-research] [--pull] [--force-embed]",
     flags: {
-      "--project": "project name (required)",
+      "--project": "project name (required if no active session)",
       "--include-research": "also sync the research collection",
       "--pull": "pull remote changes before indexing",
       "--force-embed": "re-embed all documents",

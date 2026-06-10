@@ -1,4 +1,4 @@
-import { decideTransition } from "../../artifacts/transitions";
+import { decideTransition, parseBodyTodos } from "../../artifacts/transitions";
 import { ArtifactNotFoundError, ArtifactValidationError, readArtifact, setFields, type Artifact } from "../../artifacts/store";
 import { ProjectConfigError } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
@@ -48,12 +48,15 @@ export async function handleClose(args: string[]): Promise<CliResult> {
 }
 
 function decideFromArtifact(artifact: Artifact) {
+  // The close gate sees both todo homes: a frontmatter todo list and the body's
+  // "## Todo" checkboxes that template-created slices carry.
+  const fieldTodos = Array.isArray(artifact.fields.todo) ? artifact.fields.todo : [];
   return decideTransition({
     id: artifact.id,
     verb: "close",
     status: artifact.fields.status,
     acceptance: artifact.fields.acceptance,
-    todos: artifact.fields.todo,
+    todos: [...fieldTodos, ...parseBodyTodos(artifact.body)],
     tddExempt: artifact.fields.tdd_exempt,
     tddExemptReason: artifact.fields.tdd_exempt_reason,
   });

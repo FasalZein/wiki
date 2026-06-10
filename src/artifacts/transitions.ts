@@ -60,29 +60,57 @@ export function decideTransition(input: SliceTransitionInput): SliceTransitionDe
   if (input.status !== "green" && !(input.status === "planned" && exempt)) {
     return { ok: false, exitCode: 2, reason: `cannot close ${input.id} from status ${String(input.status)}` };
   }
-  const unfinished = firstUnfinishedTodo(input.todos);
-  if (unfinished !== undefined) {
-    return { ok: false, exitCode: 1, reason: `unfinished todo ${unfinished.id}: ${unfinished.text}` };
+  const unfinished = unfinishedTodos(input.todos);
+  if (unfinished.length > 0) {
+    const lines = unfinished.map((todo) => `- [ ] ${todo.text}`).join("\n");
+    return {
+      ok: false,
+      exitCode: 1,
+      reason: `unfinished todos block close — check them off (- [x]) in the slice body or remove them:\n${lines}`,
+    };
   }
   return { ok: true };
 }
 
-function firstUnfinishedTodo(todos: unknown): { id: string; text: string } | undefined {
-  if (!Array.isArray(todos)) {
-    return undefined;
+/**
+ * Markdown checkboxes from the body's "## Todo" section, as TodoItems. This is
+ * the contract the slice template states ("close is gated on every item above
+ * being done") — template-created slices keep their todos as body checkboxes,
+ * not frontmatter.
+ */
+export function parseBodyTodos(body: string): TodoItem[] {
+  const todos: TodoItem[] = [];
+  let inTodoSection = false;
+  for (const line of body.split("\n")) {
+    if (/^## /.test(line)) {
+      inTodoSection = /^## Todo\s*$/.test(line);
+      continue;
+    }
+    if (!inTodoSection) continue;
+    const match = /^- \[( |x|X)\] (.*)$/.exec(line);
+    if (match) {
+      todos.push({ text: match[2] ?? "", done: match[1] !== " " });
+    }
   }
+  return todos;
+}
+
+function unfinishedTodos(todos: unknown): { id: string; text: string }[] {
+  if (!Array.isArray(todos)) {
+    return [];
+  }
+  const unfinished: { id: string; text: string }[] = [];
   for (const [index, todo] of todos.entries()) {
     if (typeof todo === "string") {
-      return { id: String(index + 1), text: todo };
-    }
-    if (isRecord(todo) && todo.done !== true) {
-      return {
+      unfinished.push({ id: String(index + 1), text: todo });
+    } else if (isRecord(todo) && todo.done !== true) {
+      unfinished.push({
         id: typeof todo.id === "string" ? todo.id : String(index + 1),
         text: typeof todo.text === "string" ? todo.text : "",
-      };
+      });
     }
   }
-  return undefined;
+  return unfinished;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

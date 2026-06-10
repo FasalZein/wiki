@@ -10,6 +10,7 @@ import {
   type DedupOverride,
 } from "../../artifacts/dedup";
 import {
+  appendField,
   ArtifactNotFoundError,
   ArtifactValidationError,
   createArtifact,
@@ -23,7 +24,8 @@ import { getVaultRoot } from "../../config/vault";
 import type { TemplateType } from "../../schema/load";
 import { readSession } from "../../state/session";
 import type { CliResult } from "../dispatch";
-import { parseCommand, stringValue, type ParsedCommand } from "../parse";
+import { parseCommand, stringValue } from "../parse";
+import { readSessionFromCwd, resolveProject } from "../resolve-project";
 import { phaseDocOptions, writePhaseDocToStderr } from "../phase-docs";
 import { unknownMessage, USAGE_REGISTRY } from "../usage";
 
@@ -162,6 +164,9 @@ async function createWithSupersede(req: CreateRequest): Promise<CliResult> {
     if (override.kind === "supersedes") {
       await setFields({ type, vaultRoot, project, id: override.id, fields: { status: "superseded", superseded_by: artifact.id } });
     }
+    if (type === "slice" && typeof fields.parent_prd === "string") {
+      await backlinkSliceToPrd(vaultRoot, project, fields.parent_prd, artifact.id);
+    }
     console.log(artifact.id);
     console.error(`created ${artifact.id} at ${relative(vaultRoot, artifact.path)}`);
     return { code: 0 };
@@ -284,29 +289,17 @@ async function stdinOrValue(value: string | undefined): Promise<string | undefin
   return value;
 }
 
-async function readSessionFromCwd() {
-  const session = await readSession(process.cwd());
-  if (session === null) return null;
-  try {
-    const vaultRoot = await getVaultRoot();
-    await assertProjectStructure(join(vaultRoot, "projects", session.project));
-    return session;
-  } catch {
-    return null;
-  }
-}
-
 /**
- * Resolve the target project for a create verb: an explicit --project wins,
- * otherwise fall back to the project of the repo's active session. This lets
- * create commands run without repeating --project once a session is started,
- * matching how status/handover already default. Returns undefined when neither
- * an explicit flag nor a valid repo session is present.
+ * Backlink a new slice into its parent PRD's `slices` list (the field the PRD
+ * schema marks "Auto-populated from slices that reference this PRD"). Goes
+ * through appendField → writeArtifact, so the list write is comma-safe
+ * (gray-matter serialization) and lands via the Obsidian layer (ADR-0017).
  */
-async function resolveProject(parsed: ParsedCommand): Promise<string | undefined> {
-  const explicit = stringValue(parsed.values, "project");
-  if (explicit !== undefined) return explicit;
-  return (await readSessionFromCwd())?.project;
+async function backlinkSliceToPrd(vaultRoot: string, project: string, prdId: string, sliceId: string): Promise<void> {
+  const prd = await readArtifact({ type: "prd", vaultRoot, project, id: prdId });
+  const current = Array.isArray(prd.fields.slices) ? prd.fields.slices.map(String) : [];
+  if (current.includes(sliceId)) return;
+  await appendField({ type: "prd", vaultRoot, project, id: prdId, field: "slices", value: sliceId });
 }
 
 async function readSessionForProject(vaultRoot: string, project: string) {

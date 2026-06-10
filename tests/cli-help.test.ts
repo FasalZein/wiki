@@ -35,6 +35,20 @@ describe("usage registry", () => {
     }
   });
 
+  test("close help documents the body Todo checkbox gate; red help states test-command provenance (SLICE-0053)", () => {
+    const closeEntry = USAGE_REGISTRY.close;
+    expect(closeEntry).toBeDefined();
+    const closeText = renderHelp("close", closeEntry!);
+    expect(closeText.toLowerCase()).toContain("checkbox");
+    expect(closeText).toContain("Todo");
+
+    const redEntry = USAGE_REGISTRY.red;
+    expect(redEntry).toBeDefined();
+    const redText = renderHelp("red", redEntry!);
+    expect(redText).toContain("test_command");
+    expect(redText).toContain("_project.md");
+  });
+
   test("renderHelp produces usage, the summary, and an example", () => {
     const entry: UsageEntry = {
       summary: "Do the thing",

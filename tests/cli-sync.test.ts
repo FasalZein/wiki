@@ -73,14 +73,40 @@ describe("sync CLI", () => {
     );
   });
 
-  test("sync exits 1 when project is missing", async () => {
+  test("sync exits 1 when project is missing and no session is active", async () => {
     const fixture = await createSyncFixture("wiki-v2");
 
-    const result = await runWiki(["sync"], fixture);
+    await withSession(null, async () => {
+      const result = await runWiki(["sync"], fixture);
 
-    expect(result.exitCode).toBe(1);
-    expect(result.stdout).toBe("");
-    expect(result.stderr).toContain("missing required field: project");
+      expect(result.exitCode).toBe(1);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toContain("missing required field: project");
+    });
+  });
+
+  // --- session fallback (SLICE-0052): sync resolves the project like create does ---
+
+  test("sync with an active session and no --project syncs the session project", async () => {
+    const fixture = await createSyncFixture("wiki-v2");
+
+    await withSession("wiki-v2", async () => {
+      const result = await runWiki(["sync"], fixture);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stderr).toContain("synced collection wiki-v2");
+    });
+  });
+
+  test("sync --project overrides the active session", async () => {
+    const fixture = await createSyncFixture("other-proj");
+
+    await withSession("wiki-v2", async () => {
+      const result = await runWiki(["sync", "--project", "other-proj"], fixture);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stderr).toContain("synced collection other-proj");
+    });
   });
 
   test("sync exits 10 and surfaces qmd stderr when qmd fails", async () => {
@@ -111,6 +137,32 @@ type CommandResult = {
   stdout: string;
   stderr: string;
 };
+
+const repoRoot = import.meta.dir.replace(/\/tests$/, "");
+const sessionPath = join(repoRoot, ".wiki", "state", "session.json");
+
+/** Run `fn` with the repo session forced to `project` (or absent when null), then restore. */
+async function withSession(project: string | null, fn: () => Promise<void>): Promise<void> {
+  const existing = await readFile(sessionPath, "utf8").catch(() => null);
+  try {
+    if (project === null) {
+      await rm(sessionPath, { force: true });
+    } else {
+      await mkdir(join(repoRoot, ".wiki", "state"), { recursive: true });
+      await writeFile(
+        sessionPath,
+        JSON.stringify({ project, phase: "slice", active_slices: [], updated: "2026-06-10T00:00:00.000Z" }, null, 2),
+      );
+    }
+    await fn();
+  } finally {
+    if (existing === null) {
+      await rm(sessionPath, { force: true });
+    } else {
+      await writeFile(sessionPath, existing);
+    }
+  }
+}
 
 async function runWiki(args: string[], fixture: SyncFixture): Promise<CommandResult> {
   const proc = Bun.spawn(["bun", "src/cli.ts", ...args], {

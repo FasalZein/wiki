@@ -126,8 +126,26 @@ describe("slice TDD state machine CLI", () => {
     expect(await readSlice(fixture.vaultRoot)).toBe(before);
   });
 
+  test("close blocks on unchecked body Todo checkboxes and lists them (SLICE-0053)", async () => {
+    // The slice template promises "close is gated on every item above being done" —
+    // the gate must actually read the body checkboxes and name the unchecked ones.
+    const fixture = await createGreenSlice();
+
+    const result = await runWiki(
+      ["close", "SLICE-0001", "--project", "wiki-v2", "--review-verdict", "pass"],
+      fixture.vaultRoot,
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toLowerCase()).toContain("todo");
+    expect(result.stderr).toContain("Write tests");
+    expect(result.stderr).toContain("Implement feature");
+    expect(sliceFields(await readSlice(fixture.vaultRoot)).status).toBe("green");
+  });
+
   test("close success sets review verdict and closed status", async () => {
     const fixture = await createGreenSlice();
+    await checkAllBodyTodos(fixture.vaultRoot);
     await appendSliceField(fixture.vaultRoot, "todo", { id: "t1", text: "Write implementation", done: true });
 
     const result = await runWiki(
@@ -145,6 +163,7 @@ describe("slice TDD state machine CLI", () => {
   test("tdd_exempt planned slice closes directly when it has a valid reason", async () => {
     const fixture = await createFixture();
     await createSliceWithAcceptance(fixture);
+    await checkAllBodyTodos(fixture.vaultRoot);
     await setSliceFields(fixture.vaultRoot, { tdd_exempt: true, tdd_exempt_reason: "Documentation-only change has no runnable behavior" });
 
     const result = await runWiki(
@@ -267,6 +286,13 @@ async function createSlice(fixture: Fixture): Promise<void> {
 async function createSliceWithAcceptance(fixture: Fixture): Promise<void> {
   await createSlice(fixture);
   await appendSliceField(fixture.vaultRoot, "acceptance", "First criterion");
+}
+
+/** Tick every markdown checkbox in the slice body, as an agent does before close. */
+async function checkAllBodyTodos(vaultRoot: string): Promise<void> {
+  const path = join(vaultRoot, "projects", "wiki-v2", "slices", "SLICE-0001-build-slice-authoring.md");
+  const content = await readFile(path, "utf8");
+  await writeFile(path, content.replaceAll("- [ ]", "- [x]"));
 }
 
 async function setSliceFields(vaultRoot: string, fields: Record<string, unknown>): Promise<void> {
