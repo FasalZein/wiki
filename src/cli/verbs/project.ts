@@ -1,4 +1,4 @@
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import matter from "gray-matter";
 
@@ -7,7 +7,7 @@ import { ARTIFACT_FOLDERS, STRUCTURAL_FOLDERS } from "../../artifacts/registry";
 import { deployViews } from "../../bootstrap/views";
 import { listProjects } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
-import { ensureObsidian, obsidianCreate } from "../../integrations/obsidian";
+import { ensureObsidian, obsidianCreate, obsidianPropertySet } from "../../integrations/obsidian";
 import { ensureCollection } from "../../integrations/qmd";
 import { stampRepo } from "../repo-link";
 import type { CliResult } from "../dispatch";
@@ -132,16 +132,14 @@ async function linkProject(args: string[]): Promise<CliResult> {
   // Stamp the pointer block into AGENTS.md and CLAUDE.md
   await stampRepo(repoDir, projectName);
 
-  // Record repo in _project.md linked_repos list (idempotent)
+  // Record repo in _project.md linked_repos list (idempotent). Vault writes go
+  // through the Obsidian CLI (ADR-0017), never raw FS.
   const raw = await readFile(projectMdPath, "utf8");
   const parsed2 = matter(raw);
   const existing: string[] = Array.isArray(parsed2.data.linked_repos) ? parsed2.data.linked_repos : [];
   if (!existing.includes(repoDir)) {
     existing.push(repoDir);
-    parsed2.data.linked_repos = existing;
-    // Reconstruct frontmatter, preserving body
-    const newFrontmatter = matter.stringify(parsed2.content, parsed2.data);
-    await writeFile(projectMdPath, newFrontmatter, "utf8");
+    await obsidianPropertySet(`projects/${projectName}/_project.md`, "linked_repos", existing.join(","), "list");
   }
 
   console.error(`linked repo ${repoDir} to project ${projectName}`);

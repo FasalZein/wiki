@@ -36,14 +36,45 @@ case "$CMD" in
     # silent success
     ;;
   property:set)
+    ppath=""
     pname=""
     pvalue=""
+    ptype=""
     for arg in "$@"; do
       case "$arg" in
+        path=*) ppath="${arg#path=}" ;;
         name=*) pname="${arg#name=}" ;;
         value=*) pvalue="${arg#value=}" ;;
+        type=*) ptype="${arg#type=}" ;;
       esac
     done
+    # Apply the property to the file's frontmatter like the real CLI does
+    dest="${KNOWLEDGE_VAULT_ROOT}/${ppath}"
+    if [ -n "$KNOWLEDGE_VAULT_ROOT" ] && [ -n "$ppath" ] && [ -n "$pname" ] && [ -f "$dest" ]; then
+      awk -v key="$pname" -v val="$pvalue" -v vtype="$ptype" '
+        BEGIN { infm = 0; skipping = 0 }
+        NR == 1 && /^---$/ { infm = 1; print; next }
+        infm == 1 && /^---$/ {
+          if (vtype == "list") {
+            n = split(val, parts, ",")
+            print key ":"
+            for (i = 1; i <= n; i++) print "  - " parts[i]
+          } else {
+            print key ": " val
+          }
+          infm = 0; print; next
+        }
+        infm == 1 {
+          if (index($0, key ":") == 1) { skipping = 1; next }
+          if (skipping == 1) {
+            if ($0 ~ /^[ \t]+- /) next
+            skipping = 0
+          }
+          print; next
+        }
+        { print }
+      ' "$dest" > "${dest}.tmp" && mv "${dest}.tmp" "$dest"
+    fi
     echo "Set ${pname}: ${pvalue}"
     ;;
   property:read)
