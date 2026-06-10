@@ -81,15 +81,40 @@ describe("wiki skill bundle", () => {
 
   // --- phase→skill mapping is a first-class, pinned value (no prose/table drift) ---
 
-  test("every guided phase (except ad-hoc) names at least one upstream skill", () => {
+  test("every guided phase (except ad-hoc and vault-native prd) names at least one upstream skill", () => {
+    // prd is vault-native (ADR-0030): no upstream skill needed; method lives in the phase doc itself.
+    const vaultNativePhases = new Set(["ad-hoc", "prd"]);
     for (const phase of GUIDED_PHASES) {
       const skills = skillsForPhase(phase);
-      if (phase === "ad-hoc") {
-        expect(skills).toEqual([]);
+      if (vaultNativePhases.has(phase)) {
+        expect(skills, `vault-native phase ${phase} should have no upstream skill`).toEqual([]);
       } else {
         expect(skills.length, `phase ${phase} has no skill`).toBeGreaterThanOrEqual(1);
       }
     }
+  });
+
+  // --- SLICE-0044: vault-native prd phase + slices routing (ADR-0030) ---
+
+  test("prd phase is vault-native: no upstream skill, guidance carries the PRD-writing method (SLICE-0044)", () => {
+    expect(skillsForPhase("prd")).toEqual([]);
+    const doc = loadPhaseDoc("prd") ?? "";
+    expect(doc).not.toContain("`to-prd`");
+    expect(doc).not.toContain("`write-a-prd`");
+    // The method keywords the phase doc now carries inline.
+    expect(doc).toContain("seam");
+    expect(doc).toContain("user stor");
+  });
+
+  test("slice phases route to slices skill not to-issues (SLICE-0044)", () => {
+    for (const phase of ["slice", "red", "green", "review", "close"]) {
+      const skills = skillsForPhase(phase);
+      expect(skills, `${phase} should include slices`).toContain("slices");
+      expect(skills, `${phase} should not include to-issues`).not.toContain("to-issues");
+    }
+    const doc = loadPhaseDoc("slice") ?? "";
+    expect(doc).toContain("`slices`");
+    expect(doc).not.toContain("`to-issues`");
   });
 
   test("each phase payload prose names exactly its skillsForPhase skills (prose pinned to map)", () => {

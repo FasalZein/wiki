@@ -40,7 +40,14 @@ const PRD = `# Phase: prd
 Goal: create or refine a product requirement that can drive slices, implementing
 the decisions from the grill.
 
-Process depth: load the \`to-prd\` (or \`write-a-prd\`) skill for PRD structure.
+Method (vault-native — no upstream skill needed):
+1. Clarify the goal: synthesize what you already know; do NOT interview the user —
+   explore the codebase instead when in doubt.
+2. Sketch testable seams: prefer existing seams over new ones; use the highest
+   seam possible. Check with the user that the seams match their expectations.
+3. Structure the PRD body: problem statement, solution, user stories (extensive
+   numbered list covering all aspects), implementation decisions, testing decisions,
+   out-of-scope, further notes. Use the project's domain glossary and respect ADRs.
 
 Next actions:
 - Create: \`wiki create prd --project <name> --title "..."\`
@@ -48,8 +55,8 @@ Next actions:
 - Reference the ADRs from the grill in the PRD's implementation_decisions field.
 - Close a PRD (not via \`wiki close\`): \`obsidian property:set <prd-file> status closed\` once every linked slice is closed.
 
-Then move to slicing: load \`to-issues\`, draft the slice breakdown, and quiz the
-user for approval before publishing any slice (see the slice phase guidance).
+Then move to slicing: load the \`slices\` skill and follow its draft → quiz →
+publish flow (see the slice phase guidance).
 
 ${OUTPUT_CONTRACT}`;
 
@@ -60,8 +67,8 @@ deliver each through the TDD gates. A slice is a thin vertical cut through every
 layer (schema/API/UI/tests), demoable on its own — prefer many thin slices over
 few thick ones, and AFK over HITL.
 
-Process depth: load \`to-issues\` for the slicing method (vertical-slice rules,
-the slice body template) and \`tdd\` for test-first discipline.
+Process depth: load the \`slices\` skill for the slicing method (vertical-slice
+rules, draft → quiz → publish flow) and \`tdd\` for test-first discipline.
 
 Draft → quiz → publish (do NOT skip the quiz):
 1. Draft the breakdown from the PRD; mark each slice HITL or AFK and its blocked_by.
@@ -150,13 +157,13 @@ type PhaseModel = {
   nextAction: (ctx: NextActionContext) => string;
 };
 
-const SLICE_SKILLS = ["to-issues", "tdd"];
+const SLICE_SKILLS = ["slices", "tdd"];
 const closeNext = ({ project, slice }: NextActionContext): string =>
   `run wiki close ${slice} --project ${project} --review-verdict pass`;
 
 const PHASES: Record<string, PhaseModel> = {
   plan: { guidance: PLAN, skills: ["grill-with-docs"], nextAction: () => "run wiki create prd ..." },
-  prd: { guidance: PRD, skills: ["to-prd"], nextAction: () => "run wiki create slice ..." },
+  prd: { guidance: PRD, skills: [], nextAction: () => "run wiki create slice ..." },
   slice: { guidance: SLICE, skills: SLICE_SKILLS, nextAction: ({ project, slice }) => `run wiki red ${slice} --project ${project}` },
   red: { guidance: SLICE, skills: SLICE_SKILLS, nextAction: ({ project, slice }) => `write implementation, then run wiki green ${slice} --project ${project}` },
   green: { guidance: SLICE, skills: SLICE_SKILLS, nextAction: closeNext },
