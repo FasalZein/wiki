@@ -1,9 +1,11 @@
 import { access, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import matter from "gray-matter";
 
 import { loadPluginManifest, requiredPlugins, loadDefaultConfig } from "./manifest";
 import { readLockfile } from "./plugins";
 import { DOC_CATEGORIES } from "../artifacts/registry";
+import { BLOCK_VERSION } from "../cli/repo-link";
 
 export type DriftIssue = {
   type:
@@ -13,7 +15,9 @@ export type DriftIssue = {
     | "missing-template"
     | "community-plugins-mismatch"
     | "plugin-checks-skipped"
-    | "docs-structure";
+    | "docs-structure"
+    | "repo-binding"
+    | "repo-binding-warning";
   plugin?: string;
   template?: string;
   project?: string;
@@ -227,6 +231,12 @@ export async function runDoctor(
     issues.push(...(await checkProjectDocsStructure(vaultPath, project)));
   }
 
+  // 7. Repo-binding: for every project with linked_repos, verify each repo's
+  //    AGENTS.md and CLAUDE.md contain a current-version wiki block.
+  for (const project of await listVaultProjects(vaultPath)) {
+    issues.push(...(await checkProjectRepoBindings(vaultPath, project)));
+  }
+
   return { issues, clean: issues.length === 0 };
 }
 
@@ -269,5 +279,94 @@ export async function checkProjectDocsStructure(vaultPath: string, project: stri
       });
     }
   }
+  return issues;
+}
+
+/** Sentinel regex for any version wiki block. */
+const WIKI_BLOCK_BEGIN_RE = /<!-- wiki:begin v(\d+) project=[^\s]+ -->/;
+const WIKI_BLOCK_END = "<!-- wiki:end -->";
+const WIKI_BLOCK_FILES = ["AGENTS.md", "CLAUDE.md"] as const;
+
+/**
+ * Repo-binding check: for every linked repo in a project, verify AGENTS.md and CLAUDE.md
+ * have a current-version wiki block. Returns DriftIssues for any missing, stale, or
+ * unreadable bindings.
+ */
+export async function checkProjectRepoBindings(vaultPath: string, project: string): Promise<DriftIssue[]> {
+  const issues: DriftIssue[] = [];
+  const projectMdPath = join(vaultPath, "projects", project, "_project.md");
+
+  let raw: string;
+  try {
+    raw = await readFile(projectMdPath, "utf8");
+  } catch {
+    return issues; // No _project.md — skip
+  }
+
+  const parsed = matter(raw);
+  const linkedRepos = parsed.data.linked_repos;
+  if (!Array.isArray(linkedRepos) || linkedRepos.length === 0) return issues;
+
+  for (const repoPath of linkedRepos) {
+    if (typeof repoPath !== "string") continue;
+
+    // Check repo accessibility first — degrade to warning if unreadable
+    try {
+      await access(repoPath);
+    } catch {
+      issues.push({
+        type: "repo-binding-warning",
+        project,
+        message: `${project}: linked repo '${repoPath}' is not accessible — skipping block check. Remove it from linked_repos or restore the path.`,
+      });
+      continue;
+    }
+
+    for (const file of WIKI_BLOCK_FILES) {
+      const filePath = join(repoPath, file);
+      let content: string;
+      try {
+        content = await readFile(filePath, "utf8");
+      } catch (error) {
+        if (error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT") {
+          // File absent — flag as missing
+          issues.push({
+            type: "repo-binding",
+            project,
+            message: `${project}: ${file} in repo '${repoPath}' is missing — run: wiki project link --project ${project} --repo ${repoPath}`,
+          });
+        } else {
+          // Unreadable file — degrade to warning
+          issues.push({
+            type: "repo-binding-warning",
+            project,
+            message: `${project}: ${file} in repo '${repoPath}' could not be read — skipping block check.`,
+          });
+        }
+        continue;
+      }
+
+      const match = WIKI_BLOCK_BEGIN_RE.exec(content);
+      if (match === null || !content.includes(WIKI_BLOCK_END)) {
+        // No block present
+        issues.push({
+          type: "repo-binding",
+          project,
+          message: `${project}: ${file} in repo '${repoPath}' is missing the wiki block — run: wiki project link --project ${project} --repo ${repoPath}`,
+        });
+        continue;
+      }
+
+      const blockVersion = parseInt(match[1]!, 10);
+      if (blockVersion !== BLOCK_VERSION) {
+        issues.push({
+          type: "repo-binding",
+          project,
+          message: `${project}: ${file} in repo '${repoPath}' has a stale wiki block (v${blockVersion}, current is v${BLOCK_VERSION}) — run: wiki project link --project ${project} --repo ${repoPath}`,
+        });
+      }
+    }
+  }
+
   return issues;
 }
