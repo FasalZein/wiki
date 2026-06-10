@@ -106,14 +106,14 @@ describe("wiki skill bundle", () => {
     expect(doc).toContain("user stor");
   });
 
-  test("slice phases route to slices skill not to-issues (SLICE-0044)", () => {
+  test("slice phases route to to-slices skill not to-issues (SLICE-0044)", () => {
     for (const phase of ["slice", "red", "green", "review", "close"]) {
       const skills = skillsForPhase(phase);
-      expect(skills, `${phase} should include slices`).toContain("slices");
+      expect(skills, `${phase} should include to-slices`).toContain("to-slices");
       expect(skills, `${phase} should not include to-issues`).not.toContain("to-issues");
     }
     const doc = loadPhaseDoc("slice") ?? "";
-    expect(doc).toContain("`slices`");
+    expect(doc).toContain("`to-slices`");
     expect(doc).not.toContain("`to-issues`");
   });
 

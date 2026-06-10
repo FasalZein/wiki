@@ -36,7 +36,7 @@ chains back to plan if scope needs re-establishing. Skip plan when scope is alre
 
 The phase guidance from step 1 names the upstream skill to load for process depth
 (most phases have one; `ad-hoc` has none — it just routes you to set a phase):
-plan→`grill-with-docs`, slice/red/green→`slices` + `tdd`,
+plan→`grill-with-docs`, slice/red/green→`to-slices` + `tdd`,
 triage→`triage`, handover→`handoff`. Load it only for the phase you're in.
 (prd is vault-native — no upstream skill; the phase doc carries the method.)
 

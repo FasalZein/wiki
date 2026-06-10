@@ -1,8 +1,8 @@
 ---
-name: slices
+name: to-slices
 description: "Breaks a plan or PRD into independently-deliverable implementation slices for wiki-bound work. Use when the user asks to break this down, create slices, split the PRD, or create implementation tickets."
 ---
-# /slices
+# /to-slices
 
 A vault-native slicing skill. Publishes only through the `wiki` CLI into the vault.
 Command syntax: `wiki create slice --help` / `wiki <verb> --help` — not restated here.

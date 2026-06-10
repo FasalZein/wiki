@@ -55,7 +55,7 @@ Next actions:
 - Reference the ADRs from the grill in the PRD's implementation_decisions field.
 - Close a PRD (not via \`wiki close\`): \`obsidian property:set <prd-file> status closed\` once every linked slice is closed.
 
-Then move to slicing: load the \`slices\` skill and follow its draft → quiz →
+Then move to slicing: load the \`to-slices\` skill and follow its draft → quiz →
 publish flow (see the slice phase guidance).
 
 ${OUTPUT_CONTRACT}`;
@@ -67,7 +67,7 @@ deliver each through the TDD gates. A slice is a thin vertical cut through every
 layer (schema/API/UI/tests), demoable on its own — prefer many thin slices over
 few thick ones, and AFK over HITL.
 
-Process depth: load the \`slices\` skill for the slicing method (vertical-slice
+Process depth: load the \`to-slices\` skill for the slicing method (vertical-slice
 rules, draft → quiz → publish flow) and \`tdd\` for test-first discipline.
 
 Draft → quiz → publish (do NOT skip the quiz):
@@ -157,7 +157,7 @@ type PhaseModel = {
   nextAction: (ctx: NextActionContext) => string;
 };
 
-const SLICE_SKILLS = ["slices", "tdd"];
+const SLICE_SKILLS = ["to-slices", "tdd"];
 const closeNext = ({ project, slice }: NextActionContext): string =>
   `run wiki close ${slice} --project ${project} --review-verdict pass`;
 
