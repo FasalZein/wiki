@@ -81,7 +81,8 @@ Draft → quiz → publish (do NOT skip the quiz):
 3. Publish approved slices in dependency order (blockers first), one command each:
    \`wiki create slice --project <name> --title "..." --parent-prd <PRD-NNNN> --acceptance "..." --acceptance "..." --body -\`
    (\`--body -\` reads the "## What to build" section from stdin; never \`obsidian create\`).
-   Set \`blocked_by\` after blockers exist: \`obsidian property:set <slice-file> blocked_by <ids>\`.
+   Set \`blocked_by\` after blockers exist via \`obsidian eval\` with
+   \`app.fileManager.processFrontMatter\` (\`property:set type=list\` corrupts comma values).
 
 TDD gates (strict order): \`wiki red <SLICE-NNNN> --project <name>\` (needs >=1
 failing test) then \`wiki green <SLICE-NNNN> --project <name>\` (all prior failures

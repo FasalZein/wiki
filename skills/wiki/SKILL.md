@@ -1,6 +1,6 @@
 ---
 name: wiki
-description: "Manages wiki vault delivery workflow — PRDs, slices, decisions, TDD gates, handovers. Use when work touches the wiki vault, user asks to create/update/close delivery artifacts, context needs restoring via triage, or the vault needs init or doctor health checks."
+description: "Manages wiki vault delivery workflow — PRDs, slices, ADRs/decisions, docs, TDD gates, handovers. Use when work touches the wiki vault, the repo carries a wiki:begin pointer block, the user asks to create/update/close delivery artifacts or recall project context, or the vault needs init, doctor, or sync."
 ---
 # /wiki
 
@@ -17,6 +17,10 @@ ask the CLI.
    (or `wiki session start --phase <phase>`), then rerun step 1 to get phase guidance.
 2. `wiki <verb> --help` — exact usage/flags/example before any call. `wiki --help` lists verbs.
 3. Do what the phase guidance says. On resume, always re-read step 1 — never trust stale context.
+
+Cold start — no session AND no `<!-- wiki:begin … -->` pointer block in AGENTS.md/CLAUDE.md:
+check `wiki project list`, then bind the repo with `wiki project link` (create the project
+first if it doesn't exist). Never guess a project name.
 
 Doing vault setup or a health check, not delivery work? Skip the phase flow and run
 `wiki vault --help` or `wiki doctor` — admin commands are self-describing.
@@ -48,6 +52,17 @@ triage→`triage`, handover→`handoff`. Load it only for the phase you're in.
 
 - Field edits and PRD status changes use Obsidian (`obsidian property:set`/`read`/`eval`),
   not the CLI. `wiki close` is for slices; close a PRD by setting its status field.
+- List fields (acceptance, blocked_by, tags): `property:set type=list` splits on commas,
+  so values containing commas corrupt. Set list fields via `obsidian eval` with
+  `app.fileManager.processFrontMatter` instead.
+- Body edits after creation: `obsidian append`, or a targeted `eval` that edits in place.
+  Never rewrite the whole file and never delete-and-recreate it.
+- Dedup gate: when create warns of a near-duplicate, read the match before overriding —
+  supersede it if this work replaces it, relate it if genuinely adjacent, force-new only
+  with a real written justification. Never blind-override.
+- After publishing artifacts, run `wiki sync` — search auto-updates the index but does
+  NOT re-embed, so new artifacts stay invisible to ranked search and weaken the next
+  dedup check until a sync.
 - Resolve artifacts by frontmatter ID, never assume `ID.md` (filenames are `ID-title-slug.md`).
   Docs live only in the locked `docs/<category>/` folders (architecture, research, runbooks,
   specs, notes, legacy) — never invent a new folder; an unfit doc goes in the closest locked
