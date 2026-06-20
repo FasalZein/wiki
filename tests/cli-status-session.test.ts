@@ -67,7 +67,24 @@ describe("status and session CLI", () => {
     expect(result.stdout).toContain("Phase: green");
     expect(result.stdout).toContain("Active PRD: PRD-001");
     expect(result.stdout).toContain("Active slices: SLICE-011");
-    expect(result.stdout).toContain("Next: run wiki close SLICE-011 --project wiki-v2 --review-verdict pass");
+    // Next: is a literal, copy-pasteable command — no "run " prose prefix (SLICE-0063).
+    expect(result.stdout).toContain("Next: wiki close SLICE-011 --project wiki-v2 --review-verdict pass");
+  });
+
+  test("status --json emits a machine-readable next_command", async () => {
+    const fixture = await createFixture();
+    await runWiki(
+      ["session", "start", "--project", "wiki-v2", "--active-prd", "PRD-001", "--active-slice", "SLICE-011", "--phase", "green"],
+      fixture,
+    );
+
+    const result = await runWiki(["status", "--project", "wiki-v2", "--json"], fixture);
+
+    expect(result.exitCode).toBe(0);
+    const payload = JSON.parse(result.stdout);
+    expect(payload.next_command).toBe("wiki close SLICE-011 --project wiki-v2 --review-verdict pass");
+    expect(payload.phase).toBe("green");
+    expect(payload.active_slices).toEqual(["SLICE-011"]);
   });
 
   test("status and session show can read the current repo session without --project", async () => {

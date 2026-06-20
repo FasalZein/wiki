@@ -165,7 +165,7 @@ ${OUTPUT_CONTRACT}`;
  * reads or executes skill files (ADR-0024/0026). The payload prose and skills/wiki/SKILL.md
  * remain human-facing restatements pinned to this model by tests (skill-bundle.test.ts).
  */
-export type NextActionContext = { project: string; slice: string };
+export type NextActionContext = { project: string; slice: string; prd?: string };
 
 type PhaseModel = {
   guidance: string;
@@ -174,19 +174,21 @@ type PhaseModel = {
 };
 
 const SLICE_SKILLS = ["to-slices", "tdd"];
+// nextAction returns a literal, copy-pasteable command (SLICE-0063) — no "run "/prose prefix,
+// no bare "...". Genuinely-unknown values (titles, criteria) are angle-bracket placeholders.
 const closeNext = ({ project, slice }: NextActionContext): string =>
-  `run wiki close ${slice} --project ${project} --review-verdict pass`;
+  `wiki close ${slice} --project ${project} --review-verdict pass`;
 
 const PHASES: Record<string, PhaseModel> = {
-  plan: { guidance: PLAN, skills: ["grill-with-docs"], nextAction: () => "run wiki create prd ..." },
-  prd: { guidance: PRD, skills: [], nextAction: () => "run wiki create slice ..." },
-  slice: { guidance: SLICE, skills: SLICE_SKILLS, nextAction: ({ project, slice }) => `run wiki red ${slice} --project ${project}` },
-  red: { guidance: SLICE, skills: SLICE_SKILLS, nextAction: ({ project, slice }) => `write implementation, then run wiki green ${slice} --project ${project}` },
+  plan: { guidance: PLAN, skills: ["grill-with-docs"], nextAction: ({ project }) => `wiki create prd --project ${project} --title "<title>"` },
+  prd: { guidance: PRD, skills: [], nextAction: ({ project, prd }) => `wiki create slice --project ${project} --parent-prd ${prd ?? "<PRD-NNNN>"} --title "<title>" --acceptance "<criterion>"` },
+  slice: { guidance: SLICE, skills: SLICE_SKILLS, nextAction: ({ project, slice }) => `wiki red ${slice} --project ${project}` },
+  red: { guidance: SLICE, skills: SLICE_SKILLS, nextAction: ({ project, slice }) => `wiki green ${slice} --project ${project}` },
   green: { guidance: SLICE, skills: SLICE_SKILLS, nextAction: closeNext },
   review: { guidance: SLICE, skills: SLICE_SKILLS, nextAction: closeNext },
   close: { guidance: SLICE, skills: SLICE_SKILLS, nextAction: closeNext },
   triage: { guidance: TRIAGE, skills: [], nextAction: () => "no enforced next step" },
-  handover: { guidance: HANDOVER, skills: ["handoff"], nextAction: () => "run wiki handover ..." },
+  handover: { guidance: HANDOVER, skills: ["handoff"], nextAction: ({ project }) => `wiki handover --project ${project} --next-phase <phase>` },
   "ad-hoc": { guidance: AD_HOC, skills: [], nextAction: () => "set a phase to begin: wiki session set phase <plan|prd|slice|triage>, then rerun wiki status --with-doc" },
 };
 

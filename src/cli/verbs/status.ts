@@ -5,6 +5,7 @@ import { getVaultRoot } from "../../config/vault";
 import { readSession } from "../../state/session";
 import { writePhaseDocToStdout } from "../phase-docs";
 import { nextActionForPhase } from "../guidance";
+import { emitJson, jsonEnabled } from "../output";
 import type { CliResult } from "../dispatch";
 import { booleanValue, parseCommand, stringValue } from "../parse";
 
@@ -38,11 +39,28 @@ export async function handleStatus(args: string[]): Promise<CliResult> {
     return { code: 0 };
   }
 
+  const nextCommand = nextActionForPhase(session.phase, {
+    project: session.project,
+    slice: session.active_slices[0] ?? "<slice>",
+    prd: session.active_prd ?? undefined,
+  });
+
+  if (jsonEnabled()) {
+    emitJson({
+      project: session.project,
+      phase: session.phase,
+      active_prd: session.active_prd ?? null,
+      active_slices: session.active_slices,
+      next_command: nextCommand,
+    });
+    return { code: 0 };
+  }
+
   console.log(`Project: ${session.project}`);
   console.log(`Phase: ${session.phase}`);
   console.log(`Active PRD: ${session.active_prd ?? "(none)"}`);
   console.log(`Active slices: ${session.active_slices.length > 0 ? session.active_slices.join(", ") : "(none)"}`);
-  console.log(`Next: ${nextActionForPhase(session.phase, { project: session.project, slice: session.active_slices[0] ?? "<slice>" })}`);
+  console.log(`Next: ${nextCommand}`);
 
   if (booleanValue(parsed.values, "with-doc")) {
     if (!writePhaseDocToStdout(session.phase)) {

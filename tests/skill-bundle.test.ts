@@ -228,7 +228,17 @@ describe("wiki skill bundle", () => {
       const next = nextActionForPhase(phase, { project: "demo", slice: "SLICE-0001" });
       expect(next.length, `phase ${phase} next-action`).toBeGreaterThan(0);
     }
-    expect(nextActionForPhase("slice", { project: "demo", slice: "SLICE-0001" })).toBe("run wiki red SLICE-0001 --project demo");
+    expect(nextActionForPhase("slice", { project: "demo", slice: "SLICE-0001" })).toBe("wiki red SLICE-0001 --project demo");
+    // prd phase names the real parent PRD when known, not a bare "..." (SLICE-0063).
+    const prdNext = nextActionForPhase("prd", { project: "demo", slice: "SLICE-0001", prd: "PRD-0001" });
+    expect(prdNext.startsWith("wiki create slice")).toBe(true);
+    expect(prdNext).toContain("--parent-prd PRD-0001");
+    // every actionable phase emits a literal command — no "run "/"write ..." prose, no trailing "...".
+    for (const phase of ["plan", "prd", "slice", "red", "green", "close", "handover"]) {
+      const next = nextActionForPhase(phase, { project: "demo", slice: "SLICE-0001", prd: "PRD-0001" });
+      expect(next.startsWith("wiki "), `phase ${phase}: ${next}`).toBe(true);
+      expect(next.endsWith("..."), `phase ${phase}: ${next}`).toBe(false);
+    }
     expect(nextActionForPhase("ad-hoc", { project: "demo", slice: "<slice>" })).toContain("set a phase");
     // genuinely unmapped phase falls back, never throws
     expect(nextActionForPhase("nope", { project: "demo", slice: "x" })).toBe("no enforced next step");
