@@ -113,6 +113,51 @@ describe("advisory dedup", () => {
     expect(old).toContain("superseded_by: PRD-0002");
   });
 
+  test("a strong dedup match blocks create without an override (P2.1)", async () => {
+    const fixture = await createDedupFixture("wiki-v2");
+    await writeFile(
+      fixture.resultsFile,
+      JSON.stringify([{ path: join(fixture.projectPath, "prds", "PRD-0007.md"), score: 0.95, snippet: "Same feature" }]),
+    );
+
+    const result = await runWiki(["create", "prd", "--title", "Core wiki CLI", "--project", "wiki-v2"], fixture);
+
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain("refusing to create");
+    const prds = (await readdir(join(fixture.projectPath, "prds"))).filter((name) => name.startsWith("PRD-"));
+    expect(prds.length).toBe(0);
+  });
+
+  test("slice supersedes marks the old slice superseded (P0.1 regression)", async () => {
+    const fixture = await createDedupFixture("wiki-v2");
+    await seedPrd(fixture);
+    const first = await runWiki([...sliceArgs(), "--force-new", "Seeding the slice that will be superseded"], fixture);
+    expect(first.exitCode).toBe(0);
+
+    const result = await runWiki(["create", "slice", "--title", "Rebuild slice authoring", "--project", "wiki-v2", "--parent-prd", "PRD-0001", "--supersedes", "SLICE-0001"], fixture);
+
+    expect(result.exitCode).toBe(0);
+    const sliceFiles = await readdir(join(fixture.projectPath, "slices"));
+    const newSlice = await readFile(join(fixture.projectPath, "slices", sliceFiles.find((f) => f.startsWith("SLICE-0002"))!), "utf8");
+    expect(newSlice).toContain("supersedes: SLICE-0001");
+    const oldSlice = await readFile(join(fixture.projectPath, "slices", sliceFiles.find((f) => f.startsWith("SLICE-0001"))!), "utf8");
+    expect(oldSlice).toContain("status: superseded");
+    expect(oldSlice).toContain("superseded_by: SLICE-0002");
+  });
+
+  test("a post-write supersede failure leaves no orphan (P0.2 rollback)", async () => {
+    // docs have no `superseded_by` field, so superseding one fails AFTER the new
+    // doc is written — exercising the rollback that prevents orphan + id-gap.
+    const fixture = await createDedupFixture("wiki-v2");
+    await runWiki(["create", "doc", "--title", "Old reference doc", "--project", "wiki-v2", "--type", "reference", "--force-new", "Seeding a doc to attempt superseding"], fixture);
+
+    const result = await runWiki(["create", "doc", "--title", "New reference doc", "--project", "wiki-v2", "--type", "reference", "--supersedes", "DOC-0001"], fixture);
+
+    expect(result.exitCode).not.toBe(0);
+    const remaining = await listMarkdownRecursive(join(fixture.projectPath, "docs"));
+    expect(remaining.some((name) => name.startsWith("DOC-0002"))).toBe(false);
+  });
+
   test("handover create does not call QMD", async () => {
     const fixture = await createDedupFixture("wiki-v2", { failQmd: true });
 
@@ -248,4 +293,14 @@ async function seedPrd(fixture: DedupFixture): Promise<void> {
   const result = await runWiki(["create", "prd", "--title", "Core wiki CLI", "--project", "wiki-v2", "--force-new", "Seeding parent PRD for the slice dedup test"], fixture);
   expect(result.exitCode).toBe(0);
   await writeFile(fixture.resultsFile, "[]");
+}
+
+async function listMarkdownRecursive(directory: string): Promise<string[]> {
+  const names: string[] = [];
+  const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    if (entry.isDirectory()) names.push(...await listMarkdownRecursive(join(directory, entry.name)));
+    else if (entry.isFile()) names.push(entry.name);
+  }
+  return names;
 }

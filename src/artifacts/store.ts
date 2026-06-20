@@ -115,6 +115,28 @@ export async function setFields(input: SetFieldsInput): Promise<Artifact> {
   });
 }
 
+/**
+ * Mark an existing artifact as superseded by another (P0.1). Always records
+ * `superseded_by`; only flips `status` to "superseded" when the type's schema
+ * actually has that enum value (slices gained it in P0.1; docs have neither and
+ * fail cleanly). Shared by `create --supersedes` and the `wiki supersede` verb
+ * so the conditional lives in exactly one place. Routes through setFields, so
+ * the write is validated and Obsidian-routed (ADR-0017).
+ */
+export async function supersedeArtifact(input: ReadArtifactInput & { by: string }): Promise<Artifact> {
+  const schema = await loadTemplate(input.type);
+  const statusField = schema.fields.find((field) => field.name === "status");
+  const hasSupersededStatus = statusField?.constraints.values?.includes("superseded") ?? false;
+  const fields: Record<string, unknown> = { superseded_by: input.by };
+  if (hasSupersededStatus) fields.status = "superseded";
+  return setFields({ type: input.type, vaultRoot: input.vaultRoot, project: input.project, id: input.id, fields });
+}
+
+/** Delete an artifact file by absolute path (rollback for a half-applied create). */
+export async function removeArtifactFile(path: string): Promise<void> {
+  await rm(path, { force: true });
+}
+
 export async function appendField(input: AppendFieldInput): Promise<Artifact> {
   const schema = await loadTemplate(input.type);
   const field = schema.fields.find((candidate) => candidate.name === input.field);

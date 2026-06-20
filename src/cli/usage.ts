@@ -158,6 +158,50 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
     flags: { "--project": "project name (required)" },
     example: "wiki next-id slice --project myproj",
   },
+  set: {
+    summary: "Set a field on an existing artifact (validated, no obsidian bridge). Type is inferred from the id.",
+    usage: "wiki set <id> <field> <value...> [--project <name>] [--json]",
+    flags: {
+      "--project": "project name (required if no active session)",
+      "--json": "emit {id,field,value} to stdout; {error,...} to stderr on failure",
+    },
+    example: "wiki set SLICE-0032 status green",
+  },
+  block: {
+    summary: "Set an artifact's blocked_by list; bare ids are auto-wrapped as [[..]] (no comma corruption).",
+    usage: "wiki block <id> --on <id> [--on <id>...] [--project <name>] [--json]",
+    flags: {
+      "--on": "id this artifact is blocked by (repeatable)",
+      "--project": "project name (required if no active session)",
+      "--json": "emit {id,blocked_by} to stdout; {error,...} to stderr on failure",
+    },
+    example: "wiki block SLICE-0032 --on SLICE-0030 --on SLICE-0031",
+  },
+  supersede: {
+    summary: "Mark an existing artifact superseded by another (sets superseded_by, and status if the type has it).",
+    usage: "wiki supersede <oldId> --by <newId> [--project <name>] [--json]",
+    flags: {
+      "--by": "id of the superseding artifact (required; must exist)",
+      "--project": "project name (required if no active session)",
+      "--json": "emit {id,status,superseded_by} to stdout; {error,...} to stderr on failure",
+    },
+    example: "wiki supersede SLICE-0016 --by SLICE-0032",
+  },
+  path: {
+    summary: "Print the absolute file path for an artifact id (resolve-by-id without globbing).",
+    usage: "wiki path <id> [--project <name>] [--json]",
+    flags: {
+      "--project": "project name (required if no active session)",
+      "--json": "emit {id,path} to stdout",
+    },
+    example: "wiki path SLICE-0032",
+  },
+  schema: {
+    summary: "List an artifact type's fields, types, required flags, and enum values.",
+    usage: "wiki schema <prd|slice|decision|doc|handover> [--json]",
+    flags: { "--json": "emit the schema object to stdout" },
+    example: "wiki schema slice",
+  },
   doctor: {
     summary: "Check vault health (Obsidian plugins, templates, config drift).",
     usage: "wiki doctor",

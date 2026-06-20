@@ -33,7 +33,7 @@ describe("template schemas", () => {
       type: "enum",
       required: true,
       constraints: {
-        values: ["planned", "red", "green", "closed", "blocked"],
+        values: ["planned", "red", "green", "closed", "blocked", "superseded"],
       },
     });
 

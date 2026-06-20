@@ -57,3 +57,14 @@ export const STRUCTURAL_FOLDERS: readonly string[] = [];
 export const FOLDER_TO_TYPE: Readonly<Record<string, TemplateType>> = Object.fromEntries(
   (Object.entries(ARTIFACTS) as [TemplateType, ArtifactSpec][]).map(([type, spec]) => [spec.folder, type]),
 );
+
+/** Reverse map (id prefix -> artifact type) for id-based type inference. */
+export const PREFIX_TO_TYPE: Readonly<Record<string, TemplateType>> = Object.fromEntries(
+  (Object.entries(ARTIFACTS) as [TemplateType, ArtifactSpec][]).map(([type, spec]) => [spec.prefix, type]),
+);
+
+/** Infer the artifact type from an id like "SLICE-0032" (prefix before the dash). */
+export function typeForId(id: string): TemplateType | undefined {
+  const prefix = id.split("-")[0]?.toUpperCase();
+  return prefix === undefined ? undefined : PREFIX_TO_TYPE[prefix];
+}

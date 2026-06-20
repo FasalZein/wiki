@@ -1,4 +1,4 @@
-export type SliceStatus = "planned" | "red" | "green" | "closed" | "blocked";
+export type SliceStatus = "planned" | "red" | "green" | "closed" | "blocked" | "superseded";
 export type TransitionVerb = "red" | "green" | "close";
 export type TransitionExitCode = 1 | 2;
 

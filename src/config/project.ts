@@ -11,6 +11,8 @@ export type ProjectConfig = {
   research_path: string;
   dedup_threshold_weak: number;
   dedup_threshold_strong: number;
+  /** When true (default), a strong dedup match blocks create unless an override flag is passed (P2.1). */
+  dedup_strong_blocks: boolean;
 };
 
 export type ProjectConfigErrorKind = "missing" | "incomplete";
@@ -78,6 +80,7 @@ export async function loadProjectConfig(projectPath: string, options: { requireL
     research_path: expandHome(isNonEmptyString(data.research_path) ? data.research_path : "~/.pi/artifacts/research"),
     dedup_threshold_weak: numberValue(data.dedup_threshold_weak, 0.7),
     dedup_threshold_strong: numberValue(data.dedup_threshold_strong, 0.85),
+    dedup_strong_blocks: typeof data.dedup_strong_blocks === "boolean" ? data.dedup_strong_blocks : true,
   };
 }
 

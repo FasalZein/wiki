@@ -55,8 +55,8 @@ Publish approved slices blockers-first so you can reference real IDs in `blocked
 Each slice is one command: `wiki create slice ...` with `--acceptance` (repeatable, one
 per criterion) and `--body -` (the "## What to build" section via stdin) — never
 `obsidian create`. Only `blocked_by` is set afterwards, once the blocking slices have
-real IDs — use `obsidian eval` with `app.fileManager.processFrontMatter` (comma-safe;
-`property:set type=list` corrupts values containing commas).
+real IDs: `wiki block <id> --on <blockerId> [--on <blockerId>...]` — it auto-wraps the
+ids as `[[…]]` wikilinks and is comma-safe (never use `obsidian property:set` for this).
 
 The CLI backlinks each published slice into the parent PRD's `slices` list on its own —
 don't edit that field. After publishing, run `wiki sync` so search and the dedup gate

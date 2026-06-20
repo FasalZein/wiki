@@ -2,8 +2,10 @@ import { handleClose } from "./verbs/close";
 import { handleCreate } from "./verbs/create";
 import { handleDoc } from "./verbs/doc";
 import { handleFmt } from "./verbs/fmt";
+import { handleBlock, handlePath, handleSet, handleSupersede } from "./verbs/mutate";
 import { handleNextId } from "./verbs/next-id";
 import { handleProject } from "./verbs/project";
+import { handleSchema } from "./verbs/schema";
 import { handleRed, handleGreen } from "./verbs/tdd";
 import { handleSearch } from "./verbs/search";
 import { handleSession } from "./verbs/session";
@@ -12,6 +14,7 @@ import { handleSync } from "./verbs/sync";
 import { handleValidate } from "./verbs/validate";
 import { handleVault } from "./verbs/vault";
 import { USAGE_REGISTRY, renderHelp, renderVerbList, unknownMessage, wantsHelp } from "./usage";
+import { setJsonMode } from "./output";
 import { resolveVaultRootForDisplay } from "../config/vault";
 import { readSession } from "../state/session";
 
@@ -38,7 +41,11 @@ async function printContextBanner(): Promise<void> {
 }
 
 export async function dispatch(args: string[]): Promise<CliResult> {
-  const [verb, ...rest] = args;
+  // Strip the global --json flag centrally (P1.1): the per-verb parsers are
+  // strict and would reject an unknown flag, so it must never reach them.
+  const jsonFlag = args.includes("--json");
+  if (jsonFlag) setJsonMode(true);
+  const [verb, ...rest] = args.filter((arg) => arg !== "--json");
 
   // Top-level help: bare `wiki` or `wiki --help` lists all verbs.
   if (verb === undefined || verb === "--help" || verb === "-h") {
@@ -67,9 +74,15 @@ export async function dispatch(args: string[]): Promise<CliResult> {
   }
 
   // Deterministic context banner (vault + linked project) for every real command.
-  await printContextBanner();
+  // Suppressed under --json so stderr carries only structured diagnostics.
+  if (!jsonFlag) await printContextBanner();
 
   if (verb === "create") return handleCreate(rest);
+  if (verb === "set") return handleSet(rest);
+  if (verb === "block") return handleBlock(rest);
+  if (verb === "supersede") return handleSupersede(rest);
+  if (verb === "path") return handlePath(rest);
+  if (verb === "schema") return handleSchema(rest);
   if (verb === "doc") return handleDoc(rest);
   if (verb === "red") return handleRed(rest);
   if (verb === "green") return handleGreen(rest);

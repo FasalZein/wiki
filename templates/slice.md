@@ -7,7 +7,7 @@ schema:
   title:           { type: string,    required: true,  min: 5, max: 80 }
   project:         { type: string,    required: true }
   parent_prd:      { type: link,      required: true, target: prd }
-  status:          { type: enum,      required: true, values: [planned, red, green, closed, blocked], default: planned }
+  status:          { type: enum,      required: true, values: [planned, red, green, closed, blocked, superseded], default: planned }
   type:            { type: enum,      required: true, values: [HITL, AFK], default: AFK, description: "HITL = needs human interaction; AFK = agent-completable" }
   blocked_by:      { type: link_list, target: slice, default: [] }
   user_stories:    { type: list,      default: [], description: "References to PRD user-story IDs covered by this slice" }
@@ -35,7 +35,7 @@ const type = await tp.system.suggester(["AFK", "HITL"], ["AFK", "HITL"]);
 -->
 # {{title}}
 
-> {{id}} · {{project}} · `INPUT[select(option(planned), option(red), option(green), option(closed), option(blocked)):status]` · `INPUT[select(option(AFK), option(HITL)):type]`
+> {{id}} · {{project}} · `INPUT[select(option(planned), option(red), option(green), option(closed), option(blocked), option(superseded)):status]` · `INPUT[select(option(AFK), option(HITL)):type]`
 
 ## Parent
 

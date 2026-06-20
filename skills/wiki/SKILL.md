@@ -35,8 +35,8 @@ Every artifact write goes through the `wiki` CLI into the vault — never GitHub
 decisions, docs, and handovers. This overrides any upstream skill you load.
 
 Creation is one-shot: pass the authored body via `--body -` (stdin) so the artifact is
-complete in a single command — `obsidian create` is never used. Obsidian is for later
-field edits only (`property:set`/`read`/`eval`).
+complete in a single command — `obsidian create` is never used. Later field edits are
+first-class `wiki` verbs too (see below); drop to `obsidian` only for *body* edits.
 
 ## Phase routing
 
@@ -50,28 +50,37 @@ plan→`grill-with-docs`, slice/red/green→`to-slices` + `tdd`, handover→`han
 Load it only for the phase you're in. (prd and triage are vault-native — no
 upstream skill; the phase doc carries the method.)
 
-## Rules that the CLI won't tell you
+## Mutating artifacts after creation
 
-- Field edits and PRD status changes use Obsidian (`obsidian property:set`/`read`/`eval`),
-  not the CLI. `wiki close` is for slices; close a PRD by setting its status field.
-- List fields (acceptance, blocked_by, tags): `property:set type=list` splits on commas,
-  so values containing commas corrupt. Set list fields via `obsidian eval` with
-  `app.fileManager.processFrontMatter` instead.
-- Body edits after creation: `obsidian append`, or a targeted `eval` that edits in place.
-  Never rewrite the whole file and never delete-and-recreate it.
-- Before `wiki close`, tick every checkbox in the slice body's Todo section (`- [x]`)
-  with a targeted `eval` — the close gate blocks on unchecked items and lists them.
-- A re-run gate saying "cannot red/green from status X" usually means the first run
-  already succeeded — check `wiki status` before retrying or diagnosing.
-- Dedup gate: when create warns of a near-duplicate, read the match before overriding —
-  supersede it if this work replaces it, relate it if genuinely adjacent, force-new only
-  with a real written justification. Never blind-override.
-- After publishing artifacts, run `wiki sync` — search auto-updates the index but does
-  NOT re-embed, so new artifacts stay invisible to ranked search and weaken the next
-  dedup check until a sync.
-- Resolve artifacts by frontmatter ID, never assume `ID.md` (filenames are `ID-title-slug.md`).
-  Docs live only in the locked `docs/<category>/` folders (architecture, research, runbooks,
-  specs, notes, legacy) — never invent a new folder; an unfit doc goes in the closest locked
-  category. `wiki doctor` flags any rogue folder or loose file under `docs/`.
+Frontmatter is the CLI's job — one validated call per intent. Never `obsidian
+property:set`/`eval` for a field: it comma-corrupts list values and needs the desktop app.
+
+- Set any field: `wiki set <id> <field> <value...>` — schema-validated, comma-safe,
+  booleans/ints coerced. Close a PRD with `wiki set PRD-0001 status closed` (`wiki close`
+  is slices only). Type is inferred from the id.
+- Set `blocked_by`: `wiki block <id> --on <id> [--on <id>...]` — auto-wraps as `[[…]]`.
+- Supersede an already-created artifact: `wiki supersede <oldId> --by <newId>`.
+- Discover fields/enums before guessing a value: `wiki schema <type>`.
+- Resolve an id to its file path: `wiki path <id>` (filenames are `ID-slug.md`).
+- Add `--json` to these (and `create`/`next-id`) for `{id,…}` on stdout and
+  `{error,field,expected}` on stderr — detect success/failure programmatically, never scrape prose.
+
+Body edits (prose, checkboxes) are the one thing still done through Obsidian: `obsidian
+append` or a targeted `eval` that edits in place — never rewrite or delete-and-recreate the
+file. Before `wiki close`, tick every `## Todo` checkbox (`- [x]`) with a targeted `eval`;
+the close gate blocks on unchecked items and lists them.
+
+## Gates the CLI won't tell you
+
+- Dedup: a *strong* near-duplicate now **blocks** create (exit ≠ 0). Read the match, then
+  `--supersedes` it (this replaces it), `--related-to` it (genuinely adjacent), or
+  `--force-new "<reason ≥30 chars>"`. Weak matches stay advisory. Never blind-override.
+- A re-run gate saying "cannot red/green from status X" usually means the first run already
+  succeeded — check `wiki status` before retrying or diagnosing.
+- After creating, run `wiki sync` (the CLI reminds you) — search updates the index but does
+  NOT re-embed, so new artifacts stay invisible to ranked search/dedup until a sync.
+- Docs live only in the locked `docs/<category>/` folders (architecture, research, runbooks,
+  specs, notes, legacy) — never invent a folder; an unfit doc goes in the closest locked one.
+  `wiki doctor` flags any rogue folder or loose file under `docs/`.
 - Obsidian must be running — the vault depends on it for rendering, Dataview, and Bases views.
 - Don't skip TDD/review/close/handover gates.
