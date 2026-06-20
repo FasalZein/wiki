@@ -4,10 +4,8 @@ import matter from "gray-matter";
 
 import { projectPath } from "../../artifacts/paths";
 import { ARTIFACT_FOLDERS, STRUCTURAL_FOLDERS } from "../../artifacts/registry";
-import { deployViews } from "../../bootstrap/views";
 import { listProjects } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
-import { ensureObsidian, obsidianCreate, obsidianPropertySet } from "../../integrations/obsidian";
 import { ensureCollection } from "../../integrations/qmd";
 import { stampRepo } from "../repo-link";
 import type { CliResult } from "../dispatch";
@@ -49,14 +47,11 @@ async function createProject(args: string[]): Promise<CliResult> {
     console.error("missing project name");
     return { code: 1 };
   }
-  // A project needs repo + test_command to be usable by status/red/green; default
-  // them (repo = cwd, the usual case; test_command = bun test) so the project is
-  // complete on creation rather than failing the skill's first command. Both are
-  // overridable via flags and editable later in _project.md.
+  // repo binds the project to a code repo (default: cwd, the usual case); test_command
+  // is recorded for reference. Both are overridable via flags and editable in _project.md.
   const repo = stringValue(parsed.values, "repo") ?? process.cwd();
   const testCommand = stringValue(parsed.values, "test-command") ?? "bun test";
 
-  await ensureObsidian();
   const vaultRoot = await getVaultRoot();
   const projPath = projectPath(vaultRoot, name);
 
@@ -78,12 +73,9 @@ async function createProject(args: string[]): Promise<CliResult> {
 
   const today = new Date().toISOString().slice(0, 10);
 
-  // Create _project.md (complete: repo + test_command so status/red/green work immediately)
+  // Create _project.md (repo + test_command recorded for reference).
   const projectContent = `---\nproject: ${name}\nstatus: planning\ncreated: ${today}\nrepo: ${repo}\ntest_command: ${testCommand}\n---\n# ${name}\n`;
-  await obsidianCreate("_project", projectContent, `projects/${name}`);
-
-  // Deploy .base view files
-  await deployViews(vaultRoot, name);
+  await Bun.write(join(projPath, "_project.md"), projectContent);
 
   // Try to register QMD collection (best-effort)
   try {
@@ -132,14 +124,13 @@ async function linkProject(args: string[]): Promise<CliResult> {
   // Stamp the pointer block into AGENTS.md and CLAUDE.md
   await stampRepo(repoDir, projectName);
 
-  // Record repo in _project.md linked_repos list (idempotent). Vault writes go
-  // through the Obsidian CLI (ADR-0017), never raw FS.
+  // Record repo in _project.md linked_repos list (idempotent).
   const raw = await readFile(projectMdPath, "utf8");
   const parsed2 = matter(raw);
   const existing: string[] = Array.isArray(parsed2.data.linked_repos) ? parsed2.data.linked_repos : [];
   if (!existing.includes(repoDir)) {
     existing.push(repoDir);
-    await obsidianPropertySet(`projects/${projectName}/_project.md`, "linked_repos", existing.join(","), "list");
+    await Bun.write(projectMdPath, matter.stringify(parsed2.content, { ...parsed2.data, linked_repos: existing }));
   }
 
   console.error(`linked repo ${repoDir} to project ${projectName}`);

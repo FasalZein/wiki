@@ -3,10 +3,6 @@ import { dirname, join } from "node:path";
 
 export type SessionState = {
   project: string;
-  active_prd?: string;
-  active_slices: string[];
-  phase: string;
-  notes?: string;
   updated: string;
 };
 
@@ -38,14 +34,6 @@ export async function writeSession(repo: string, session: Omit<SessionState, "up
   return next;
 }
 
-export async function updateSession(repo: string, patch: Partial<Omit<SessionState, "updated">>): Promise<SessionState> {
-  const existing = await readSession(repo);
-  if (existing === null) {
-    throw new Error("no active session");
-  }
-  return writeSession(repo, { ...existing, ...patch, updated: new Date().toISOString() });
-}
-
 export async function clearSession(repo: string): Promise<void> {
   await rm(sessionPath(repo), { force: true });
 }
@@ -58,18 +46,7 @@ async function atomicWriteFile(path: string, content: string): Promise<void> {
 
 function isSessionState(value: unknown): value is SessionState {
   if (!isRecord(value)) return false;
-  return (
-    typeof value.project === "string" &&
-    (value.active_prd === undefined || typeof value.active_prd === "string") &&
-    isStringArray(value.active_slices) &&
-    typeof value.phase === "string" &&
-    (value.notes === undefined || typeof value.notes === "string") &&
-    typeof value.updated === "string"
-  );
-}
-
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === "string");
+  return typeof value.project === "string" && typeof value.updated === "string";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

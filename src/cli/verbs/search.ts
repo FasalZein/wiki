@@ -56,10 +56,10 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
   } else {
     const projectPath = join(vaultRoot, "projects", project);
     try {
-      await loadProjectConfig(projectPath, { requireLifecycle: false });
+      await loadProjectConfig(projectPath);
     } catch (error) {
       if (error instanceof ProjectConfigError) {
-        console.error(await projectErrorMessage(vaultRoot, project, error));
+        console.error(await projectErrorMessage(vaultRoot, project));
         return { code: 10 };
       }
       throw error;

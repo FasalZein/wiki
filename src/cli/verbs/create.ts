@@ -10,7 +10,6 @@ import {
   type DedupOverride,
 } from "../../artifacts/dedup";
 import {
-  appendField,
   ArtifactNotFoundError,
   ArtifactValidationError,
   createArtifact,
@@ -23,12 +22,10 @@ import { defaultCategoryForDocType, DOC_CATEGORIES, isDocCategory, type DocCateg
 import { assertProjectStructure, loadProjectConfig, ProjectConfigError } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import type { TemplateType } from "../../schema/load";
-import { readSession, updateSession } from "../../state/session";
 import type { CliResult } from "../dispatch";
 import { emitJson, emitJsonError, jsonEnabled } from "../output";
 import { parseCommand, stringValue } from "../parse";
-import { readSessionFromCwd, resolveProject } from "../resolve-project";
-import { phaseDocOptions, writePhaseDocToStderr } from "../phase-docs";
+import { resolveProject } from "../resolve-project";
 import { unknownMessage, USAGE_REGISTRY } from "../usage";
 
 export async function handleCreate(args: string[]): Promise<CliResult> {
@@ -36,7 +33,6 @@ export async function handleCreate(args: string[]): Promise<CliResult> {
   if (type === "prd") return createPrd(rest);
   if (type === "slice") return createSlice(rest);
   if (type === "decision") return createDecision(rest);
-  if (type === "handover") return createHandover(rest);
   if (type === "doc") return createDoc(rest);
   console.error(unknownMessage("artifact type", type ?? "", Object.keys(USAGE_REGISTRY.create?.subverbs ?? {})));
   return { code: 1 };
@@ -62,30 +58,22 @@ async function createSlice(args: string[]): Promise<CliResult> {
   );
   const project = await resolveProject(parsed);
   const title = stringValue(parsed.values, "title");
-  const parentPrd = stringValue(parsed.values, "parent-prd");
-  const missing = missingFields({ project, title, "parent-prd": parentPrd });
+  const missing = missingFields({ project, title });
   if (missing) return missing;
-  if (project === undefined || title === undefined || parentPrd === undefined) return { code: 1 };
+  if (project === undefined || title === undefined) return { code: 1 };
 
-  const vaultRoot = await getVaultRoot();
-  const projectPath = join(vaultRoot, "projects", project);
-  await assertProjectStructure(projectPath);
-  try {
-    await readArtifact({ type: "prd", vaultRoot, project, id: parentPrd });
-  } catch (error) {
-    if (error instanceof ArtifactNotFoundError) {
-      console.error(`parent PRD not found: ${parentPrd}`);
-      return { code: 1 };
-    }
-    throw error;
-  }
+  // parent-prd is now an optional plain field — no existence gate, no backlink.
+  // Relate a slice to a PRD (or anything) with --related-to instead.
+  const parentPrd = stringValue(parsed.values, "parent-prd");
+  const fields: Record<string, unknown> = { title, acceptance: stringListValue(parsed.values.acceptance) };
+  if (parentPrd !== undefined) fields.parent_prd = parentPrd;
 
   const body = await stdinOrValue(stringValue(parsed.values, "body"));
   return createWithSupersede({
     type: "slice",
     project,
-    dedupQuery: `${title} ${parentPrd}`,
-    fields: { title, parent_prd: parentPrd, acceptance: stringListValue(parsed.values.acceptance) },
+    dedupQuery: parentPrd !== undefined ? `${title} ${parentPrd}` : title,
+    fields,
     rawValues: parsed.values,
     body,
   });
@@ -171,9 +159,6 @@ async function createWithSupersede(req: CreateRequest): Promise<CliResult> {
       if (override.kind === "supersedes") {
         await supersedeArtifact({ type, vaultRoot, project, id: override.id, by: artifact.id });
       }
-      if (type === "slice" && typeof fields.parent_prd === "string") {
-        await backlinkSliceToPrd(vaultRoot, project, fields.parent_prd, artifact.id);
-      }
     } catch (postWriteError) {
       await removeArtifactFile(artifact.path);
       throw postWriteError;
@@ -200,77 +185,11 @@ async function createWithSupersede(req: CreateRequest): Promise<CliResult> {
   }
 }
 
-async function createHandover(args: string[]): Promise<CliResult> {
-  const parsed = parseCommand(
-    args,
-    ["project", "phase", "next-phase", "active-prd", "produced", "open", "active-slice", "decision", "suggested-skill", "doc-phase"],
-    ["active-slice", "decision", "suggested-skill"],
-    ["no-doc"],
-  );
-  const vaultRoot = await getVaultRoot();
-  const explicitProject = stringValue(parsed.values, "project");
-  const session = explicitProject === undefined ? await readSessionFromCwd() : await readSessionForProject(vaultRoot, explicitProject);
-  const project = explicitProject ?? session?.project;
-  const phase = stringValue(parsed.values, "phase") ?? session?.phase;  const missing = missingFields({ project, phase });
-  if (missing) return missing;
-  if (project === undefined || phase === undefined) return { code: 1 };
-
-  const produced = stringValue(parsed.values, "produced");
-  const open = stringValue(parsed.values, "open");
-  if (produced === "-" && open === "-") {
-    console.error("only one of --produced or --open may read from stdin per invocation");
-    return { code: 1 };
-  }
-
-  await assertProjectStructure(join(vaultRoot, "projects", project));
-  try {
-    const explicitSlices = stringListValue(parsed.values["active-slice"]);
-    const nextPhase = stringValue(parsed.values, "next-phase");
-    const activeSlices = explicitSlices.length > 0 ? explicitSlices : session?.active_slices ?? [];
-    const suggestedSkills = stringListValue(parsed.values["suggested-skill"]);
-    const openText = await stdinOrValue(open);
-    const fields: Record<string, unknown> = {
-      phase,
-      active_slices: activeSlices,
-      decisions_made: stringListValue(parsed.values.decision),
-      suggested_skills: suggestedSkills,
-    };
-    addStringField(fields, "next_phase", nextPhase);
-    addStringField(fields, "active_prd", stringValue(parsed.values, "active-prd") ?? session?.active_prd);
-    addStringField(fields, "produced", await stdinOrValue(produced));
-    addStringField(fields, "open", openText);
-
-    const artifact = await createArtifact({ type: "handover", vaultRoot, project, fields });
-    console.log(artifact.id);
-    console.error(`created ${artifact.id}`);
-
-    // Finish the loop (SLICE-0055): the next agent resumes in the handover's
-    // next phase, not a stale `handover`. Only after a successful write, and
-    // only when a session already exists — handover never invents one.
-    if (nextPhase !== undefined && session !== null) {
-      const sessionRepo = explicitProject === undefined ? process.cwd() : await repoForProject(vaultRoot, explicitProject);
-      if (sessionRepo !== null) {
-        await updateSession(sessionRepo, { phase: nextPhase });
-      }
-    }
-
-    await writePhaseDocToStderr(nextPhase ?? "ad-hoc", phaseDocOptions(parsed));
-    emitResumePrompt({ project, handoverId: artifact.id, nextPhase, activeSlices, suggestedSkills, open: openText });
-    return { code: 0 };
-  } catch (error) {
-    if (error instanceof ArtifactValidationError) {
-      console.error(error.message);
-      return { code: 1 };
-    }
-    throw error;
-  }
-}
-
 /**
- * Run the dedup gate. Returns a CliResult to abort the create (strong match,
- * P2.1), or null to proceed. A *strong* match blocks by default
- * (config.dedup_strong_blocks) so the override flags become a real decision
- * instead of decoration; *weak* matches stay advisory and proceed.
+ * Run the dedup gate. Returns a CliResult to abort the create, or null to
+ * proceed. Dedup is advisory by default (warn + link); a *strong* match blocks
+ * only in opt-in strict mode (config.dedup_strong_blocks). *Weak* matches always
+ * stay advisory and proceed.
  */
 async function advisoryDedup(type: TemplateType, project: string, projectPath: string, query: string, override: DedupOverride): Promise<CliResult | null> {
   if (override.kind !== "none" || !ARTIFACTS[type].dedup) return null;
@@ -346,10 +265,6 @@ function missingFields(fields: Record<string, unknown>): CliResult | null {
   return null;
 }
 
-function addStringField(fields: Record<string, unknown>, name: string, value: string | undefined): void {
-  if (value !== undefined) fields[name] = value;
-}
-
 function stringListValue(value: string | string[] | boolean | undefined): string[] {
   if (Array.isArray(value)) return value;
   if (typeof value === "string") return [value];
@@ -359,54 +274,4 @@ function stringListValue(value: string | string[] | boolean | undefined): string
 async function stdinOrValue(value: string | undefined): Promise<string | undefined> {
   if (value === "-") return Bun.stdin.text();
   return value;
-}
-
-/**
- * Backlink a new slice into its parent PRD's `slices` list (the field the PRD
- * schema marks "Auto-populated from slices that reference this PRD"). Goes
- * through appendField → writeArtifact, so the list write is comma-safe
- * (gray-matter serialization) and lands via the Obsidian layer (ADR-0017).
- */
-async function backlinkSliceToPrd(vaultRoot: string, project: string, prdId: string, sliceId: string): Promise<void> {
-  const prd = await readArtifact({ type: "prd", vaultRoot, project, id: prdId });
-  const current = Array.isArray(prd.fields.slices) ? prd.fields.slices.map(String) : [];
-  if (current.includes(sliceId)) return;
-  await appendField({ type: "prd", vaultRoot, project, id: prdId, field: "slices", value: sliceId });
-}
-
-// SLICE-0056: the human carries the baton between sessions — print the exact
-// prompt to paste into the next one. stderr only; stdout stays the bare ID.
-function emitResumePrompt(input: {
-  project: string;
-  handoverId: string;
-  nextPhase?: string;
-  activeSlices: string[];
-  suggestedSkills: string[];
-  open?: string;
-}): void {
-  const lines = [
-    "--- next session prompt (copy everything between the markers) ---",
-    `Continue delivery on wiki project "${input.project}".`,
-    `Load the \`wiki\` skill, then run: wiki status --project ${input.project} --with-doc`,
-    `Read ${input.handoverId} first — it records what was produced and what is open (resolve it by frontmatter ID, not filename).`,
-  ];
-  if (input.nextPhase !== undefined) lines.push(`Resume in phase: ${input.nextPhase}.`);
-  if (input.activeSlices.length > 0) lines.push(`Active slices: ${input.activeSlices.join(", ")}.`);
-  if (input.suggestedSkills.length > 0) lines.push(`Suggested skills: ${input.suggestedSkills.join(", ")}.`);
-  if (input.open !== undefined) lines.push(`Open work: ${input.open}`);
-  lines.push("--- end next session prompt ---");
-  console.error(lines.join("\n"));
-}
-
-async function repoForProject(vaultRoot: string, project: string): Promise<string | null> {
-  try {
-    return (await loadProjectConfig(join(vaultRoot, "projects", project))).repo;
-  } catch {
-    return null;
-  }
-}
-
-async function readSessionForProject(vaultRoot: string, project: string) {
-  const repo = await repoForProject(vaultRoot, project);
-  return repo === null ? null : readSession(repo);
 }

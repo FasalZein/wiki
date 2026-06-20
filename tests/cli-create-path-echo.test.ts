@@ -7,7 +7,6 @@ import { dispatch } from "../src/cli/dispatch";
 
 let vaultRoot: string;
 let prevVaultRoot: string | undefined;
-let prevObsidian: string | undefined;
 
 const ARTIFACT_FOLDERS = ["prds", "slices", "adrs", "handovers", "docs", "sessions"];
 
@@ -27,16 +26,12 @@ beforeEach(async () => {
   for (const f of ARTIFACT_FOLDERS) await mkdir(join(proj, f), { recursive: true });
   await writeFile(join(proj, "_project.md"), "---\nproject: p\nrepo: /tmp/p\ntest_command: bun test\n---\n", "utf8");
   prevVaultRoot = process.env.KNOWLEDGE_VAULT_ROOT;
-  prevObsidian = process.env.OBSIDIAN_BIN;
   process.env.KNOWLEDGE_VAULT_ROOT = vaultRoot;
-  process.env.OBSIDIAN_BIN = join(process.cwd(), "tests", "fixtures", "mock-obsidian.sh");
 });
 
 afterEach(async () => {
   if (prevVaultRoot === undefined) delete process.env.KNOWLEDGE_VAULT_ROOT;
   else process.env.KNOWLEDGE_VAULT_ROOT = prevVaultRoot;
-  if (prevObsidian === undefined) delete process.env.OBSIDIAN_BIN;
-  else process.env.OBSIDIAN_BIN = prevObsidian;
   await rm(vaultRoot, { recursive: true, force: true });
 });
 

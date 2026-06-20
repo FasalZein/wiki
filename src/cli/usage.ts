@@ -16,8 +16,8 @@ export type UsageEntry = {
 
 export const USAGE_REGISTRY: Record<string, UsageEntry> = {
   create: {
-    summary: "Create a new artifact (prd, slice, decision, doc, handover).",
-    usage: "wiki create <prd|slice|decision|doc|handover> [flags]",
+    summary: "Create a new artifact (prd, slice, decision, doc).",
+    usage: "wiki create <prd|slice|decision|doc> [flags]",
     example: 'wiki create prd --project myproj --title "Short descriptive title"',
     subverbs: {
       prd: {
@@ -34,19 +34,19 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
         example: 'cat prd-body.md | wiki create prd --project myproj --title "Short descriptive title" --body -',
       },
       slice: {
-        summary: "Create a slice under a parent PRD.",
-        usage: "wiki create slice --project <name> --title <title> --parent-prd <PRD-NNNN> [--acceptance <c>]... [--body -]",
+        summary: "Create a slice.",
+        usage: "wiki create slice --project <name> --title <title> [--parent-prd <PRD-NNNN>] [--acceptance <c>]... [--body -]",
         flags: {
           "--project": "project name (required if no active session)",
           "--title": "slice title (required)",
-          "--parent-prd": "parent PRD id (required; must exist)",
-          "--acceptance": "acceptance criterion (repeatable); the red gate requires at least one",
+          "--parent-prd": "optional parent PRD id (recorded as a plain field; no existence check)",
+          "--acceptance": "acceptance criterion (repeatable)",
           "--body": "authored body markdown ('-' reads stdin); only the ## What to build section — Todo/Evidence/Acceptance are rendered by the CLI",
           "--supersedes": "id this slice supersedes",
           "--related-to": "link a near-duplicate instead of blocking",
           "--force-new": "bypass the advisory dedup gate",
         },
-        example: 'wiki create slice --project myproj --title "End-to-end behavior" --parent-prd PRD-0001 --acceptance "first criterion" --body -',
+        example: 'wiki create slice --project myproj --title "End-to-end behavior" --related-to PRD-0001 --acceptance "first criterion" --body -',
       },
       decision: {
         summary: "Create an ADR (architecture decision record).",
@@ -75,23 +75,6 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
         },
         example: 'cat findings.md | wiki create doc --project myproj --title "How auth works" --type reference --body -',
       },
-      handover: {
-        summary: "Create a handover artifact capturing session state and next-phase routing.",
-        usage: "wiki create handover [--project <name>] [--phase <phase>] [--next-phase <phase>] [flags]",
-        flags: {
-          "--project": "project name (required if no active session)",
-          "--phase": "current phase (required if no active session)",
-          "--next-phase": "phase the next agent should resume in",
-          "--active-prd": "PRD this session operated on",
-          "--active-slice": "slice in progress (repeatable)",
-          "--decision": "decision made this session (repeatable)",
-          "--suggested-skill": "skill the next agent should load (repeatable)",
-          "--produced": "what this session produced ('-' reads stdin)",
-          "--open": "open threads / next steps ('-' reads stdin)",
-          "--no-doc": "suppress the auto-printed next-phase guidance",
-        },
-        example: 'wiki create handover --project myproj --next-phase slice --produced "PRD-0006 published"',
-      },
     },
   },
   doc: {
@@ -113,33 +96,11 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
       },
     },
   },
-  red: {
-    summary:
-      "TDD red gate: run tests, require at least one failure, record the log. " +
-      "The run executes the test_command field from the project's _project.md.",
-    usage: "wiki red <SLICE-NNNN> --project <name>",
-    flags: { "--project": "project name (required)" },
-    example: "wiki red SLICE-0001 --project myproj",
-  },
-  green: {
-    summary: "TDD green gate: run tests, require all prior red failures now pass.",
-    usage: "wiki green <SLICE-NNNN> --project <name>",
-    flags: { "--project": "project name (required)" },
-    example: "wiki green SLICE-0001 --project myproj",
-  },
-  close: {
-    summary:
-      "Close a slice after todos, evidence, and review verdict are satisfied. " +
-      "Every checkbox in the slice body's ## Todo section must be checked (- [x]) or removed; the gate lists any unchecked items.",
-    usage: "wiki close <SLICE-NNNN> --project <name> --review-verdict <pass|pass-with-notes|reject>",
-    flags: { "--project": "project name (required)", "--review-verdict": "pass|pass-with-notes|reject" },
-    example: "wiki close SLICE-0001 --project myproj --review-verdict pass",
-  },
   status: {
-    summary: "Show phase, active artifacts, and next step. Vault-wide with no --project.",
-    usage: "wiki status [--project <name>] [--with-doc]",
-    flags: { "--project": "narrow to one project (optional)", "--with-doc": "include inline phase guidance" },
-    example: "wiki status --project myproj --with-doc",
+    summary: "Show a project's recent artifacts. Vault-wide (lists projects) with no --project.",
+    usage: "wiki status [--project <name>]",
+    flags: { "--project": "narrow to one project (optional)" },
+    example: "wiki status --project myproj",
   },
   search: {
     summary: "Search artifacts by keyword. Vault-wide with no --project.",
@@ -159,7 +120,7 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
     example: "wiki next-id slice --project myproj",
   },
   set: {
-    summary: "Set a field on an existing artifact (validated, no obsidian bridge). Type is inferred from the id.",
+    summary: "Set a field on an existing artifact (schema-validated). Type is inferred from the id.",
     usage: "wiki set <id> <field> <value...> [--project <name>] [--json]",
     flags: {
       "--project": "project name (required if no active session)",
@@ -203,7 +164,7 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
     example: "wiki schema slice",
   },
   doctor: {
-    summary: "Check vault health (Obsidian plugins, templates, config drift).",
+    summary: "Check vault health (docs-structure and repo-binding drift).",
     usage: "wiki doctor",
     example: "wiki doctor",
   },
@@ -228,25 +189,17 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
     example: "wiki sync --project myproj",
   },
   session: {
-    summary: "Manage the active work session (start, set, show, clear).",
-    usage: "wiki session <start|set|show|clear> [flags]",
+    summary: "Manage the active work session (start, show, clear).",
+    usage: "wiki session <start|show|clear> [flags]",
     example: "wiki session show",
     subverbs: {
       start: {
-        summary: "Start a session for a project in the current repo.",
-        usage: "wiki session start --project <name> [--phase <phase>] [--active-prd <id>] [--active-slice <id>]",
+        summary: "Bind the current repo to a project for the session.",
+        usage: "wiki session start --project <name>",
         flags: {
           "--project": "project name (required)",
-          "--phase": "initial phase: plan|prd|slice|red|green|review|close|handover|triage (default: ad-hoc)",
-          "--active-prd": "PRD this session is working on",
-          "--active-slice": "slice in progress (repeatable)",
         },
-        example: "wiki session start --project myproj --phase slice",
-      },
-      set: {
-        summary: "Set a field on the current session (phase, active_prd, active_slices, project).",
-        usage: "wiki session set <field> <value>",
-        example: "wiki session set phase slice",
+        example: "wiki session start --project myproj",
       },
       show: {
         summary: "Show the current session context.",
@@ -261,30 +214,19 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
     },
   },
   vault: {
-    summary: "Vault administration (init, sync, doctor, config).",
-    usage: "wiki vault <init|sync|doctor|config> [args]",
+    summary: "Vault administration (init, doctor).",
+    usage: "wiki vault <init|doctor> [args]",
     example: "wiki vault doctor",
     subverbs: {
       init: {
-        summary: "Initialize a new vault at a path.",
+        summary: "Initialize a new vault at a path (creates projects/, .wiki/, git).",
         usage: "wiki vault init <path>",
         example: "wiki vault init ~/Knowledge",
       },
-      sync: {
-        summary: "Sync vault config and plugins from the manifest into the vault at <path>.",
-        usage: "wiki vault sync <path> [--plugin-source <path>]",
-        flags: { "--plugin-source": "path to the plugin source dir (optional)" },
-        example: "wiki vault sync ~/Knowledge",
-      },
       doctor: {
-        summary: "Report vault config/plugin/template drift.",
+        summary: "Report docs-structure and repo-binding drift.",
         usage: "wiki vault doctor",
         example: "wiki vault doctor",
-      },
-      config: {
-        summary: "Bless or reset a plugin's config snapshot.",
-        usage: "wiki vault config <bless|reset> <plugin>",
-        example: "wiki vault config bless dataview",
       },
     },
   },
@@ -317,23 +259,6 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
         example: "wiki project link --project myproj --repo ~/code/myproj",
       },
     },
-  },
-  handover: {
-    summary: "Create a handover artifact capturing session state and next-phase routing.",
-    usage: "wiki handover [--project <name>] [--phase <phase>] [--next-phase <phase>] [flags]",
-    flags: {
-      "--project": "project name (required if no active session)",
-      "--phase": "current phase (required if no active session)",
-      "--next-phase": "phase the next agent should resume in",
-      "--active-prd": "PRD this session operated on",
-      "--active-slice": "slice in progress (repeatable)",
-      "--decision": "decision made this session (repeatable)",
-      "--suggested-skill": "skill the next agent should load (repeatable)",
-      "--produced": "what this session produced ('-' reads stdin)",
-      "--open": "open threads / next steps ('-' reads stdin)",
-      "--no-doc": "suppress the auto-printed next-phase guidance",
-    },
-    example: 'wiki handover --project myproj --next-phase slice --produced "PRD-0006 published"',
   },
 };
 

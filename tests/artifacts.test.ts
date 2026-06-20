@@ -1,19 +1,9 @@
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { appendField, ArtifactValidationError, createArtifact, readArtifact, setField } from "../src/artifacts/store";
-
-const MOCK_BIN = join(import.meta.dir, "fixtures", "mock-obsidian.sh");
-
-beforeAll(() => {
-  process.env.OBSIDIAN_BIN = MOCK_BIN;
-});
-
-afterAll(() => {
-  delete process.env.OBSIDIAN_BIN;
-});
 
 const tempPaths: string[] = [];
 

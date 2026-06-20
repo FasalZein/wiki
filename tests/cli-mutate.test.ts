@@ -139,7 +139,7 @@ async function readSlice(f: Fixture, id: string): Promise<string> {
 async function runWiki(args: string[], f: Fixture): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const proc = Bun.spawn(["bun", "src/cli.ts", ...args], {
     cwd: import.meta.dir.replace(/\/tests$/, ""),
-    env: { ...process.env, KNOWLEDGE_VAULT_ROOT: f.vaultRoot, OBSIDIAN_BIN: join(import.meta.dir, "fixtures", "mock-obsidian.sh"), ...f.env },
+    env: { ...process.env, KNOWLEDGE_VAULT_ROOT: f.vaultRoot, ...f.env },
     stdout: "pipe",
     stderr: "pipe",
   });

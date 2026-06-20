@@ -1,4 +1,3 @@
-import matter from "gray-matter";
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -12,84 +11,70 @@ afterEach(async () => {
 });
 
 describe("status and session CLI", () => {
-  test("session start writes repo-local session.json", async () => {
+  test("session start writes repo-local session.json with {project, updated}", async () => {
     const fixture = await createFixture();
 
-    const result = await runWiki(
-      [
-        "session",
-        "start",
-        "--project",
-        "wiki-v2",
-        "--active-prd",
-        "PRD-001",
-        "--active-slice",
-        "SLICE-011",
-        "--phase",
-        "green",
-      ],
-      fixture,
-    );
+    const result = await runWiki(["session", "start", "--project", "wiki-v2"], fixture);
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe(`${join(fixture.repoPath, ".wiki", "state", "session.json")}\n`);
     const session = JSON.parse(await readFile(join(fixture.repoPath, ".wiki", "state", "session.json"), "utf8"));
     expect(session.project).toBe("wiki-v2");
-    expect(session.active_prd).toBe("PRD-001");
-    expect(session.active_slices).toEqual(["SLICE-011"]);
-    expect(session.phase).toBe("green");
     expect(session.updated).toBeString();
   });
 
-  test("show and status without session exit 0 with helpful messages", async () => {
+  test("session show without a session exits 0 with a helpful message", async () => {
     const fixture = await createFixture();
 
     const show = await runWiki(["session", "show", "--project", "wiki-v2"], fixture);
-    const status = await runWiki(["status", "--project", "wiki-v2"], fixture);
 
     expect(show.exitCode).toBe(0);
     expect(show.stdout).toContain("No active session");
-    expect(status.exitCode).toBe(0);
-    expect(status.stdout).toContain("No active session for project wiki-v2");
   });
 
-  test("status prints summary and simple next action", async () => {
+  test("status on a project with no artifacts names the project and how to create", async () => {
     const fixture = await createFixture();
-    await runWiki(
-      ["session", "start", "--project", "wiki-v2", "--active-prd", "PRD-001", "--active-slice", "SLICE-011", "--phase", "green"],
-      fixture,
+
+    const result = await runWiki(["status", "--project", "wiki-v2"], fixture);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("Project: wiki-v2");
+    expect(result.stdout).toContain("No artifacts yet");
+  });
+
+  test("status lists the most-recently-modified artifacts", async () => {
+    const fixture = await createFixture();
+    await writeFile(
+      join(fixture.vaultRoot, "projects", "wiki-v2", "docs", "DOC-0001-thing.md"),
+      "---\nid: DOC-0001\n---\n# Thing\n",
     );
 
     const result = await runWiki(["status", "--project", "wiki-v2"], fixture);
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("Project: wiki-v2");
-    expect(result.stdout).toContain("Phase: green");
-    expect(result.stdout).toContain("Active PRD: PRD-001");
-    expect(result.stdout).toContain("Active slices: SLICE-011");
-    // Next: is a literal, copy-pasteable command — no "run " prose prefix (SLICE-0063).
-    expect(result.stdout).toContain("Next: wiki close SLICE-011 --project wiki-v2 --review-verdict pass");
+    expect(result.stdout).toContain("Recent artifacts (1):");
+    expect(result.stdout).toContain(join("projects", "wiki-v2", "docs", "DOC-0001-thing.md"));
   });
 
-  test("status --json emits a machine-readable next_command", async () => {
+  test("status --json emits project and recent artifact paths", async () => {
     const fixture = await createFixture();
-    await runWiki(
-      ["session", "start", "--project", "wiki-v2", "--active-prd", "PRD-001", "--active-slice", "SLICE-011", "--phase", "green"],
-      fixture,
+    await writeFile(
+      join(fixture.vaultRoot, "projects", "wiki-v2", "docs", "DOC-0001-thing.md"),
+      "---\nid: DOC-0001\n---\n# Thing\n",
     );
 
     const result = await runWiki(["status", "--project", "wiki-v2", "--json"], fixture);
 
     expect(result.exitCode).toBe(0);
     const payload = JSON.parse(result.stdout);
-    expect(payload.next_command).toBe("wiki close SLICE-011 --project wiki-v2 --review-verdict pass");
-    expect(payload.phase).toBe("green");
-    expect(payload.active_slices).toEqual(["SLICE-011"]);
+    expect(payload.project).toBe("wiki-v2");
+    expect(payload.recent).toEqual([join("projects", "wiki-v2", "docs", "DOC-0001-thing.md")]);
   });
 
-  test("status and session show can read the current repo session without --project", async () => {
+  test("status and session show read the current repo session without --project", async () => {
     const fixture = await createFixture();
-    await runWiki(["session", "start", "--project", "wiki-v2", "--phase", "ad-hoc"], fixture);
+    await runWiki(["session", "start", "--project", "wiki-v2"], fixture);
     const repoFixture = { ...fixture, cwd: fixture.repoPath };
 
     const status = await runWiki(["status"], repoFixture);
@@ -101,80 +86,15 @@ describe("status and session CLI", () => {
     expect(JSON.parse(show.stdout).project).toBe("wiki-v2");
   });
 
-  test("status --with-doc emits CLI-owned phase guidance (ADR-0024)", async () => {
-    const fixture = await createFixture();
-    await runWiki(["session", "start", "--project", "wiki-v2", "--phase", "green"], fixture);
-
-    const result = await runWiki(["status", "--project", "wiki-v2", "--with-doc"], fixture);
-
-    expect(result.exitCode).toBe(0);
-    // green aliases to the slice/TDD guidance; guidance is code-owned, not seeded from the repo.
-    expect(result.stdout).toContain("--- phase doc: green ---");
-    expect(result.stdout).toContain("# Phase: slice");
-    expect(result.stdout.toLowerCase()).toContain("output contract");
-    expect(result.stderr).toContain("wiki vault:");
-  });
-
-  test("status --with-doc renders the slice guidance for a slice-phase session", async () => {
-    const fixture = await createFixture();
-    await runWiki(["session", "start", "--project", "wiki-v2", "--phase", "slice"], fixture);
-
-    const result = await runWiki(["status", "--project", "wiki-v2", "--with-doc"], fixture);
-
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("Project: wiki-v2");
-    expect(result.stdout).toContain("--- phase doc: slice ---");
-    expect(result.stdout).toContain("# Phase: slice");
-  });
-
-  test("session set updates fields and supports stdin notes", async () => {
-    const fixture = await createFixture();
-    await runWiki(["session", "start", "--project", "wiki-v2", "--phase", "red"], fixture);
-
-    const phase = await runWiki(["session", "set", "--project", "wiki-v2", "phase", "green"], fixture);
-    const notes = await runWiki(["session", "set", "--project", "wiki-v2", "notes", "-"], fixture, "Working notes\n");
-
-    expect(phase.exitCode).toBe(0);
-    expect(notes.exitCode).toBe(0);
-    const session = JSON.parse(await readFile(join(fixture.repoPath, ".wiki", "state", "session.json"), "utf8"));
-    expect(session.phase).toBe("green");
-    expect(session.notes).toBe("Working notes\n");
-  });
-
   test("session clear removes session.json", async () => {
     const fixture = await createFixture();
     await runWiki(["session", "start", "--project", "wiki-v2"], fixture);
 
     const result = await runWiki(["session", "clear", "--project", "wiki-v2"], fixture);
-    const status = await runWiki(["status", "--project", "wiki-v2"], fixture);
+    const show = await runWiki(["session", "show", "--project", "wiki-v2"], fixture);
 
     expect(result.exitCode).toBe(0);
-    expect(status.stdout).toContain("No active session");
-  });
-
-  test("handover create/write fill omitted fields from session and explicit flags override", async () => {
-    const fixture = await createFixture();
-    await runWiki(
-      ["session", "start", "--project", "wiki-v2", "--active-prd", "PRD-001", "--active-slice", "SLICE-011", "--phase", "green"],
-      fixture,
-    );
-
-    const fromSession = await runWiki(["handover", "create", "--project", "wiki-v2"], fixture);
-    const override = await runWiki(
-      ["handover", "write", "--project", "wiki-v2", "--phase", "handover", "--active-prd", "PRD-999", "--active-slice", "SLICE-999"],
-      fixture,
-    );
-
-    expect(fromSession.exitCode).toBe(0);
-    expect(override.exitCode).toBe(0);
-    const first = matter(await readFile(join(fixture.vaultRoot, "projects", "wiki-v2", "handovers", "HANDOVER-0001-handover-0001.md"), "utf8")).data;
-    const second = matter(await readFile(join(fixture.vaultRoot, "projects", "wiki-v2", "handovers", "HANDOVER-0002-handover-0002.md"), "utf8")).data;
-    expect(first.phase).toBe("green");
-    expect(first.active_prd).toBe("PRD-001");
-    expect(first.active_slices).toEqual(["SLICE-011"]);
-    expect(second.phase).toBe("handover");
-    expect(second.active_prd).toBe("PRD-999");
-    expect(second.active_slices).toEqual(["SLICE-999"]);
+    expect(show.stdout).toContain("No active session");
   });
 });
 
@@ -209,7 +129,7 @@ async function createFixture(): Promise<Fixture> {
 async function runWiki(args: string[], fixture: Fixture, stdin?: string): Promise<CommandResult> {
   const proc = Bun.spawn(["bun", join(repoRoot, "src", "cli.ts"), ...args], {
     cwd: fixture.cwd,
-    env: { ...process.env, KNOWLEDGE_VAULT_ROOT: fixture.vaultRoot, OBSIDIAN_BIN: join(import.meta.dir, "fixtures", "mock-obsidian.sh") },
+    env: { ...process.env, KNOWLEDGE_VAULT_ROOT: fixture.vaultRoot },
     stdin: stdin === undefined ? undefined : "pipe",
     stdout: "pipe",
     stderr: "pipe",

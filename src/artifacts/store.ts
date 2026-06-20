@@ -1,8 +1,6 @@
 import matter from "gray-matter";
 import { readdir, readFile, rm } from "node:fs/promises";
-import { basename, dirname, join, relative } from "node:path";
-
-import { obsidianCreate } from "../integrations/obsidian";
+import { join, relative } from "node:path";
 
 import { loadTemplate, normalizeInlineMaps, resolveTemplatePath, type TemplateType } from "../schema/load";
 import { BodyParseError, parseBodySections } from "./body";
@@ -121,7 +119,7 @@ export async function setFields(input: SetFieldsInput): Promise<Artifact> {
  * actually has that enum value (slices gained it in P0.1; docs have neither and
  * fail cleanly). Shared by `create --supersedes` and the `wiki supersede` verb
  * so the conditional lives in exactly one place. Routes through setFields, so
- * the write is validated and Obsidian-routed (ADR-0017).
+ * the write is validated.
  */
 export async function supersedeArtifact(input: ReadArtifactInput & { by: string }): Promise<Artifact> {
   const schema = await loadTemplate(input.type);
@@ -185,7 +183,7 @@ export async function createArtifact(input: CreateArtifactInput): Promise<Artifa
 
   const content = renderArtifact(template, orderBySchema(schema, result.value), bodySections);
   const path = artifactPath(input.type, input.vaultRoot, input.project, id, String(result.value.title ?? id), input.category);
-  await writeArtifact(input.vaultRoot, path, content);
+  await writeArtifact(path, content);
 
   return {
     id,
@@ -233,7 +231,7 @@ export async function relocateArtifact(input: RelocateArtifactInput): Promise<Ar
     : join(directory, fileName);
 
   const content = matter.stringify(existing.body, { ...fields, updated: new Date().toISOString().slice(0, 10) });
-  await writeArtifact(input.vaultRoot, destination, content);
+  await writeArtifact(destination, content);
   if (destination !== existing.path) {
     await rm(existing.path, { force: true });
   }
@@ -270,15 +268,12 @@ async function writeFields(input: ReadArtifactInput, existing: Artifact, fields:
   }
 
   const content = matter.stringify(existing.body, result.value);
-  await writeArtifact(input.vaultRoot, existing.path, content);
+  await writeArtifact(existing.path, content);
   return { ...existing, fields: result.value };
 }
 
-async function writeArtifact(vaultRoot: string, path: string, content: string): Promise<void> {
-  const rel = relative(vaultRoot, path);
-  const name = basename(rel, ".md");
-  const folder = dirname(rel);
-  await obsidianCreate(name, content, folder, { silent: true, overwrite: true });
+async function writeArtifact(path: string, content: string): Promise<void> {
+  await Bun.write(path, content);
 }
 
 function artifactPath(type: TemplateType, vaultRoot: string, project: string, id: string, title: string, category?: string): string {

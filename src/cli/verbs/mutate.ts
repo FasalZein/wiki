@@ -1,9 +1,8 @@
 /**
- * First-class, validated field mutation verbs (P1.2) so an agent never drops to
- * the `obsidian` bridge for a status change, a `blocked_by` edit, or a
- * supersede. All wrap the existing internal store writers (setField /
- * supersedeArtifact), which validate against the schema and route through
- * Obsidian (ADR-0017) — this narrows ADR-0019, it does not unlock raw writes.
+ * First-class, validated field mutation verbs (P1.2) so an agent never hand-edits
+ * an artifact for a status change, a `blocked_by` edit, or a supersede. All wrap
+ * the internal store writers (setField / supersedeArtifact), which validate
+ * against the schema before writing.
  */
 
 import {

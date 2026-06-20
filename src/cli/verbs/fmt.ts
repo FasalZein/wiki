@@ -1,4 +1,4 @@
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, rename } from "node:fs/promises";
 import { join, relative } from "node:path";
 
 import matter from "gray-matter";
@@ -6,7 +6,6 @@ import matter from "gray-matter";
 import { orderBySchema } from "../../artifacts/render";
 import { assertProjectStructure } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
-import { obsidianCreate, obsidianRename } from "../../integrations/obsidian";
 import { loadTemplate, type TemplateType } from "../../schema/load";
 import type { Schema } from "../../schema/types";
 import { booleanValue, parseCommand } from "../parse";
@@ -69,7 +68,7 @@ export async function handleFmt(args: string[]): Promise<CliResult> {
       console.log(write ? `fixed ${label}` : label);
     }
     if (write) {
-      await writeBack(vaultRoot, filePath, content);
+      await writeBack(filePath, content);
     }
   }
 
@@ -146,7 +145,7 @@ async function diagnoseCoreFields(content: string, file: string): Promise<string
     .filter((field) => data[field.name] === undefined)
     .map((field) => field.name);
   if (missing.length === 0) return [];
-  return [`${file}: missing required fields: ${missing.join(", ")} — hint: set them via obsidian eval with app.fileManager.processFrontMatter`];
+  return [`${file}: missing required fields: ${missing.join(", ")} — hint: set them with 'wiki set <id> <field> <value>'`];
 }
 
 const ARTIFACT_ID = /^[A-Z]+-\d+$/;
@@ -251,7 +250,7 @@ async function renumberLegacyIds(
       content = content.replace(new RegExp(`\\b${oldId}(?!\\d)`, "g"), newId);
     }
     if (content !== raw) {
-      await writeBack(vaultRoot, filePath, content);
+      await writeBack(filePath, content);
     }
   }
   for (const [oldId, newId] of map) {
@@ -261,7 +260,7 @@ async function renumberLegacyIds(
     const folder = rel.slice(0, rel.lastIndexOf("/"));
     const base = rel.slice(rel.lastIndexOf("/") + 1);
     const newBase = base.replace(new RegExp(`^${oldId}(?!\\d)`), newId);
-    await obsidianRename(rel, `${folder}/${newBase}`);
+    await rename(filePath, join(vaultRoot, folder, newBase));
   }
 
   return { labels, collisions, map };
@@ -420,10 +419,6 @@ async function markdownFiles(dir: string): Promise<string[]> {
   return files.sort();
 }
 
-/** All vault mutations go through the Obsidian layer (ADR-0017). */
-async function writeBack(vaultRoot: string, filePath: string, content: string): Promise<void> {
-  const rel = relative(vaultRoot, filePath);
-  const folder = rel.slice(0, rel.lastIndexOf("/"));
-  const name = rel.slice(rel.lastIndexOf("/") + 1).replace(/\.md$/, "");
-  await obsidianCreate(name, content, folder, { silent: true, overwrite: true });
+async function writeBack(filePath: string, content: string): Promise<void> {
+  await Bun.write(filePath, content);
 }

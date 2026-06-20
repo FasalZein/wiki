@@ -15,8 +15,8 @@ function captureStdout(): { restore: () => void; output: () => string } {
 describe("usage registry", () => {
   test("every top-level verb has a usage entry with summary and example", () => {
     const verbs = [
-      "create", "doc", "red", "green", "close", "status", "search",
-      "validate", "next-id", "doctor", "sync", "session", "vault", "project", "handover",
+      "create", "doc", "status", "search",
+      "validate", "next-id", "doctor", "sync", "session", "vault", "project",
     ];
     for (const verb of verbs) {
       const entry = USAGE_REGISTRY[verb];
@@ -33,20 +33,6 @@ describe("usage registry", () => {
       expect(entry?.subverbs, `${verb} should declare subverbs`).toBeDefined();
       expect(Object.keys(entry?.subverbs ?? {}).length).toBeGreaterThan(0);
     }
-  });
-
-  test("close help documents the body Todo checkbox gate; red help states test-command provenance (SLICE-0053)", () => {
-    const closeEntry = USAGE_REGISTRY.close;
-    expect(closeEntry).toBeDefined();
-    const closeText = renderHelp("close", closeEntry!);
-    expect(closeText.toLowerCase()).toContain("checkbox");
-    expect(closeText).toContain("Todo");
-
-    const redEntry = USAGE_REGISTRY.red;
-    expect(redEntry).toBeDefined();
-    const redText = renderHelp("red", redEntry!);
-    expect(redText).toContain("test_command");
-    expect(redText).toContain("_project.md");
   });
 
   test("renderHelp produces usage, the summary, and an example", () => {

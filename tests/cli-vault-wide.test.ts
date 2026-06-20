@@ -88,7 +88,7 @@ async function runWiki(args: string[], fixture: Fixture, cwd?: string): Promise<
   const cliPath = join(repoRoot, "src", "cli.ts");
   const proc = Bun.spawn(["bun", cliPath, ...args], {
     cwd: cwd ?? repoRoot,
-    env: { ...process.env, KNOWLEDGE_VAULT_ROOT: fixture.vaultRoot, OBSIDIAN_BIN: join(import.meta.dir, "fixtures", "mock-obsidian.sh"), ...fixture.env },
+    env: { ...process.env, KNOWLEDGE_VAULT_ROOT: fixture.vaultRoot, ...fixture.env },
     stdout: "pipe", stderr: "pipe",
   });
   const [stdout, stderr, exitCode] = await Promise.all([

@@ -113,8 +113,23 @@ describe("advisory dedup", () => {
     expect(old).toContain("superseded_by: PRD-0002");
   });
 
-  test("a strong dedup match blocks create without an override (P2.1)", async () => {
+  test("a strong dedup match is advisory by default — create proceeds (memory-layer default)", async () => {
     const fixture = await createDedupFixture("wiki-v2");
+    await writeFile(
+      fixture.resultsFile,
+      JSON.stringify([{ path: join(fixture.projectPath, "prds", "PRD-0007.md"), score: 0.95, snippet: "Same feature" }]),
+    );
+
+    const result = await runWiki(["create", "prd", "--title", "Core wiki CLI", "--project", "wiki-v2"], fixture);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toContain("advisory");
+    const prds = (await readdir(join(fixture.projectPath, "prds"))).filter((name) => name.startsWith("PRD-"));
+    expect(prds.length).toBe(1);
+  });
+
+  test("a strong dedup match blocks create when dedup_strong_blocks is opt-in enabled (strict mode)", async () => {
+    const fixture = await createDedupFixture("wiki-v2", { projectFrontmatter: "dedup_strong_blocks: true\n" });
     await writeFile(
       fixture.resultsFile,
       JSON.stringify([{ path: join(fixture.projectPath, "prds", "PRD-0007.md"), score: 0.95, snippet: "Same feature" }]),
@@ -157,15 +172,6 @@ describe("advisory dedup", () => {
     const remaining = await listMarkdownRecursive(join(fixture.projectPath, "docs"));
     expect(remaining.some((name) => name.startsWith("DOC-0002"))).toBe(false);
   });
-
-  test("handover create does not call QMD", async () => {
-    const fixture = await createDedupFixture("wiki-v2", { failQmd: true });
-
-    const handover = await runWiki(["handover", "--project", "wiki-v2", "--phase", "ad-hoc"], fixture);
-
-    expect(handover.exitCode).toBe(0);
-    expect(await readFile(fixture.stateFile, "utf8")).toBe("");
-  });
 });
 
 function decisionArgs(): string[] {
@@ -199,7 +205,6 @@ type DedupFixture = {
 
 type DedupFixtureOptions = {
   projectFrontmatter?: string;
-  failQmd?: boolean;
 };
 
 type CommandResult = {
@@ -211,7 +216,7 @@ type CommandResult = {
 async function runWiki(args: string[], fixture: DedupFixture): Promise<CommandResult> {
   const proc = Bun.spawn(["bun", "src/cli.ts", ...args], {
     cwd: import.meta.dir.replace(/\/tests$/, ""),
-    env: { ...process.env, KNOWLEDGE_VAULT_ROOT: fixture.vaultRoot, OBSIDIAN_BIN: join(import.meta.dir, "fixtures", "mock-obsidian.sh"), ...fixture.env },
+    env: { ...process.env, KNOWLEDGE_VAULT_ROOT: fixture.vaultRoot, ...fixture.env },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -249,10 +254,6 @@ async function createDedupFixture(project: string, options: DedupFixtureOptions 
     `#!/usr/bin/env bash
 set -euo pipefail
 echo "$@" >> "$STATE_FILE"
-if [ "\${FAIL_QMD:-0}" = "1" ]; then
-  echo "fake qmd should not have been called" >&2
-  exit 9
-fi
 case "\${1:-}" in
   collection)
     case "\${2:-}" in
@@ -284,7 +285,6 @@ esac
       STATE_FILE: stateFile,
       REGISTERED_FILE: registeredFile,
       RESULTS_FILE: resultsFile,
-      FAIL_QMD: options.failQmd === true ? "1" : "0",
     },
   };
 }

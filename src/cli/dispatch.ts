@@ -1,4 +1,3 @@
-import { handleClose } from "./verbs/close";
 import { handleCreate } from "./verbs/create";
 import { handleDoc } from "./verbs/doc";
 import { handleFmt } from "./verbs/fmt";
@@ -6,7 +5,6 @@ import { handleBlock, handlePath, handleSet, handleSupersede } from "./verbs/mut
 import { handleNextId } from "./verbs/next-id";
 import { handleProject } from "./verbs/project";
 import { handleSchema } from "./verbs/schema";
-import { handleRed, handleGreen } from "./verbs/tdd";
 import { handleSearch } from "./verbs/search";
 import { handleSession } from "./verbs/session";
 import { handleStatus } from "./verbs/status";
@@ -36,7 +34,7 @@ async function printContextBanner(): Promise<void> {
     return;
   }
   const session = await readSession(process.cwd()).catch(() => null);
-  const linked = session === null ? "this repo has no session — run wiki session start --project <name>" : `project ${session.project} (phase ${session.phase})`;
+  const linked = session === null ? "this repo has no session — run wiki session start --project <name>" : `project ${session.project}`;
   console.error(`wiki vault: ${vault}  |  ${linked}`);
 }
 
@@ -44,7 +42,7 @@ export async function dispatch(args: string[]): Promise<CliResult> {
   // Strip the global --json flag centrally (P1.1): the per-verb parsers are
   // strict and would reject an unknown flag, so it must never reach them.
   const jsonFlag = args.includes("--json");
-  if (jsonFlag) setJsonMode(true);
+  setJsonMode(jsonFlag);
   const [verb, ...rest] = args.filter((arg) => arg !== "--json");
 
   // Top-level help: bare `wiki` or `wiki --help` lists all verbs.
@@ -84,9 +82,6 @@ export async function dispatch(args: string[]): Promise<CliResult> {
   if (verb === "path") return handlePath(rest);
   if (verb === "schema") return handleSchema(rest);
   if (verb === "doc") return handleDoc(rest);
-  if (verb === "red") return handleRed(rest);
-  if (verb === "green") return handleGreen(rest);
-  if (verb === "close") return handleClose(rest);
   if (verb === "status") return handleStatus(rest);
   if (verb === "search") return handleSearch(rest);
   if (verb === "validate") return handleValidate(rest);
@@ -97,7 +92,6 @@ export async function dispatch(args: string[]): Promise<CliResult> {
   if (verb === "session") return handleSession(rest);
   if (verb === "vault") return handleVault(rest);
   if (verb === "project") return handleProject(rest);
-  if (verb === "handover") return handleCreate(["handover", ...rest]);
   console.error(unknownMessage("verb", verb ?? ""));
   return { code: 1 };
 }

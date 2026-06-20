@@ -43,7 +43,7 @@ describe("registry ↔ handler contract (ADR-0023)", () => {
   test("create models every dispatched artifact form as a subverb", () => {
     // Mirrors the branches in handleCreate; if a form is added there it must be
     // advertised here so `wiki create <form> --help` and the unknown-type error stay truthful.
-    const dispatched = ["prd", "slice", "decision", "doc", "handover"].sort();
+    const dispatched = ["prd", "slice", "decision", "doc"].sort();
     const advertised = Object.keys(USAGE_REGISTRY.create?.subverbs ?? {}).sort();
     expect(advertised).toEqual(dispatched);
   });
@@ -74,20 +74,9 @@ describe("registry ↔ handler contract (ADR-0023)", () => {
     expect(out).toContain("unknown project subverb");
   });
 
-  test("handover help does not advertise --title (the handler never parses it)", () => {
-    const flags = USAGE_REGISTRY.handover?.flags ?? {};
-    expect(Object.keys(flags)).not.toContain("--title");
-    const createHandover = USAGE_REGISTRY.create?.subverbs?.handover?.flags ?? {};
-    expect(Object.keys(createHandover)).not.toContain("--title");
-  });
-
   test("sync help advertises --project, matching the handler's required field", () => {
     expect(USAGE_REGISTRY.sync?.usage).toContain("--project");
     expect(Object.keys(USAGE_REGISTRY.sync?.flags ?? {})).toContain("--project");
-  });
-
-  test("vault sync help advertises the required <path> argument", () => {
-    expect(USAGE_REGISTRY.vault?.subverbs?.sync?.usage).toContain("<path>");
   });
 
   test("next-id advertises doc, matching the handler's accepted types", () => {

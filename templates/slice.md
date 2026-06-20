@@ -6,7 +6,7 @@ schema:
   aliases:         { type: list,      default: [] }
   title:           { type: string,    required: true,  min: 5, max: 80 }
   project:         { type: string,    required: true }
-  parent_prd:      { type: link,      required: true, target: prd }
+  parent_prd:      { type: link,      target: prd }
   status:          { type: enum,      required: true, values: [planned, red, green, closed, blocked, superseded], default: planned }
   type:            { type: enum,      required: true, values: [HITL, AFK], default: AFK, description: "HITL = needs human interaction; AFK = agent-completable" }
   blocked_by:      { type: link_list, target: slice, default: [] }

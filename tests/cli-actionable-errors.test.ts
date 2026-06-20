@@ -89,16 +89,6 @@ describe("actionable project errors", () => {
     expect(msg).toContain("alpha"); // available projects listed
   });
 
-  test("status on an incomplete project names the missing field", async () => {
-    await makeProject("beta", "---\nproject: beta\nstatus: planning\n---\n");
-    const cap = capture();
-    const result = await dispatch(["status", "--project", "beta"]);
-    cap.restore();
-    const msg = cap.err() + cap.out();
-    expect(msg.toLowerCase()).toContain("repo");
-    expect(msg.toLowerCase()).toContain("test_command");
-  });
-
   test("search on a nonexistent project suggests create instead of a cryptic error", async () => {
     await makeProject("alpha", "---\nproject: alpha\nrepo: /tmp/a\ntest_command: bun test\n---\n");
     const cap = capture();

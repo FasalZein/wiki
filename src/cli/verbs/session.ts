@@ -3,25 +3,22 @@ import { readFile, writeFile } from "node:fs/promises";
 
 import { loadProjectConfig, ProjectConfigError } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
-import { clearSession, readSession, sessionPath, updateSession, writeSession, type SessionState } from "../../state/session";
+import { clearSession, readSession, sessionPath, writeSession } from "../../state/session";
 import type { CliResult } from "../dispatch";
 import { parseCommand, stringValue } from "../parse";
 import { unknownMessage } from "../usage";
 
-const sessionFields = new Set(["project", "active_prd", "active_slices", "phase", "notes"]);
-
 export async function handleSession(args: string[]): Promise<CliResult> {
   const [subverb, ...rest] = args;
   if (subverb === "start") return startSession(rest);
-  if (subverb === "set") return setSession(rest);
   if (subverb === "show") return showSession(rest);
   if (subverb === "clear") return clearCurrentSession(rest);
-  console.error(unknownMessage("session subverb", subverb ?? "", ["start", "set", "show", "clear"]));
+  console.error(unknownMessage("session subverb", subverb ?? "", ["start", "show", "clear"]));
   return { code: 1 };
 }
 
 async function startSession(args: string[]): Promise<CliResult> {
-  const parsed = parseCommand(args, ["project", "active-prd", "active-slice", "phase"], ["active-slice"]);
+  const parsed = parseCommand(args, ["project"]);
   const project = stringValue(parsed.values, "project");
   if (project === undefined) {
     console.error("missing required field: project");
@@ -29,47 +26,9 @@ async function startSession(args: string[]): Promise<CliResult> {
   }
   const repo = await repoForProject(project);
   await ensureWikiGitignored(repo);
-  const session = await writeSession(repo, {
-    project,
-    active_prd: stringValue(parsed.values, "active-prd"),
-    active_slices: stringListValue(parsed.values["active-slice"]),
-    phase: stringValue(parsed.values, "phase") ?? "ad-hoc",
-  });
+  const session = await writeSession(repo, { project });
   console.log(sessionPath(repo));
   console.error(`session started for ${session.project}`);
-  return { code: 0 };
-}
-
-async function setSession(args: string[]): Promise<CliResult> {
-  const parsed = parseCommand(args, ["project"]);
-  const project = stringValue(parsed.values, "project");
-  const field = parsed.positionals[0];
-  const rawValue = parsed.positionals[1];
-  if (field === undefined || rawValue === undefined) {
-    console.error("usage: wiki session set <field> <value>");
-    return { code: 1 };
-  }
-  const normalizedField = field.replaceAll("-", "_");
-  if (!sessionFields.has(normalizedField)) {
-    console.error("field must be one of: project, active_prd, active_slices, phase, notes");
-    return { code: 1 };
-  }
-  const repo = project === undefined ? process.cwd() : await repoForProject(project);
-  const raw = rawValue === "-" ? await Bun.stdin.text() : rawValue;
-  const patch: Partial<Omit<SessionState, "updated">> = {};
-  if (normalizedField === "active_slices") {
-    patch.active_slices = raw.length === 0 ? [] : raw.split(",").map((item) => item.trim()).filter((item) => item.length > 0);
-  } else if (normalizedField === "project") {
-    patch.project = raw;
-  } else if (normalizedField === "active_prd") {
-    patch.active_prd = raw;
-  } else if (normalizedField === "phase") {
-    patch.phase = raw;
-  } else {
-    patch.notes = raw;
-  }
-  await updateSession(repo, patch);
-  console.error("session updated");
   return { code: 0 };
 }
 
@@ -128,10 +87,4 @@ async function repoForProject(project: string): Promise<string> {
     }
     throw error;
   }
-}
-
-function stringListValue(value: string | string[] | boolean | undefined): string[] {
-  if (Array.isArray(value)) return value;
-  if (typeof value === "string") return [value];
-  return [];
 }

@@ -4,18 +4,19 @@
  * INPUT(select(...)) widget or triggering a validation error to learn them.
  */
 
+import { ARTIFACTS } from "../../artifacts/registry";
 import { loadTemplate, type TemplateType } from "../../schema/load";
 import type { CliResult } from "../dispatch";
 import { emitJson, emitJsonError, jsonEnabled } from "../output";
 import { parseCommand } from "../parse";
 
-const TYPES = new Set<string>(["prd", "slice", "decision", "doc", "handover"]);
+const TYPES = new Set<string>(Object.keys(ARTIFACTS));
 
 export async function handleSchema(args: string[]): Promise<CliResult> {
   const parsed = parseCommand(args, []);
   const type = parsed.positionals[0];
   if (type === undefined || !TYPES.has(type)) {
-    const message = `usage: wiki schema <prd|slice|decision|doc|handover>`;
+    const message = `usage: wiki schema <${[...TYPES].join("|")}>`;
     if (jsonEnabled()) emitJsonError({ error: message });
     else console.error(message);
     return { code: 1 };

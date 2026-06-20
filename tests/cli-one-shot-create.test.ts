@@ -130,7 +130,7 @@ async function runWiki(args: string[], vaultRoot: string, stdin?: string): Promi
   const repoRoot = import.meta.dir.replace(/\/tests$/, "");
   const proc = Bun.spawn(["bun", join(repoRoot, "src", "cli.ts"), ...args], {
     cwd: repoRoot,
-    env: { ...process.env, KNOWLEDGE_VAULT_ROOT: vaultRoot, OBSIDIAN_BIN: join(import.meta.dir, "fixtures", "mock-obsidian.sh") },
+    env: { ...process.env, KNOWLEDGE_VAULT_ROOT: vaultRoot },
     stdin: stdin === undefined ? undefined : "pipe",
     stdout: "pipe",
     stderr: "pipe",
