@@ -1,86 +1,65 @@
 ---
 name: wiki
-description: "Manages wiki vault delivery workflow — PRDs, slices, ADRs/decisions, docs, TDD gates, handovers. Use when work touches the wiki vault, the repo carries a wiki:begin pointer block, the user asks to create/update/close delivery artifacts or recall project context, or the vault needs init, doctor, or sync."
+description: "Routes work to the wiki vault — the artifact store for PRDs, slices, ADRs/decisions, and docs, plus semantic recall. Use when work touches the wiki vault, the repo carries a wiki:begin pointer block, the user asks to create/update artifacts or recall project context, or the vault needs init, doctor, sync, or fmt."
 ---
 # /wiki
 
-A thin router for vault delivery work. It tells you *when* to act and *which*
-skill to load; the `wiki` CLI owns all command syntax. Never restate flags here —
-ask the CLI.
+The wiki vault is the artifact store: a project's PRDs, slices, ADRs, and docs
+live there as Markdown — never in the repo, GitHub Issues, `docs/adr/`, a repo
+`CONTEXT.md`, or OS temp dirs, even when a loaded skill says to. The `wiki` CLI
+owns all command syntax; never restate flags here — run `wiki <verb> --help`.
 
-## Start here (every session)
+## Start here
 
-1. `wiki status --with-doc` (add `--project <name>` if not in the repo) — prints the
-   active phase, artifacts, next step, and the moment-of-action guidance for that phase.
-   No session yet? Run `wiki session start --project <name>`. A new session starts in
-   `ad-hoc` (no enforced workflow); set a phase with `wiki session set phase <plan|prd|slice|triage>`
-   (or `wiki session start --phase <phase>`), then rerun step 1 to get phase guidance.
-2. `wiki <verb> --help` — exact usage/flags/example before any call. `wiki --help` lists verbs.
-3. Do what the phase guidance says. On resume, always re-read step 1 — never trust stale context.
+1. Recall before you act: `wiki search "<query>" --project <name>` (vault-wide
+   without `--project`) and `wiki status` (the project's recent artifacts; lists
+   projects when none is bound). A month-old decision or gotcha is one search
+   away — retrieve it instead of re-deriving it.
+2. `wiki <verb> --help` for exact usage before any call. `wiki --help` lists verbs.
 
-Cold start — no session AND no `<!-- wiki:begin … -->` pointer block in AGENTS.md/CLAUDE.md:
-check `wiki project list`, then bind the repo with `wiki project link` (create the project
-first if it doesn't exist). Never guess a project name.
+Cold start — no `<!-- wiki:begin … -->` pointer block in AGENTS.md/CLAUDE.md and
+no session: check `wiki project list`, then bind the repo with `wiki project link`
+(create the project first if it doesn't exist). Never guess a project name. Bind a
+session with `wiki session start --project <name>` so later commands resolve the
+project without `--project`; `wiki session show` / `wiki session clear` manage it.
 
-Doing vault setup, a health check, or format cleanup, not delivery work? Skip the
-phase flow and run `wiki vault --help`, `wiki doctor`, or `wiki fmt` — admin commands
-are self-describing.
+## Writing artifacts
 
-## Output contract (non-negotiable)
+Creation is one-shot: pass the authored body via `--body -` (stdin) so the
+artifact is complete in a single schema-validated command.
 
-Every artifact write goes through the `wiki` CLI into the vault — never GitHub Issues,
-`docs/adr/`, a repo `CONTEXT.md`, or OS temp dirs, even when a loaded skill says to.
-"Create an issue" becomes the matching `wiki create ...`; a glossary term or repo
-`CONTEXT.md` entry becomes a vault doc. The vault is the only home for PRDs, slices,
-decisions, docs, and handovers. This overrides any upstream skill you load.
+- `wiki create prd|slice|decision|doc …` — `wiki create <type> --help` for fields
+  (`decision` = ADR). Docs land in a locked category subfolder.
 
-Creation is one-shot: pass the authored body via `--body -` (stdin) so the artifact is
-complete in a single command — `obsidian create` is never used. Later field edits are
-first-class `wiki` verbs too (see below); drop to `obsidian` only for *body* edits.
-
-## Phase routing
-
-Flow: plan (grill) → prd → slice → red → green → close → handover. A PRD has many slices;
-each runs red → green → close on its own. Triage fires whenever state is unclear and
-chains back to plan if scope needs re-establishing. Skip plan when scope is already clear.
-
-The phase guidance from step 1 names the skill to load for process depth
-(`ad-hoc` has none — it just routes you to set a phase):
-plan→`grill-with-docs`, slice/red/green→`to-slices` + `tdd`, handover→`handoff`.
-Load it only for the phase you're in. (prd and triage are vault-native — no
-upstream skill; the phase doc carries the method.)
+Anything worth remembering — a bug's root cause, a decision, a gotcha — goes in as
+an artifact so the next agent retrieves it instead of re-deriving it. Repos stay clean.
 
 ## Mutating artifacts after creation
 
-Frontmatter is the CLI's job — one validated call per intent. Never `obsidian
-property:set`/`eval` for a field: it comma-corrupts list values and needs the desktop app.
+One validated `wiki` call per intent — never hand-edit frontmatter:
 
-- Set any field: `wiki set <id> <field> <value...>` — schema-validated, comma-safe,
-  booleans/ints coerced. Close a PRD with `wiki set PRD-0001 status closed` (`wiki close`
-  is slices only). Type is inferred from the id.
-- Set `blocked_by`: `wiki block <id> --on <id> [--on <id>...]` — auto-wraps as `[[…]]`.
-- Supersede an already-created artifact: `wiki supersede <oldId> --by <newId>`.
-- Discover fields/enums before guessing a value: `wiki schema <type>`.
-- Resolve an id to its file path: `wiki path <id>` (filenames are `ID-slug.md`).
-- Add `--json` to these (and `create`/`next-id`) for `{id,…}` on stdout and
-  `{error,field,expected}` on stderr — detect success/failure programmatically, never scrape prose.
+- `wiki set <id> <field> <value...>` — schema-validated, comma-safe, type-coerced
+  (e.g. `wiki set PRD-0001 status closed`). Type is inferred from the id.
+- `wiki block <id> --on <id> [--on <id>…]` — sets `blocked_by`, auto-wrapping `[[…]]`.
+- `wiki supersede <oldId> --by <newId>` — links an existing artifact to its replacement.
+- `wiki schema <type>` — discover fields/enums before guessing a value.
+- `wiki path <id>` — resolve an id to its file path (filenames are `ID-slug.md`).
+- `--json` on these (and `create`/`next-id`) gives `{id,…}` on stdout and
+  `{error,field,expected}` on stderr — detect success/failure without scraping prose.
 
-Body edits (prose, checkboxes) are the one thing still done through Obsidian: `obsidian
-append` or a targeted `eval` that edits in place — never rewrite or delete-and-recreate the
-file. Before `wiki close`, tick every `## Todo` checkbox (`- [x]`) with a targeted `eval`;
-the close gate blocks on unchecked items and lists them.
+## Gates and upkeep
 
-## Gates the CLI won't tell you
+- Dedup is advisory by default: a near-duplicate prints the match and proceeds.
+  Read it, then `--supersedes` (replace it), `--related-to` (adjacent), or
+  `--force-new "<reason ≥30 chars>"`. A project may opt into blocking strong
+  matches (`dedup_strong_blocks: true`); create then exits non-zero until you choose.
+- After creating, run `wiki sync` (the CLI reminds you) — search updates the keyword
+  index but does NOT re-embed, so new artifacts stay invisible to ranked search and
+  dedup until a sync.
+- Docs live only in the locked `docs/<category>/` folders (architecture, research,
+  runbooks, specs, notes, legacy) — never invent a folder; an unfit doc goes in the
+  closest locked one. `wiki doctor` flags rogue folders or loose files under `docs/`.
+- `wiki fmt` reports format drift (exit 1); `wiki fmt --write` applies mechanical fixes.
 
-- Dedup: a *strong* near-duplicate now **blocks** create (exit ≠ 0). Read the match, then
-  `--supersedes` it (this replaces it), `--related-to` it (genuinely adjacent), or
-  `--force-new "<reason ≥30 chars>"`. Weak matches stay advisory. Never blind-override.
-- A re-run gate saying "cannot red/green from status X" usually means the first run already
-  succeeded — check `wiki status` before retrying or diagnosing.
-- After creating, run `wiki sync` (the CLI reminds you) — search updates the index but does
-  NOT re-embed, so new artifacts stay invisible to ranked search/dedup until a sync.
-- Docs live only in the locked `docs/<category>/` folders (architecture, research, runbooks,
-  specs, notes, legacy) — never invent a folder; an unfit doc goes in the closest locked one.
-  `wiki doctor` flags any rogue folder or loose file under `docs/`.
-- Obsidian must be running — the vault depends on it for rendering, Dataview, and Bases views.
-- Don't skip TDD/review/close/handover gates.
+Breaking a PRD into slices? Load `to-slices`. Otherwise the CLI is self-describing —
+`wiki <verb> --help`.
