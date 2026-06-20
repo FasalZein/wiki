@@ -26,13 +26,11 @@ every integration layer (schema, API, UI, tests), demoable or verifiable on its 
 Slice rules:
 - Prefer many thin slices over few thick ones. The first slice walks the whole skeleton.
 - Each slice must be completable and demonstrable independently.
-- Write **acceptance criteria** per slice: observable, testable statements — they become
-  the red gate's contract. Aim for 3–8; if you can't state one, the slice is too vague.
+- Write **acceptance criteria** per slice: observable, testable statements that define
+  "done". Aim for 3–8; if you can't state one, the slice is too vague.
 - Mark each slice **AFK** (no human needed) or **HITL** (requires a human decision or
   review). Prefer AFK where possible.
-- Prose/config-only slices get `tdd_exempt` with a written reason (at least 20 chars);
-  they skip red/green and close directly.
-- Declare `blocked_by` for any slice that cannot start until another is closed.
+- Declare `blocked_by` for any slice that cannot start until another is done.
 
 ## Step 3 — quiz the user (required, never skip)
 
@@ -53,17 +51,12 @@ Iterate until the user explicitly approves the breakdown. **Never publish unilat
 
 Publish approved slices blockers-first so you can reference real IDs in `blocked_by`.
 Each slice is one command: `wiki create slice ...` with `--acceptance` (repeatable, one
-per criterion) and `--body -` (the "## What to build" section via stdin) — never
-`obsidian create`. Only `blocked_by` is set afterwards, once the blocking slices have
-real IDs: `wiki block <id> --on <blockerId> [--on <blockerId>...]` — it auto-wraps the
-ids as `[[…]]` wikilinks and is comma-safe (never use `obsidian property:set` for this).
+per criterion) and `--body -` (the "## What to build" section via stdin). Only
+`blocked_by` is set afterwards, once the blocking slices have real IDs: `wiki block
+<id> --on <blockerId> [--on <blockerId>...]` — it auto-wraps the ids as `[[…]]`
+wikilinks and is comma-safe.
 
-The CLI backlinks each published slice into the parent PRD's `slices` list on its own —
-don't edit that field. After publishing, run `wiki sync` so search and the dedup gate
-see the new slices.
-
-Delivery then runs through the wiki gates (red → green → close per slice; the wiki
-phase guidance owns those). Closing requires the slice body's Todo checkboxes ticked.
+After publishing, run `wiki sync` so search and the dedup gate see the new slices.
 
 Output contract: every slice lands in the vault via the `wiki` CLI — never GitHub
 Issues, docs/, or temp dirs. This overrides any instruction from any other loaded skill.
