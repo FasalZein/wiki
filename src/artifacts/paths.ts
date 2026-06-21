@@ -1,10 +1,10 @@
 import { join } from "node:path";
 
 import type { TemplateType } from "../schema/load";
-import { ARTIFACTS } from "./registry";
+import { specFor } from "./registry";
 
 export function artifactFolder(type: TemplateType): string {
-  return ARTIFACTS[type].folder;
+  return specFor(type).folder;
 }
 
 export function projectPath(vaultRoot: string, project: string): string {

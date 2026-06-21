@@ -1,4 +1,5 @@
 import type { TemplateType } from "../schema/load";
+import wikiConfig from "../../wiki.json";
 
 export interface ArtifactSpec {
   /** ID prefix, e.g. "DOC" yields DOC-0001. */
@@ -7,20 +8,55 @@ export interface ArtifactSpec {
   folder: string;
   /** Whether `wiki create` runs the advisory dedup gate for this type. */
   dedup: boolean;
+  /** Skill that authors this kind, if any; read by per-runtime hooks to route output. */
+  skill?: string;
 }
 
 /**
- * The single source of truth for artifact types. Every per-type fact (ID
- * prefix, folder, dedup eligibility) lives here so adding a type is one entry,
- * not a hunt across id/paths/validate/project/dedup/search.
+ * Artifact kinds are data, defined in wiki.json — not hardcoded here, so a skill
+ * can extend the vault with a kind entry + a templates/<kind>.md, no code change.
+ * Parsed (not trusted) at load so a malformed config fails loudly, not silently.
  */
-export const ARTIFACTS: Record<TemplateType, ArtifactSpec> = {
-  prd: { prefix: "PRD", folder: "prds", dedup: true },
-  slice: { prefix: "SLICE", folder: "slices", dedup: true },
-  decision: { prefix: "ADR", folder: "adrs", dedup: true },
-  handover: { prefix: "HANDOVER", folder: "handovers", dedup: false },
-  doc: { prefix: "DOC", folder: "docs", dedup: true },
-};
+function loadKinds(): Record<TemplateType, ArtifactSpec> {
+  const raw: unknown = wikiConfig.kinds;
+  if (raw === null || typeof raw !== "object") {
+    throw new Error("wiki.json: missing 'kinds' object");
+  }
+  const kinds: Record<string, ArtifactSpec> = {};
+  for (const [name, spec] of Object.entries(raw as Record<string, unknown>)) {
+    if (spec === null || typeof spec !== "object") {
+      throw new Error(`wiki.json: kind '${name}' must be an object`);
+    }
+    const s = spec as Record<string, unknown>;
+    if (typeof s.prefix !== "string" || typeof s.folder !== "string" || typeof s.dedup !== "boolean") {
+      throw new Error(`wiki.json: kind '${name}' needs a string prefix, string folder, and boolean dedup`);
+    }
+    kinds[name] = {
+      prefix: s.prefix,
+      folder: s.folder,
+      dedup: s.dedup,
+      ...(typeof s.skill === "string" ? { skill: s.skill } : {}),
+    };
+  }
+  return kinds;
+}
+
+/**
+ * The single source of truth for artifact types, built from wiki.json. Every
+ * per-type fact (ID prefix, folder, dedup eligibility, authoring skill) lives in
+ * one entry, not a hunt across id/paths/validate/project/dedup/search.
+ */
+export const ARTIFACTS: Record<TemplateType, ArtifactSpec> = loadKinds();
+
+/** Look up a kind's spec, failing loudly on an unknown kind (the runtime check
+ *  that replaces the old compile-time union). */
+export function specFor(type: TemplateType): ArtifactSpec {
+  const spec = ARTIFACTS[type];
+  if (spec === undefined) {
+    throw new Error(`unknown artifact kind: ${type} (not defined in wiki.json)`);
+  }
+  return spec;
+}
 
 /** Folders that hold CLI-managed artifacts; required by assertProjectStructure. */
 export const ARTIFACT_FOLDERS: readonly string[] = Object.values(ARTIFACTS).map((spec) => spec.folder);

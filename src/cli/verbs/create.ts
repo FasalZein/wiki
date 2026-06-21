@@ -17,7 +17,7 @@ import {
   removeArtifactFile,
   supersedeArtifact,
 } from "../../artifacts/store";
-import { ARTIFACTS } from "../../artifacts/registry";
+import { specFor } from "../../artifacts/registry";
 import { defaultCategoryForDocType, DOC_CATEGORIES, isDocCategory, type DocCategory } from "../../artifacts/registry";
 import { assertProjectStructure, loadProjectConfig, ProjectConfigError } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
@@ -177,7 +177,7 @@ async function createWithSupersede(req: CreateRequest): Promise<CliResult> {
       console.error(`created ${artifact.id} at ${relative(vaultRoot, artifact.path)}`);
       // P2.2: the dedup index only refreshes on `wiki sync`, so a just-created
       // artifact is invisible to the next dedup check until then. Remind once.
-      if (ARTIFACTS[type].dedup) console.error("note: run 'wiki sync' to index this artifact for future dedup checks");
+      if (specFor(type).dedup) console.error("note: run 'wiki sync' to index this artifact for future dedup checks");
     }
     return { code: 0 };
   } catch (error) {
@@ -192,7 +192,7 @@ async function createWithSupersede(req: CreateRequest): Promise<CliResult> {
  * stay advisory and proceed.
  */
 async function advisoryDedup(type: TemplateType, project: string, projectPath: string, query: string, override: DedupOverride): Promise<CliResult | null> {
-  if (override.kind !== "none" || !ARTIFACTS[type].dedup) return null;
+  if (override.kind !== "none" || !specFor(type).dedup) return null;
   let config;
   try {
     config = await loadProjectConfig(projectPath);
