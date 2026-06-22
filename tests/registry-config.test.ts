@@ -7,8 +7,8 @@ describe("config-driven kind registry (wiki.json)", () => {
     // The five kinds shipped in wiki.json; the point is they come from config,
     // not a hardcoded union, so this just pins the loaded shape.
     expect(ARTIFACTS.prd).toEqual({ prefix: "PRD", folder: "prds", dedup: true });
-    expect(ARTIFACTS.handover.skill).toBe("handoff");
-    expect(ARTIFACTS.decision.skill).toBe("grill-with-docs");
+    expect(specFor("handover").skill).toBe("handoff");
+    expect(specFor("decision").skill).toBe("grill-with-docs");
   });
 
   test("specFor throws loudly on a kind not defined in wiki.json", () => {

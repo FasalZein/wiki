@@ -1,3 +1,4 @@
+import matter from "gray-matter";
 import { join, relative } from "node:path";
 
 import {
@@ -17,107 +18,124 @@ import {
   removeArtifactFile,
   supersedeArtifact,
 } from "../../artifacts/store";
-import { specFor } from "../../artifacts/registry";
-import { defaultCategoryForDocType, DOC_CATEGORIES, isDocCategory, type DocCategory } from "../../artifacts/registry";
+import { authoredSections } from "../../artifacts/body";
+import { ARTIFACTS, defaultCategoryForDocType, DOC_CATEGORIES, isDocCategory, specFor, type DocCategory } from "../../artifacts/registry";
 import { assertProjectStructure, loadProjectConfig, ProjectConfigError } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
-import type { TemplateType } from "../../schema/load";
+import { loadTemplate, normalizeInlineMaps, resolveTemplatePath, type TemplateType } from "../../schema/load";
 import type { CliResult } from "../dispatch";
 import { emitJson, emitJsonError, jsonEnabled } from "../output";
 import { parseCommand, stringValue } from "../parse";
 import { resolveProject } from "../resolve-project";
-import { unknownMessage, USAGE_REGISTRY } from "../usage";
+import { unknownMessage } from "../usage";
 
 export async function handleCreate(args: string[]): Promise<CliResult> {
-  const [type, ...rest] = args;
-  if (type === "prd") return createPrd(rest);
-  if (type === "slice") return createSlice(rest);
-  if (type === "decision") return createDecision(rest);
-  if (type === "doc") return createDoc(rest);
-  console.error(unknownMessage("artifact type", type ?? "", Object.keys(USAGE_REGISTRY.create?.subverbs ?? {})));
-  return { code: 1 };
+  const [kind, ...rest] = args;
+  if (kind === undefined || ARTIFACTS[kind] === undefined) {
+    console.error(unknownMessage("artifact type", kind ?? "", Object.keys(ARTIFACTS)));
+    return { code: 1 };
+  }
+  return createGeneric(kind, rest);
 }
 
-async function createPrd(args: string[]): Promise<CliResult> {
-  const parsed = parseCommand(args, ["title", "project", "body", "force-new", "related-to", "supersedes"]);
-  const project = await resolveProject(parsed);
-  const title = stringValue(parsed.values, "title");
-  const missing = missingFields({ project, title });
-  if (missing) return missing;
-  if (project === undefined || title === undefined) return { code: 1 };
-
-  const body = await stdinOrValue(stringValue(parsed.values, "body"));
-  return createWithSupersede({ type: "prd", project, dedupQuery: title, fields: { title }, rawValues: parsed.values, body });
+/** Snake-case schema/placeholder name -> kebab CLI flag (e.g. parent_prd -> parent-prd). */
+function flagName(field: string): string {
+  return field.replace(/_/g, "-");
 }
 
-async function createSlice(args: string[]): Promise<CliResult> {
-  const parsed = parseCommand(
-    args,
-    ["title", "project", "parent-prd", "body", "acceptance", "force-new", "related-to", "supersedes"],
-    ["acceptance"],
-  );
+/**
+ * Fields the CLI sets itself, the dedup override owns, or other verbs manage —
+ * never create-time flags. Every other schema field becomes a flag.
+ */
+const NON_FLAG_FIELDS: ReadonlySet<string> = new Set([
+  "id", "aliases", "project", "created", "updated", "session_date",
+  "supersedes", "superseded_by", "related", "slices", "blocked_by", "force_new_reason",
+]);
+
+/**
+ * Schema-driven create for any kind in wiki.json (ADR-0035). Flags are derived
+ * from templates/<kind>.md — every schema field (minus the CLI/override-owned set
+ * above) plus every authored body placeholder — so a new kind needs only a config
+ * entry and a template, no code. There is no per-kind branch and no fallback: an
+ * unknown kind never reaches here (handleCreate hard-errors first). Provided values
+ * pass through as `fields`; schema fields are validated, placeholders fall through
+ * untouched and fill their `{{...}}` section.
+ */
+async function createGeneric(kind: TemplateType, args: string[]): Promise<CliResult> {
+  const schema = await loadTemplate(kind);
+  const template = await Bun.file(resolveTemplatePath(`${kind}.md`)).text();
+  const schemaNames = new Set(schema.fields.map((field) => field.name));
+  const placeholders = authoredSections(matter(normalizeInlineMaps(template)).content, schemaNames).map((s) => s.placeholder);
+
+  const stringFlags = ["project", "body", "category", "force-new", "related-to", "supersedes"];
+  const multipleFlags: string[] = [];
+  const booleanFlags: string[] = [];
+  for (const field of schema.fields) {
+    if (NON_FLAG_FIELDS.has(field.name)) continue;
+    const flag = flagName(field.name);
+    if (field.type === "list" || field.type === "link_list") {
+      stringFlags.push(flag);
+      multipleFlags.push(flag);
+    } else if (field.type === "boolean") {
+      booleanFlags.push(flag);
+    } else {
+      stringFlags.push(flag);
+    }
+  }
+  for (const placeholder of placeholders) stringFlags.push(flagName(placeholder));
+
+  const parsed = parseCommand(args, stringFlags, multipleFlags, booleanFlags);
+
   const project = await resolveProject(parsed);
-  const title = stringValue(parsed.values, "title");
-  const missing = missingFields({ project, title });
+  const missing = missingFields({ project });
   if (missing) return missing;
-  if (project === undefined || title === undefined) return { code: 1 };
+  if (project === undefined) return { code: 1 };
 
-  // parent-prd is now an optional plain field — no existence gate, no backlink.
-  // Relate a slice to a PRD (or anything) with --related-to instead.
-  const parentPrd = stringValue(parsed.values, "parent-prd");
-  const fields: Record<string, unknown> = { title, acceptance: stringListValue(parsed.values.acceptance) };
-  if (parentPrd !== undefined) fields.parent_prd = parentPrd;
+  const fields: Record<string, unknown> = {};
+  for (const field of schema.fields) {
+    if (NON_FLAG_FIELDS.has(field.name)) continue;
+    const flag = flagName(field.name);
+    if (field.type === "list" || field.type === "link_list") {
+      const value = parsed.values[flag];
+      if (Array.isArray(value) && value.length > 0) fields[field.name] = value;
+    } else if (field.type === "boolean") {
+      if (parsed.values[flag] === true) fields[field.name] = true;
+    } else {
+      const value = stringValue(parsed.values, flag);
+      if (value !== undefined) fields[field.name] = value;
+    }
+  }
+  for (const placeholder of placeholders) {
+    const value = stringValue(parsed.values, flagName(placeholder));
+    if (value !== undefined) fields[placeholder] = value;
+  }
 
-  const body = await stdinOrValue(stringValue(parsed.values, "body"));
-  return createWithSupersede({
-    type: "slice",
-    project,
-    dedupQuery: parentPrd !== undefined ? `${title} ${parentPrd}` : title,
-    fields,
-    rawValues: parsed.values,
-    body,
-  });
-}
-
-async function createDecision(args: string[]): Promise<CliResult> {
-  const parsed = parseCommand(args, ["title", "context", "decision", "consequences", "project", "force-new", "related-to", "supersedes"]);
-  const project = await resolveProject(parsed);
-  const title = stringValue(parsed.values, "title");
-  const context = stringValue(parsed.values, "context");
-  const decision = stringValue(parsed.values, "decision");
-  const consequences = stringValue(parsed.values, "consequences");
-  const missing = missingFields({ project, title, context, decision, consequences });
-  if (missing) return missing;
-  if (project === undefined || title === undefined || context === undefined || decision === undefined || consequences === undefined) return { code: 1 };
-
-  return createWithSupersede({ type: "decision", project, dedupQuery: `${title} ${context} ${decision}`, fields: { title, context, decision, consequences }, rawValues: parsed.values });
-}
-
-async function createDoc(args: string[]): Promise<CliResult> {
-  const parsed = parseCommand(args, ["title", "project", "type", "category", "tags", "source-url", "body", "force-new", "related-to", "supersedes"]);
-  const project = await resolveProject(parsed);
-  const title = stringValue(parsed.values, "title");
-  const docType = stringValue(parsed.values, "type");
-  const missing = missingFields({ project, title, type: docType });
-  if (missing) return missing;
-  if (project === undefined || title === undefined || docType === undefined) return { code: 1 };
-
+  // Category is a doc subfolder, not a schema field: validate it, and for doc
+  // default it from --type. Ignored by kinds that don't nest (only doc does).
   const explicitCategory = stringValue(parsed.values, "category");
   if (explicitCategory !== undefined && !isDocCategory(explicitCategory)) {
     console.error(`unknown category: ${explicitCategory}`);
     console.error(`category must be one of: ${DOC_CATEGORIES.join(", ")}`);
     return { code: 1 };
   }
-  const category = explicitCategory ?? defaultCategoryForDocType(docType);
+  const category = explicitCategory ?? (kind === "doc" ? defaultCategoryForDocType(stringValue(parsed.values, "type")) : undefined);
 
-  const fields: Record<string, unknown> = { title, type: docType };
-  const tags = stringValue(parsed.values, "tags");
-  if (tags !== undefined) fields.tags = tags.split(",").map((t) => t.trim());
-  const sourceUrl = stringValue(parsed.values, "source-url");
-  if (sourceUrl !== undefined) fields.source_url = sourceUrl;
-
+  // Dedup query: title plus every authored body section the user supplied, in
+  // template order — a uniform signal across kinds (no per-kind composition).
+  const title = stringValue(parsed.values, "title");
+  const dedupQuery = [title, ...placeholders.map((p) => fields[p])]
+    .filter((v): v is string => typeof v === "string" && v.length > 0)
+    .join(" ");
   const body = await stdinOrValue(stringValue(parsed.values, "body"));
-  return createWithSupersede({ type: "doc", project, dedupQuery: `${title} ${docType}`, fields, rawValues: parsed.values, category, body });
+  return createWithSupersede({
+    type: kind,
+    project,
+    dedupQuery,
+    fields,
+    rawValues: parsed.values,
+    category,
+    body,
+  });
 }
 
 type CreateRequest = {
@@ -263,12 +281,6 @@ function missingFields(fields: Record<string, unknown>): CliResult | null {
     return { code: 1 };
   }
   return null;
-}
-
-function stringListValue(value: string | string[] | boolean | undefined): string[] {
-  if (Array.isArray(value)) return value;
-  if (typeof value === "string") return [value];
-  return [];
 }
 
 async function stdinOrValue(value: string | undefined): Promise<string | undefined> {

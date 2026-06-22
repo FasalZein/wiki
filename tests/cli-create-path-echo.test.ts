@@ -54,4 +54,15 @@ describe("create echoes destination path", () => {
     const all = cap.out() + cap.err();
     expect(all).toContain("projects/p/docs/runbooks/DOC-0001");
   });
+
+  test("create handover works through the generic config-driven path (ADR-0035)", async () => {
+    // handover never had a bespoke create fn; it is creatable purely from its
+    // wiki.json entry + template, proving the full collapse needs no per-kind code.
+    const cap = capture();
+    const result = await dispatch(["create", "handover", "--project", "p", "--phase", "plan"]);
+    cap.restore();
+    expect(result.code).toBe(0);
+    const all = cap.out() + cap.err();
+    expect(all).toContain("projects/p/handovers/HANDOVER-0001");
+  });
 });

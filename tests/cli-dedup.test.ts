@@ -18,7 +18,7 @@ describe("advisory dedup", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("ADR-0001\n");
     expect(await readFile(fixture.stateFile, "utf8")).toContain(
-      "query Use SQLite Need a durable local index. Use SQLite for local persistence. --json --collection wiki-v2\n",
+      "query Use SQLite Need a durable local index. Use SQLite for local persistence. Keep migrations small and explicit. --json --collection wiki-v2\n",
     );
   });
 
