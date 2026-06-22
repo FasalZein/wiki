@@ -1,0 +1,17 @@
+[
+  {
+    "id": 1,
+    "text": "PRD↔slice backlink: create slice --parent-prd appends slice ID to parent PRD slices list (comma-safe, dedup, create-if-absent, via store setFields not Obsidian) + temp-vault test",
+    "done": true
+  },
+  {
+    "id": 2,
+    "text": "Trim templates/handoff.md to de-workflowed schema (drop next_phase/active_prd/active_slices/suggested_skills, red/green/review/close from phase enum, banner, Templater block)",
+    "done": false
+  },
+  {
+    "id": 3,
+    "text": "Reconcile stale vault slice statuses: close verifiably-shipped slices (0050/0057/0059/0060/0069/0070) via wiki set; leave obsolete pre-pivot slices",
+    "done": false
+  }
+]

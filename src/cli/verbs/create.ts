@@ -16,6 +16,7 @@ import {
   createArtifact,
   readArtifact,
   removeArtifactFile,
+  setField,
   supersedeArtifact,
 } from "../../artifacts/store";
 import { authoredSections } from "../../artifacts/body";
@@ -177,6 +178,7 @@ async function createWithSupersede(req: CreateRequest): Promise<CliResult> {
       if (override.kind === "supersedes") {
         await supersedeArtifact({ type, vaultRoot, project, id: override.id, by: artifact.id });
       }
+      await backlinkParentPrd(type, vaultRoot, project, artifact.id, fields);
     } catch (postWriteError) {
       await removeArtifactFile(artifact.path);
       throw postWriteError;
@@ -247,6 +249,30 @@ async function advisoryDedup(type: TemplateType, project: string, projectPath: s
     }
     throw error;
   }
+}
+
+/**
+ * SLICE-0054 backlink: when a slice is created with --parent-prd, append its id to
+ * the parent PRD's `slices` list. `slices` is in NON_FLAG_FIELDS, so create never
+ * populates it from the slice side — this is the only place the backlink is written.
+ * Dedup-safe (no double-add), create-if-absent (setField writes the list whether or
+ * not the PRD already had one). Runs in createWithSupersede's rollback try block, so
+ * a missing/invalid parent PRD rolls back the slice rather than orphaning it.
+ */
+async function backlinkParentPrd(
+  type: TemplateType,
+  vaultRoot: string,
+  project: string,
+  sliceId: string,
+  fields: Record<string, unknown>,
+): Promise<void> {
+  if (type !== "slice") return;
+  const parentPrd = fields.parent_prd;
+  if (typeof parentPrd !== "string" || parentPrd.length === 0) return;
+  const prd = await readArtifact({ type: "prd", vaultRoot, project, id: parentPrd });
+  const current = Array.isArray(prd.fields.slices) ? prd.fields.slices.map(String) : [];
+  if (current.includes(sliceId)) return;
+  await setField({ type: "prd", vaultRoot, project, id: parentPrd, field: "slices", value: [...current, sliceId] });
 }
 
 function parseOverride(values: Record<string, string | string[] | boolean | undefined>) {

@@ -48,6 +48,37 @@ describe("slice CLI", () => {
     expect(file).not.toContain("parent_prd:");
   });
 
+  test("slice create backlinks its id into the parent PRD slices list, without clobbering", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    await seedPrd(vaultRoot);
+
+    const first = await runWiki(createArgs(), vaultRoot);
+    expect(first.exitCode).toBe(0);
+    const second = await runWiki(
+      ["create", "slice", "--title", "Second slice authoring", "--project", "wiki-v2", "--parent-prd", "PRD-0001"],
+      vaultRoot,
+    );
+    expect(second.exitCode).toBe(0);
+
+    const prd = matter(await readPrd(vaultRoot));
+    expect(prd.data.slices).toEqual(["SLICE-0001", "SLICE-0002"]);
+  });
+
+  test("backlink creates the slices field when the parent PRD lacks one", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    await seedPrd(vaultRoot);
+    // Strip the default `slices: []` to exercise the create-if-absent path.
+    const prdPath = join(vaultRoot, "projects", "wiki-v2", "prds", "PRD-0001-core-wiki-cli.md");
+    const stripped = (await readFile(prdPath, "utf8")).replace(/^slices:.*$\n/m, "");
+    await writeFile(prdPath, stripped);
+
+    const result = await runWiki(createArgs(), vaultRoot);
+    expect(result.exitCode).toBe(0);
+
+    const prd = matter(await readPrd(vaultRoot));
+    expect(prd.data.slices).toEqual(["SLICE-0001"]);
+  });
+
   test("slice create exits 1 and names a missing title", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
     await seedPrd(vaultRoot);
@@ -170,4 +201,8 @@ async function createFixtureVault(project: string): Promise<string> {
 
 async function readSlice(vaultRoot: string, id: string): Promise<string> {
   return readFile(join(vaultRoot, "projects", "wiki-v2", "slices", `${id}-build-slice-authoring.md`), "utf8");
+}
+
+async function readPrd(vaultRoot: string): Promise<string> {
+  return readFile(join(vaultRoot, "projects", "wiki-v2", "prds", "PRD-0001-core-wiki-cli.md"), "utf8");
 }
