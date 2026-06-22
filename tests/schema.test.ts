@@ -146,4 +146,27 @@ describe("template schemas", () => {
       errors: [{ field: "id", reason: "pattern mismatch", expected: "SLICE-\\d{3,}" }],
     });
   });
+
+  test("treats a null optional field as absent, not a type mismatch", () => {
+    const schema: Schema = {
+      template: "synthetic",
+      version: 1,
+      fields: [{ name: "note", type: "string", required: false, constraints: {} }],
+    };
+
+    expect(validate(schema, { note: null })).toEqual({ ok: true, value: { note: null } });
+  });
+
+  test("reports a null required field as required, not a type mismatch", () => {
+    const schema: Schema = {
+      template: "synthetic",
+      version: 1,
+      fields: [{ name: "note", type: "string", required: true, constraints: {} }],
+    };
+
+    expect(validate(schema, { note: null })).toEqual({
+      ok: false,
+      errors: [{ field: "note", reason: "required", expected: "string" }],
+    });
+  });
 });

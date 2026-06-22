@@ -196,6 +196,26 @@ describe("artifact store", () => {
     expect(after.body).toBe(before.body);
   });
 
+  test("sets an unrelated field even when an optional field is blank/null on disk", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    const created = await createArtifact({ type: "decision", vaultRoot, project: "wiki-v2", fields: decisionFields() });
+
+    // Simulate an Obsidian-authored blank key: gray-matter round-trips `related_prd:` as null.
+    const raw = await readFile(created.path, "utf8");
+    await writeFile(created.path, raw.replace("status:", "related_prd:\nstatus:"));
+
+    const after = await setField({
+      type: "decision",
+      vaultRoot,
+      project: "wiki-v2",
+      id: "ADR-0001",
+      field: "status",
+      value: "proposed",
+    });
+
+    expect(after.fields.status).toBe("proposed");
+  });
+
   test("rejects setting a field not declared by the template schema", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
     await createArtifact({ type: "decision", vaultRoot, project: "wiki-v2", fields: decisionFields() });

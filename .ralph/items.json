@@ -22,7 +22,7 @@
   {
     "id": 5,
     "text": "Treat null frontmatter value as absent in validate (coalesce null->undefined). Plan: .ralph/audit-plans/005-null-field-validate.md",
-    "done": false
+    "done": true
   },
   {
     "id": 6,

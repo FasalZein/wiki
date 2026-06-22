@@ -7,7 +7,7 @@ export function validate(
   const errors: ValidationError[] = [];
 
   for (const field of schema.fields) {
-    const value = input[field.name];
+    const value = input[field.name] ?? undefined; // ponytail: gray-matter yields null for a blank key; treat blank as absent
     if (field.required && value === undefined) {
       errors.push({ field: field.name, reason: "required", expected: field.type });
       continue;

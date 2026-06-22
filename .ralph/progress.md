@@ -26,3 +26,8 @@
 - `src/integrations/qmd.ts parseQmdResults`: wrapped `JSON.parse` in try/catch → throws `QmdError` (truncated to 200 chars) so non-JSON stdout reaches the existing graceful-degradation catches instead of crashing create/sync. Exported the function for direct unit testing. Rest unchanged.
 - Test (`tests/qmd-parse.test.ts`): valid array, file/filename fallbacks + none-dropped, score string-vs-number + text snippet fallback, non-array→[], malformed→throws QmdError.
 - Verify: build + tsc clean, 250 pass / 0 fail.
+
+## Item 5 — null-field validation (done)
+- `src/schema/validate.ts`: `const value = input[field.name] ?? undefined` — coalesces null/undefined only (not 0/false/""), so a blank Obsidian key (gray-matter → null) is treated as absent: blank optional passes, blank required → "required" (not "type mismatch"). Matched plan excerpt exactly. matchesType untouched; return still passes `input` through (null preserved on disk).
+- Tests: `tests/schema.test.ts` — null optional → ok:true; null required → ok:false reason "required". `tests/artifacts.test.ts` — inject blank `related_prd:` into a decision's frontmatter, then setField unrelated `status` succeeds (would throw "type mismatch" pre-fix).
+- Verify: build + tsc clean, 253 pass / 0 fail.
