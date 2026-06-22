@@ -9,11 +9,11 @@ export function validate(
   for (const field of schema.fields) {
     const value = input[field.name];
     if (field.required && value === undefined) {
-      errors.push({ field: field.name, reason: "required", expected: expectedType(field) });
+      errors.push({ field: field.name, reason: "required", expected: field.type });
       continue;
     }
     if (value !== undefined && !matchesType(field, value)) {
-      errors.push({ field: field.name, reason: "type mismatch", expected: expectedType(field) });
+      errors.push({ field: field.name, reason: "type mismatch", expected: field.type });
       continue;
     }
     if (
@@ -75,8 +75,4 @@ function matchesType(field: FieldDef, value: unknown): boolean {
 
 function isStringLike(field: FieldDef): boolean {
   return field.type === "string" || field.type === "text" || field.type === "link" || field.type === "file_ref";
-}
-
-function expectedType(field: FieldDef): string {
-  return field.type;
 }

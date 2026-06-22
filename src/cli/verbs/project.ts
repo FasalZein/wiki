@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import matter from "gray-matter";
 
 import { projectPath } from "../../artifacts/paths";
-import { ARTIFACT_FOLDERS, STRUCTURAL_FOLDERS } from "../../artifacts/registry";
+import { ARTIFACT_FOLDERS } from "../../artifacts/registry";
 import { listProjects } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import { ensureCollection } from "../../integrations/qmd";
@@ -68,8 +68,7 @@ async function createProject(args: string[]): Promise<CliResult> {
   }
 
   // Create directory structure
-  const dirs = [...ARTIFACT_FOLDERS, ...STRUCTURAL_FOLDERS];
-  await Promise.all(dirs.map((dir) => mkdir(join(projPath, dir), { recursive: true })));
+  await Promise.all(ARTIFACT_FOLDERS.map((dir) => mkdir(join(projPath, dir), { recursive: true })));
 
   const today = new Date().toISOString().slice(0, 10);
 

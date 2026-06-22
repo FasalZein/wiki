@@ -4,6 +4,7 @@ import { join, relative } from "node:path";
 import matter from "gray-matter";
 
 import { orderBySchema } from "../../artifacts/render";
+import { FOLDER_TO_TYPE } from "../../artifacts/registry";
 import { assertProjectStructure } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import { loadTemplate, type TemplateType } from "../../schema/load";
@@ -117,7 +118,7 @@ const DIAGNOSTICS: Diagnostic[] = [
 
 function artifactTypeOf(file: string): TemplateType | undefined {
   const folder = file.split("/")[2];
-  return folder === undefined ? undefined : TYPE_BY_FOLDER[folder];
+  return folder === undefined ? undefined : FOLDER_TO_TYPE[folder];
 }
 
 function diagnoseIdentity(content: string, file: string): string[] {
@@ -343,20 +344,6 @@ function fixClosedSliceTodos(content: string, file: string): CategoryResult {
   };
 }
 
-/**
- * Frontmatter shape (SLICE-0059): aliases backfilled to [<ID>] where missing,
- * fields in schema declaration order (id first), unknown fields preserved
- * after the schema fields. Skips files outside artifact folders and files
- * without an id (pre-schema artifacts are flag-only territory).
- */
-const TYPE_BY_FOLDER: Record<string, TemplateType> = {
-  prds: "prd",
-  slices: "slice",
-  adrs: "decision",
-  handovers: "handover",
-  docs: "doc",
-};
-
 const schemaCache = new Map<TemplateType, Promise<Schema>>();
 
 function schemaFor(type: TemplateType): Promise<Schema> {
@@ -368,10 +355,16 @@ function schemaFor(type: TemplateType): Promise<Schema> {
   return cached;
 }
 
+/**
+ * Frontmatter shape (SLICE-0059): aliases backfilled to [<ID>] where missing,
+ * fields in schema declaration order (id first), unknown fields preserved
+ * after the schema fields. Skips files outside artifact folders and files
+ * without an id (pre-schema artifacts are flag-only territory).
+ */
 async function fixFrontmatterShape(content: string, file: string): Promise<CategoryResult> {
   const noop = { labels: [], fixed: content };
   const folder = file.split("/")[2];
-  const type = folder === undefined ? undefined : TYPE_BY_FOLDER[folder];
+  const type = folder === undefined ? undefined : FOLDER_TO_TYPE[folder];
   if (type === undefined || !content.startsWith("---")) return noop;
 
   let parsed: matter.GrayMatterFile<string>;

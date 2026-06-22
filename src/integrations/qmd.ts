@@ -18,10 +18,6 @@ export type QmdResult = {
 };
 
 export class QmdError extends Error {
-  constructor(message: string) {
-    super(message);
-  }
-
   /**
    * One-line summary for CLI output: the first `Error:` line if present, else the
    * first non-empty line. qmd surfaces native-module/dlopen failures as a multi-line

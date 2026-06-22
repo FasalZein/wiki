@@ -86,9 +86,6 @@ export function defaultCategoryForDocType(docType: string | undefined): DocCateg
   }
 }
 
-/** Named non-artifact folders scaffolded at init. */
-export const STRUCTURAL_FOLDERS: readonly string[] = [];
-
 /** Reverse map (folder name -> artifact type) for path-based type inference. */
 export const FOLDER_TO_TYPE: Readonly<Record<string, TemplateType>> = Object.fromEntries(
   (Object.entries(ARTIFACTS) as [TemplateType, ArtifactSpec][]).map(([type, spec]) => [spec.folder, type]),
