@@ -5,6 +5,6 @@
     "slice":    { "prefix": "SLICE",    "folder": "slices",    "dedup": true,  "skill": "to-slices" },
     "decision": { "prefix": "ADR",      "folder": "adrs",      "dedup": true,  "skill": "grill-with-docs" },
     "doc":      { "prefix": "DOC",      "folder": "docs",      "dedup": true },
-    "handoff": { "prefix": "HANDOFF", "folder": "handoffs", "dedup": false, "skill": "handoff" }
+    "handoff":  { "prefix": "HANDOFF",  "folder": "handoffs",  "dedup": false, "skill": "handoff" }
   }
 }
