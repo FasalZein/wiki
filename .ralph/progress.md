@@ -37,3 +37,10 @@
 - Part B: fmt + sync now run the status.ts pattern (loadProjectConfig → ProjectConfigError → projectErrorMessage + exit 10) for a nonexistent `--project`; the "no project at all" terse exit-1 path unchanged. fmt keeps assertProjectStructure after the config check; sync's pre-flight is added before the docs gate.
 - Test: cli-fmt.test.ts — nonexistent `--project` exits 10 and lists wiki-v2.
 - Verify: build + tsc clean, 254 pass / 0 fail.
+
+## Item 7 — de-workflow dead-code removal (done)
+- 7a `test_command`: removed `ProjectConfig.test_command` member + loader line (config/project.ts); removed `testCommand` flag/var, dropped it from `_project.md` template + both console.error lines + comments (cli/verbs/project.ts); dropped `--test-command` from usage string/flags/example (cli/usage.ts). Existing tests that embed `test_command` in fixture frontmatter are harmless (unknown keys ignored) — none assert on create output, so left them.
+- 7b `appendField`: deleted the function + `AppendFieldInput` type (store.ts); removed its test block + import in tests/artifacts.test.ts.
+- 7c `research.sources`: removed `WikiConfig.research` member (types.ts); removed `sources`/`defaultResearchSources`/now-unused `isStringArray` from config.ts. Updated tests/config.test.ts (2 cases) to expect `{ vault: { root } }` only.
+- 7d deleted orphan tests/js-yaml.d.ts.
+- Verify: build + tsc clean, 253 pass / 0 fail (−1 from removed appendField test).

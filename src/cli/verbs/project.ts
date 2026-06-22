@@ -47,10 +47,9 @@ async function createProject(args: string[]): Promise<CliResult> {
     console.error("missing project name");
     return { code: 1 };
   }
-  // repo binds the project to a code repo (default: cwd, the usual case); test_command
-  // is recorded for reference. Both are overridable via flags and editable in _project.md.
+  // repo binds the project to a code repo (default: cwd, the usual case);
+  // overridable via flag and editable in _project.md.
   const repo = stringValue(parsed.values, "repo") ?? process.cwd();
-  const testCommand = stringValue(parsed.values, "test-command") ?? "bun test";
 
   const vaultRoot = await getVaultRoot();
   const projPath = projectPath(vaultRoot, name);
@@ -72,8 +71,8 @@ async function createProject(args: string[]): Promise<CliResult> {
 
   const today = new Date().toISOString().slice(0, 10);
 
-  // Create _project.md (repo + test_command recorded for reference).
-  const projectContent = `---\nproject: ${name}\nstatus: planning\ncreated: ${today}\nrepo: ${repo}\ntest_command: ${testCommand}\n---\n# ${name}\n`;
+  // Create _project.md (repo recorded for reference).
+  const projectContent = `---\nproject: ${name}\nstatus: planning\ncreated: ${today}\nrepo: ${repo}\n---\n# ${name}\n`;
   await Bun.write(join(projPath, "_project.md"), projectContent);
 
   // Try to register QMD collection (best-effort)
@@ -84,8 +83,8 @@ async function createProject(args: string[]): Promise<CliResult> {
     // QMD not available — proceed without it
   }
 
-  console.error(`created project ${name} (repo: ${repo}, test_command: ${testCommand})`);
-  console.error(`edit projects/${name}/_project.md to change repo/test_command; then: wiki project link --project ${name}`);
+  console.error(`created project ${name} (repo: ${repo})`);
+  console.error(`edit projects/${name}/_project.md to change repo; then: wiki project link --project ${name}`);
   console.log(projPath);
   return { code: 0 };
 }

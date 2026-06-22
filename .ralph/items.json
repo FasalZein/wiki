@@ -32,7 +32,7 @@
   {
     "id": 7,
     "text": "Remove de-workflow dead code (test_command flag/field/usage, appendField+AppendFieldInput+test, research.sources, js-yaml.d.ts). Plan: .ralph/audit-plans/007-deworkflow-dead-code.md",
-    "done": false
+    "done": true
   },
   {
     "id": 8,

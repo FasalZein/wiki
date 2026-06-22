@@ -4,13 +4,6 @@ import { parse } from "smol-toml";
 
 import type { WikiConfig } from "./types";
 
-const defaultResearchSources = [
-  "~/.pi/artifacts/research",
-  "~/.codex/artifacts/research",
-  "~/.claude/artifacts/research",
-  "~/Research",
-];
-
 export async function getConfig(): Promise<WikiConfig> {
   const configPath = join(homeDirectory(), ".config", "wiki", "config.toml");
   let contents: string;
@@ -28,18 +21,14 @@ export async function getConfig(): Promise<WikiConfig> {
     throw new Error("Config is missing vault.root");
   }
 
-  const sources = isRecord(parsed.research) && isStringArray(parsed.research.sources) ? parsed.research.sources : [];
-
   return {
     vault: { root: parsed.vault.root },
-    research: { sources },
   };
 }
 
 function defaultConfig(): WikiConfig {
   return {
     vault: { root: process.env.KNOWLEDGE_VAULT_ROOT ?? `${homeDirectory()}/Knowledge` },
-    research: { sources: defaultResearchSources },
   };
 }
 
@@ -53,10 +42,6 @@ function homeDirectory(): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item): item is string => typeof item === "string");
 }
 
 function isFileNotFound(error: unknown): boolean {

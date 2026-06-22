@@ -6,7 +6,6 @@ import { ARTIFACT_FOLDERS } from "../artifacts/registry";
 
 export type ProjectConfig = {
   repo: string;
-  test_command: string;
   qmd_command: string;
   research_path: string;
   dedup_threshold_weak: number;
@@ -65,7 +64,6 @@ export async function loadProjectConfig(projectPath: string): Promise<ProjectCon
   const data = matter(content).data;
   return {
     repo: isNonEmptyString(data.repo) ? data.repo : projectPath,
-    test_command: isNonEmptyString(data.test_command) ? data.test_command : "bun test",
     qmd_command: isNonEmptyString(data.qmd_command) ? data.qmd_command : "qmd",
     research_path: expandHome(isNonEmptyString(data.research_path) ? data.research_path : "~/.pi/artifacts/research"),
     dedup_threshold_weak: numberValue(data.dedup_threshold_weak, 0.7),

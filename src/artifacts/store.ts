@@ -45,8 +45,6 @@ export type RelocateArtifactInput = ReadArtifactInput & {
   category?: DocCategory;
 };
 
-export type AppendFieldInput = SetFieldInput;
-
 export type Artifact = {
   id: string;
   path: string;
@@ -133,21 +131,6 @@ export async function supersedeArtifact(input: ReadArtifactInput & { by: string 
 /** Delete an artifact file by absolute path (rollback for a half-applied create). */
 export async function removeArtifactFile(path: string): Promise<void> {
   await rm(path, { force: true });
-}
-
-export async function appendField(input: AppendFieldInput): Promise<Artifact> {
-  const schema = await loadTemplate(input.type);
-  const field = schema.fields.find((candidate) => candidate.name === input.field);
-  if (field === undefined || (field.type !== "list" && field.type !== "link_list")) {
-    throw new ArtifactValidationError([{ field: input.field, reason: "not a list field", expected: "list" }]);
-  }
-  const existing = await readArtifact(input);
-  const current = existing.fields[input.field];
-  const list = Array.isArray(current) ? current : [];
-  return writeFields(input, existing, {
-    ...existing.fields,
-    [input.field]: [...list, input.value],
-  });
 }
 
 export async function createArtifact(input: CreateArtifactInput): Promise<Artifact> {
