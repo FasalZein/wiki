@@ -37,6 +37,6 @@
   {
     "id": 8,
     "text": "Fix the test script footgun (package.json: bun test -> bun test tests/). Plan: .ralph/audit-plans/008-test-script-footgun.md",
-    "done": false
+    "done": true
   }
 ]

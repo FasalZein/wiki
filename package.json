@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "bun --watch src/cli.ts",
     "build": "bun build src/cli.ts --outdir dist --target bun",
-    "test": "bun test",
+    "test": "bun test tests/",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

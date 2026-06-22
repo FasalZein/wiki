@@ -44,3 +44,7 @@
 - 7c `research.sources`: removed `WikiConfig.research` member (types.ts); removed `sources`/`defaultResearchSources`/now-unused `isStringArray` from config.ts. Updated tests/config.test.ts (2 cases) to expect `{ vault: { root } }` only.
 - 7d deleted orphan tests/js-yaml.d.ts.
 - Verify: build + tsc clean, 253 pass / 0 fail (−1 from removed appendField test).
+
+## Item 8 — test script footgun (done)
+- `package.json:12`: `"test": "bun test"` → `"test": "bun test tests/"` so `bun run test` matches the documented gate and doesn't descend into bundled `qmd/`.
+- Verify: build + tsc clean, 253 pass / 0 fail.
