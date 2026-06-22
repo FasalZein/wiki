@@ -28,11 +28,12 @@ project without `--project`; `wiki session show` / `wiki session clear` manage i
 Creation is one-shot: pass the authored body via `--body -` (stdin) so the
 artifact is complete in a single schema-validated command.
 
-- `wiki create prd|slice|decision|doc …` — `wiki create <type> --help` for fields
-  (`decision` = ADR). Docs land in a locked category subfolder.
+- `wiki create <kind> …` — kinds come from the vault's `wiki.json`; `wiki create --help`
+  lists them and `wiki create <kind> --help` gives the fields (`decision` = ADR). Docs
+  land in a locked category subfolder.
 
-Anything worth remembering — a bug's root cause, a decision, a gotcha — goes in as
-an artifact so the next agent retrieves it instead of re-deriving it. Repos stay clean.
+Anything worth remembering — a bug's root cause, a decision, a gotcha — goes in as an
+artifact, not just this chat, so it outlives the session. Repos stay clean.
 
 ## Mutating artifacts after creation
 
