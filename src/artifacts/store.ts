@@ -8,7 +8,7 @@ import { validate } from "../schema/validate";
 import type { NormalizedRecord, Schema, ValidationError } from "../schema/types";
 import { type DocCategory, isDocCategory } from "./registry";
 import { nextId } from "./id";
-import { artifactDirectory } from "./paths";
+import { artifactDirectory, assertSafeSegment } from "./paths";
 import { applyDefaults, orderBySchema, renderArtifact } from "./render";
 
 export type CreateArtifactInput = {
@@ -200,6 +200,7 @@ export async function createArtifact(input: CreateArtifactInput): Promise<Artifa
  * [[ID]] links and id-based reads keep resolving. The old file is removed.
  */
 export async function relocateArtifact(input: RelocateArtifactInput): Promise<Artifact> {
+  assertSafeSegment(input.id, "artifact id");
   const existing = await readArtifact(input);
   const nextTitle = input.title ?? (typeof existing.fields.title === "string" ? existing.fields.title : input.id);
 
@@ -229,6 +230,12 @@ export async function relocateArtifact(input: RelocateArtifactInput): Promise<Ar
   const destination = category !== undefined && category.length > 0
     ? join(directory, category, fileName)
     : join(directory, fileName);
+
+  if (destination !== existing.path && (await Bun.file(destination).exists())) {
+    throw new ArtifactValidationError([
+      { field: "id", reason: `destination already exists: ${destination}` },
+    ]);
+  }
 
   const content = matter.stringify(existing.body, { ...fields, updated: new Date().toISOString().slice(0, 10) });
   await writeArtifact(destination, content);
@@ -286,6 +293,7 @@ function artifactPath(type: TemplateType, vaultRoot: string, project: string, id
 }
 
 async function resolveArtifactPath(type: TemplateType, vaultRoot: string, project: string, id: string): Promise<string> {
+  assertSafeSegment(id, "artifact id");
   const directory = artifactDirectory(type, vaultRoot, project);
   const exact = join(directory, `${id}.md`);
   try {

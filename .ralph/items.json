@@ -1,17 +1,42 @@
 [
   {
     "id": 1,
-    "text": "PRD↔slice backlink: create slice --parent-prd appends slice ID to parent PRD slices list (comma-safe, dedup, create-if-absent, via store setFields not Obsidian) + temp-vault test",
+    "text": "Path-traversal containment for --project and artifact id (assertSafeSegment in paths.ts; validate id in store.ts; refuse colliding relocate). Plan: .ralph/audit-plans/001-path-containment.md",
     "done": true
   },
   {
     "id": 2,
-    "text": "Trim templates/handoff.md to de-workflowed schema (drop next_phase/active_prd/active_slices/suggested_skills, red/green/review/close from phase enum, banner, Templater block)",
-    "done": true
+    "text": "Roll back the supersede mutation on a failed create (pre-flight parent_prd read + restore superseded artifact in catch). Plan: .ralph/audit-plans/002-supersede-rollback.md",
+    "done": false
   },
   {
     "id": 3,
-    "text": "Reconcile stale vault slice statuses: close verifiably-shipped slices (0050/0057/0059/0060/0069/0070) via wiki set; leave obsolete pre-pivot slices",
-    "done": true
+    "text": "Collision-safe ID allocation (exclusive 'wx' write + bounded retry in createArtifact). Plan: .ralph/audit-plans/003-nextid-race.md",
+    "done": false
+  },
+  {
+    "id": 4,
+    "text": "Guard the qmd JSON.parse -> QmdError + export & unit-test parseQmdResults. Plan: .ralph/audit-plans/004-qmd-parse-hardening.md",
+    "done": false
+  },
+  {
+    "id": 5,
+    "text": "Treat null frontmatter value as absent in validate (coalesce null->undefined). Plan: .ralph/audit-plans/005-null-field-validate.md",
+    "done": false
+  },
+  {
+    "id": 6,
+    "text": "Consolidate project resolution (projectPath() at 9 sites; converge fmt/sync onto loadProjectConfig+projectErrorMessage+exit-10). Plan: .ralph/audit-plans/006-project-resolution-consolidation.md",
+    "done": false
+  },
+  {
+    "id": 7,
+    "text": "Remove de-workflow dead code (test_command flag/field/usage, appendField+AppendFieldInput+test, research.sources, js-yaml.d.ts). Plan: .ralph/audit-plans/007-deworkflow-dead-code.md",
+    "done": false
+  },
+  {
+    "id": 8,
+    "text": "Fix the test script footgun (package.json: bun test -> bun test tests/). Plan: .ralph/audit-plans/008-test-script-footgun.md",
+    "done": false
   }
 ]
