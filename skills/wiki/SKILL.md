@@ -17,11 +17,11 @@ owns all command syntax; never restate flags here — run `wiki <verb> --help`.
    away — retrieve it instead of re-deriving it.
 2. `wiki <verb> --help` for exact usage before any call. `wiki --help` lists verbs.
 
-Cold start — no `<!-- wiki:begin … -->` pointer block in AGENTS.md/CLAUDE.md and
-no session: check `wiki project list`, then bind the repo with `wiki project link`
-(create the project first if it doesn't exist). Never guess a project name. Bind a
-session with `wiki session start --project <name>` so later commands resolve the
-project without `--project`; `wiki session show` / `wiki session clear` manage it.
+Cold start — no `<!-- wiki:begin … -->` pointer block in AGENTS.md/CLAUDE.md:
+check `wiki project list`, then bind the repo with `wiki project link --project <name>`
+(create the project first if it doesn't exist). Never guess a project name. The block
+`wiki project link` stamps is the single repo→project binding — once linked, later
+commands resolve `--project` from it automatically.
 
 ## Writing artifacts
 
