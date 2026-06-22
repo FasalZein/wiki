@@ -47,12 +47,8 @@ describe("template schemas", () => {
       id: "HANDOFF-0001",
       project: "wiki-v2",
       session_date: "2026-05-25",
-      phase: "red",
-      next_phase: "green",
-      active_prd: "PRD-001",
-      active_slices: ["SLICE-001"],
+      phase: "slice",
       decisions_made: ["ADR-0001"],
-      suggested_skills: ["/wiki", "/tdd"],
       status: "open",
       created: "2026-05-25",
     };

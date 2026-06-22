@@ -7,7 +7,7 @@
   {
     "id": 2,
     "text": "Trim templates/handoff.md to de-workflowed schema (drop next_phase/active_prd/active_slices/suggested_skills, red/green/review/close from phase enum, banner, Templater block)",
-    "done": false
+    "done": true
   },
   {
     "id": 3,
