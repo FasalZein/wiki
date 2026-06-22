@@ -7,7 +7,7 @@
   {
     "id": 2,
     "text": "Roll back the supersede mutation on a failed create (pre-flight parent_prd read + restore superseded artifact in catch). Plan: .ralph/audit-plans/002-supersede-rollback.md",
-    "done": false
+    "done": true
   },
   {
     "id": 3,

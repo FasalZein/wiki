@@ -158,8 +158,18 @@ async function createWithSupersede(req: CreateRequest): Promise<CliResult> {
   const projectPath = join(vaultRoot, "projects", project);
   await assertProjectStructure(projectPath);
   try {
-    if (override.kind === "supersedes") {
-      await readArtifact({ type, vaultRoot, project, id: override.id });
+    // Snapshot the to-be-superseded artifact (single read) so a post-write
+    // failure can byte-restore it. setFields can't undo the supersede: it merges
+    // onto the *current* (already-mutated) frontmatter, so the added
+    // `superseded_by` would survive a field-level revert.
+    const supersededBefore = override.kind === "supersedes"
+      ? await readArtifact({ type, vaultRoot, project, id: override.id })
+      : null;
+    const supersededSnapshot = supersededBefore ? await Bun.file(supersededBefore.path).text() : null;
+    // Pre-flight the parent PRD before any write, mirroring backlinkParentPrd's
+    // guard, so a missing/garbage --parent-prd fails before supersede runs.
+    if (type === "slice" && typeof fields.parent_prd === "string" && fields.parent_prd.length > 0) {
+      await readArtifact({ type: "prd", vaultRoot, project, id: fields.parent_prd });
     }
     const dedupBlock = await advisoryDedup(type, project, projectPath, dedupQuery, override);
     if (dedupBlock !== null) return dedupBlock;
@@ -173,7 +183,8 @@ async function createWithSupersede(req: CreateRequest): Promise<CliResult> {
     });
     // Post-write steps mutate *other* artifacts and can fail (e.g. supersede a
     // type without a `superseded` status). If any throws, roll back the new
-    // artifact so a half-applied create never leaves an orphan (P0.2/P0.3).
+    // artifact AND restore the superseded one so a half-applied create never
+    // leaves an orphan (P0.2/P0.3).
     try {
       if (override.kind === "supersedes") {
         await supersedeArtifact({ type, vaultRoot, project, id: override.id, by: artifact.id });
@@ -181,6 +192,9 @@ async function createWithSupersede(req: CreateRequest): Promise<CliResult> {
       await backlinkParentPrd(type, vaultRoot, project, artifact.id, fields);
     } catch (postWriteError) {
       await removeArtifactFile(artifact.path);
+      if (supersededBefore && supersededSnapshot !== null) {
+        await Bun.write(supersededBefore.path, supersededSnapshot);
+      }
       throw postWriteError;
     }
     if (jsonEnabled()) {

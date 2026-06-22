@@ -181,6 +181,22 @@ describe("advisory dedup", () => {
     const remaining = await listMarkdownRecursive(join(fixture.projectPath, "docs"));
     expect(remaining.some((name) => name.startsWith("DOC-0002"))).toBe(false);
   });
+
+  test("a bad --parent-prd aborts before superseding the old slice (P0.2 pre-flight)", async () => {
+    const fixture = await createDedupFixture("wiki-v2");
+    await seedPrd(fixture);
+    const first = await runWiki([...sliceArgs(), "--force-new", "Seeding the slice that must stay un-superseded"], fixture);
+    expect(first.exitCode).toBe(0);
+
+    const result = await runWiki(["create", "slice", "--title", "Rebuild slice authoring", "--project", "wiki-v2", "--parent-prd", "PRD-9999", "--supersedes", "SLICE-0001"], fixture);
+
+    expect(result.exitCode).not.toBe(0);
+    const sliceFiles = await readdir(join(fixture.projectPath, "slices"));
+    expect(sliceFiles.some((name) => name.startsWith("SLICE-0002"))).toBe(false);
+    const oldSlice = await readFile(join(fixture.projectPath, "slices", sliceFiles.find((f) => f.startsWith("SLICE-0001"))!), "utf8");
+    expect(oldSlice).not.toContain("status: superseded");
+    expect(oldSlice).not.toContain("superseded_by:");
+  });
 });
 
 function decisionArgs(): string[] {
