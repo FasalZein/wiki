@@ -21,3 +21,8 @@
 - DEVIATION from plan: plan kept `writeArtifact` (Bun.write). node `writeFile` does NOT auto-mkdir parents like Bun.write, so added `mkdir(dirname(path), { recursive: true })` before the exclusive write. `relocateArtifact`/`writeFields` untouched (keep overwrite semantics).
 - Test (`tests/id-generation.test.ts`): two concurrent `createArtifact` of same type via Promise.all → distinct ids, both files exist.
 - Verify: build + tsc clean, 245 pass / 0 fail.
+
+## Item 4 — qmd JSON.parse hardening (done)
+- `src/integrations/qmd.ts parseQmdResults`: wrapped `JSON.parse` in try/catch → throws `QmdError` (truncated to 200 chars) so non-JSON stdout reaches the existing graceful-degradation catches instead of crashing create/sync. Exported the function for direct unit testing. Rest unchanged.
+- Test (`tests/qmd-parse.test.ts`): valid array, file/filename fallbacks + none-dropped, score string-vs-number + text snippet fallback, non-array→[], malformed→throws QmdError.
+- Verify: build + tsc clean, 250 pass / 0 fail.

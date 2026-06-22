@@ -104,8 +104,13 @@ async function runQmd(command: string, args: string[]): Promise<string> {
   return stdout;
 }
 
-function parseQmdResults(stdout: string): QmdResult[] {
-  const parsed: unknown = JSON.parse(stdout);
+export function parseQmdResults(stdout: string): QmdResult[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    throw new QmdError(`qmd returned non-JSON output: ${stdout.slice(0, 200)}`);
+  }
   if (!Array.isArray(parsed)) {
     return [];
   }

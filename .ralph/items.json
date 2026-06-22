@@ -17,7 +17,7 @@
   {
     "id": 4,
     "text": "Guard the qmd JSON.parse -> QmdError + export & unit-test parseQmdResults. Plan: .ralph/audit-plans/004-qmd-parse-hardening.md",
-    "done": false
+    "done": true
   },
   {
     "id": 5,
