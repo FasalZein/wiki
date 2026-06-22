@@ -193,9 +193,10 @@ async function createWithSupersede(req: CreateRequest): Promise<CliResult> {
     } else {
       console.log(artifact.id);
       console.error(`created ${artifact.id} at ${relative(vaultRoot, artifact.path)}`);
-      // P2.2: the dedup index only refreshes on `wiki sync`, so a just-created
-      // artifact is invisible to the next dedup check until then. Remind once.
-      if (specFor(type).dedup) console.error("note: run 'wiki sync' to index this artifact for future dedup checks");
+      // SLICE-0064: no "run wiki sync" nag here. Coupling create to qmd makes
+      // every write pay a slow, fragile index call — the opposite of the lean
+      // delivery loop (PRD-0012). Indexing is owned by `wiki sync`; the wiki
+      // skill guides syncing at the right altitude.
     }
     return { code: 0 };
   } catch (error) {

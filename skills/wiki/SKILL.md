@@ -54,9 +54,8 @@ One validated `wiki` call per intent — never hand-edit frontmatter:
   Read it, then `--supersedes` (replace it), `--related-to` (adjacent), or
   `--force-new "<reason ≥30 chars>"`. A project may opt into blocking strong
   matches (`dedup_strong_blocks: true`); create then exits non-zero until you choose.
-- After creating, run `wiki sync` (the CLI reminds you) — search updates the keyword
-  index but does NOT re-embed, so new artifacts stay invisible to ranked search and
-  dedup until a sync.
+- After creating, run `wiki sync` — search updates the keyword index but does NOT
+  re-embed, so new artifacts stay invisible to ranked search and dedup until a sync.
 - Docs live only in the locked `docs/<category>/` folders (architecture, research,
   runbooks, specs, notes, legacy) — never invent a folder; an unfit doc goes in the
   closest locked one. `wiki doctor` flags rogue folders or loose files under `docs/`.

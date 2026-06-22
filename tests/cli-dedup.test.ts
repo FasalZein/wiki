@@ -22,6 +22,15 @@ describe("advisory dedup", () => {
     );
   });
 
+  test("create no longer nags to run wiki sync (SLICE-0064: lean delivery loop)", async () => {
+    const fixture = await createDedupFixture("wiki-v2");
+
+    const result = await runWiki(decisionArgs(), fixture);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).not.toContain("wiki sync");
+  });
+
   test("prd create warns on a match but proceeds (advisory dedup)", async () => {
     const fixture = await createDedupFixture("wiki-v2");
     await writeFile(

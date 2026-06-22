@@ -7,6 +7,7 @@ import { dispatch } from "../src/cli/dispatch";
 
 let vaultRoot: string;
 let prevVaultRoot: string | undefined;
+let prevQmd: string | undefined;
 
 const ARTIFACT_FOLDERS = ["prds", "slices", "adrs", "handovers", "docs", "sessions"];
 
@@ -27,11 +28,19 @@ beforeEach(async () => {
   await writeFile(join(proj, "_project.md"), "---\nproject: p\nrepo: /tmp/p\ntest_command: bun test\n---\n", "utf8");
   prevVaultRoot = process.env.KNOWLEDGE_VAULT_ROOT;
   process.env.KNOWLEDGE_VAULT_ROOT = vaultRoot;
+  // Hermetic dedup gate: a no-op qmd so these output-shape tests don't ride the
+  // real binary's ~5s embedding-model cold start (flaky against bun's 5s timeout).
+  const qmd = join(vaultRoot, "fake-qmd");
+  await writeFile(qmd, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  prevQmd = process.env.QMD_COMMAND;
+  process.env.QMD_COMMAND = qmd;
 });
 
 afterEach(async () => {
   if (prevVaultRoot === undefined) delete process.env.KNOWLEDGE_VAULT_ROOT;
   else process.env.KNOWLEDGE_VAULT_ROOT = prevVaultRoot;
+  if (prevQmd === undefined) delete process.env.QMD_COMMAND;
+  else process.env.QMD_COMMAND = prevQmd;
   await rm(vaultRoot, { recursive: true, force: true });
 });
 
