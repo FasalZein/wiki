@@ -4,7 +4,7 @@ import { join, relative } from "node:path";
 import { ARTIFACT_FOLDERS } from "../../artifacts/registry";
 import { listProjects, loadProjectConfig, ProjectConfigError, projectErrorMessage } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
-import { readSession } from "../../state/session";
+import { readLinkedProject } from "../repo-link";
 import { emitJson, jsonEnabled } from "../output";
 import type { CliResult } from "../dispatch";
 import { parseCommand, stringValue } from "../parse";
@@ -18,10 +18,10 @@ export async function handleStatus(args: string[]): Promise<CliResult> {
 
   let project = explicit;
   if (project === undefined) {
-    // No --project: prefer the current repo's session; otherwise summarize the vault.
-    const session = await readSession(process.cwd());
-    if (session === null) return summarizeVault(vaultRoot);
-    project = session.project;
+    // No --project: prefer the repo's linked project; otherwise summarize the vault.
+    const linked = await readLinkedProject(process.cwd());
+    if (linked === null) return summarizeVault(vaultRoot);
+    project = linked;
   }
 
   const projectPath = join(vaultRoot, "projects", project);

@@ -28,7 +28,7 @@ export async function handleFmt(args: string[]): Promise<CliResult> {
   const parsed = parseCommand(args, ["project"], [], ["write"]);
   const project = await resolveProject(parsed);
   if (project === undefined) {
-    console.error("missing required field: project (pass --project or start a session with wiki session start)");
+    console.error("missing required field: project (pass --project or link the repo with wiki project link)");
     return { code: 1 };
   }
 

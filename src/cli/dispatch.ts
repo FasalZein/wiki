@@ -6,7 +6,6 @@ import { handleNextId } from "./verbs/next-id";
 import { handleProject } from "./verbs/project";
 import { handleSchema } from "./verbs/schema";
 import { handleSearch } from "./verbs/search";
-import { handleSession } from "./verbs/session";
 import { handleStatus } from "./verbs/status";
 import { handleSync } from "./verbs/sync";
 import { handleValidate } from "./verbs/validate";
@@ -14,7 +13,7 @@ import { handleVault } from "./verbs/vault";
 import { USAGE_REGISTRY, renderHelp, renderVerbList, unknownMessage, wantsHelp } from "./usage";
 import { setJsonMode } from "./output";
 import { resolveVaultRootForDisplay } from "../config/vault";
-import { readSession } from "../state/session";
+import { readLinkedProject } from "./repo-link";
 
 export type CliResult = {
   code: number;
@@ -23,8 +22,8 @@ export type CliResult = {
 /**
  * Print a deterministic one-line context banner to stderr before any command runs:
  * where the vault is (so artifacts are never written into the project's own folder)
- * and, when this repo has a session, which project it is linked to (so an agent
- * knows the repo is already on the wiki without running discovery tools). stderr
+ * and, when this repo is linked, which project it points at (so an agent knows
+ * the repo is already on the wiki without running discovery tools). stderr
  * keeps the scriptable stdout (ids, log paths, search hits) clean.
  */
 async function printContextBanner(): Promise<void> {
@@ -33,8 +32,8 @@ async function printContextBanner(): Promise<void> {
     console.error("wiki vault: (unconfigured — set KNOWLEDGE_VAULT_ROOT or ~/.config/wiki/config.toml vault.root)");
     return;
   }
-  const session = await readSession(process.cwd()).catch(() => null);
-  const linked = session === null ? "this repo has no session — run wiki session start --project <name>" : `project ${session.project}`;
+  const project = await readLinkedProject(process.cwd()).catch(() => null);
+  const linked = project === null ? "this repo isn't linked — run wiki project link --project <name>" : `project ${project}`;
   console.error(`wiki vault: ${vault}  |  ${linked}`);
 }
 
@@ -89,7 +88,6 @@ export async function dispatch(args: string[]): Promise<CliResult> {
   if (verb === "doctor") return handleVault(["doctor", ...rest]);
   if (verb === "fmt") return handleFmt(rest);
   if (verb === "sync") return handleSync(rest);
-  if (verb === "session") return handleSession(rest);
   if (verb === "vault") return handleVault(rest);
   if (verb === "project") return handleProject(rest);
   console.error(unknownMessage("verb", verb ?? ""));

@@ -267,13 +267,6 @@ describe("wiki project link (CLI)", () => {
     expect(count).toBe(1);
   });
 
-  test("exits 1 when --repo is missing", async () => {
-    const vaultRoot = await createProjectVault("acme");
-    const result = await runWiki(["project", "link", "--project", "acme"], vaultRoot);
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("--repo");
-  });
-
   test("exits 1 when --project is missing", async () => {
     const repoDir = await makeTempDir();
     const vaultRoot = await createProjectVault("acme");

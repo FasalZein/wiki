@@ -16,15 +16,15 @@ export type UsageEntry = {
 
 export const USAGE_REGISTRY: Record<string, UsageEntry> = {
   create: {
-    summary: "Create a new artifact (prd, slice, decision, doc).",
-    usage: "wiki create <prd|slice|decision|doc> [flags]",
+    summary: "Create a new artifact of any kind configured in wiki.json.",
+    usage: "wiki create <kind> [flags]",
     example: 'wiki create prd --project myproj --title "Short descriptive title"',
     subverbs: {
       prd: {
         summary: "Create a PRD.",
         usage: "wiki create prd --project <name> --title <title> [--body -]",
         flags: {
-          "--project": "project name (required if no active session)",
+          "--project": "project name (required if the repo isn't linked)",
           "--title": "PRD title (required)",
           "--body": "authored body markdown ('-' reads stdin); H2 sections fill the template (## Problem Statement, ## Solution, ## User Stories, ## Implementation Decisions, ## Testing Decisions, ## Out of Scope, ## Further Notes)",
           "--supersedes": "id this PRD supersedes (marks the old one superseded)",
@@ -37,7 +37,7 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
         summary: "Create a slice.",
         usage: "wiki create slice --project <name> --title <title> [--parent-prd <PRD-NNNN>] [--acceptance <c>]... [--body -]",
         flags: {
-          "--project": "project name (required if no active session)",
+          "--project": "project name (required if the repo isn't linked)",
           "--title": "slice title (required)",
           "--parent-prd": "optional parent PRD id (recorded as a plain field; no existence check)",
           "--acceptance": "acceptance criterion (repeatable)",
@@ -52,7 +52,7 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
         summary: "Create an ADR (architecture decision record).",
         usage: "wiki create decision --project <name> --title <t> --context <c> --decision <d> --consequences <q>",
         flags: {
-          "--project": "project name (required if no active session)",
+          "--project": "project name (required if the repo isn't linked)",
           "--title": "decision title (required)",
           "--context": "what forces the decision (required)",
           "--decision": "the decision taken (required)",
@@ -65,7 +65,7 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
         summary: "Create a knowledge doc in a locked category subfolder.",
         usage: "wiki create doc --project <name> --title <title> --type <type> [--category <cat>] [--body -]",
         flags: {
-          "--project": "project name (required if no active session)",
+          "--project": "project name (required if the repo isn't linked)",
           "--title": "doc title (required)",
           "--type": "doc type (required): runbook|research|guide|learning|reference",
           "--category": "locked category (defaults from --type): architecture|research|runbooks|specs|notes|legacy",
@@ -123,7 +123,7 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
     summary: "Set a field on an existing artifact (schema-validated). Type is inferred from the id.",
     usage: "wiki set <id> <field> <value...> [--project <name>] [--json]",
     flags: {
-      "--project": "project name (required if no active session)",
+      "--project": "project name (required if the repo isn't linked)",
       "--json": "emit {id,field,value} to stdout; {error,...} to stderr on failure",
     },
     example: "wiki set SLICE-0032 status green",
@@ -133,7 +133,7 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
     usage: "wiki block <id> --on <id> [--on <id>...] [--project <name>] [--json]",
     flags: {
       "--on": "id this artifact is blocked by (repeatable)",
-      "--project": "project name (required if no active session)",
+      "--project": "project name (required if the repo isn't linked)",
       "--json": "emit {id,blocked_by} to stdout; {error,...} to stderr on failure",
     },
     example: "wiki block SLICE-0032 --on SLICE-0030 --on SLICE-0031",
@@ -143,7 +143,7 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
     usage: "wiki supersede <oldId> --by <newId> [--project <name>] [--json]",
     flags: {
       "--by": "id of the superseding artifact (required; must exist)",
-      "--project": "project name (required if no active session)",
+      "--project": "project name (required if the repo isn't linked)",
       "--json": "emit {id,status,superseded_by} to stdout; {error,...} to stderr on failure",
     },
     example: "wiki supersede SLICE-0016 --by SLICE-0032",
@@ -152,7 +152,7 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
     summary: "Print the absolute file path for an artifact id (resolve-by-id without globbing).",
     usage: "wiki path <id> [--project <name>] [--json]",
     flags: {
-      "--project": "project name (required if no active session)",
+      "--project": "project name (required if the repo isn't linked)",
       "--json": "emit {id,path} to stdout",
     },
     example: "wiki path SLICE-0032",
@@ -172,7 +172,7 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
     summary: "Format vault artifacts. Default mode is check: report format drift and exit 1 if any; --write applies the mechanical fixes idempotently.",
     usage: "wiki fmt [--project <name>] [--write]",
     flags: {
-      "--project": "project name (required if no active session)",
+      "--project": "project name (required if the repo isn't linked)",
       "--write": "apply fixes (without it, check mode only reports)",
     },
     example: "wiki fmt --project myproj --write",
@@ -181,37 +181,12 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
     summary: "Re-index a project into the QMD search collections.",
     usage: "wiki sync [--project <name>] [--include-research] [--pull] [--force-embed]",
     flags: {
-      "--project": "project name (required if no active session)",
+      "--project": "project name (required if the repo isn't linked)",
       "--include-research": "also sync the research collection",
       "--pull": "pull remote changes before indexing",
       "--force-embed": "re-embed all documents",
     },
     example: "wiki sync --project myproj",
-  },
-  session: {
-    summary: "Manage the active work session (start, show, clear).",
-    usage: "wiki session <start|show|clear> [flags]",
-    example: "wiki session show",
-    subverbs: {
-      start: {
-        summary: "Bind the current repo to a project for the session.",
-        usage: "wiki session start --project <name>",
-        flags: {
-          "--project": "project name (required)",
-        },
-        example: "wiki session start --project myproj",
-      },
-      show: {
-        summary: "Show the current session context.",
-        usage: "wiki session show",
-        example: "wiki session show",
-      },
-      clear: {
-        summary: "Clear the current session.",
-        usage: "wiki session clear",
-        example: "wiki session clear",
-      },
-    },
   },
   vault: {
     summary: "Vault administration (init, doctor).",
@@ -250,13 +225,13 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
         example: "wiki project list",
       },
       link: {
-        summary: "Bind a code repo to a project: stamp the wiki pointer block into its AGENTS.md/CLAUDE.md.",
-        usage: "wiki project link --project <name> --repo <path>",
+        summary: "Bind a code repo to a project: stamp the wiki pointer block into its AGENTS.md/CLAUDE.md. This is the single repo→project binding the CLI resolves --project from.",
+        usage: "wiki project link --project <name> [--repo <path>]",
         flags: {
           "--project": "project name (required)",
-          "--repo": "path to the code repo to bind (required)",
+          "--repo": "path to the code repo to bind (default: current directory)",
         },
-        example: "wiki project link --project myproj --repo ~/code/myproj",
+        example: "wiki project link --project myproj",
       },
     },
   },

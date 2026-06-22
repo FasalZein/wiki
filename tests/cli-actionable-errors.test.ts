@@ -40,15 +40,6 @@ afterEach(async () => {
 });
 
 describe("actionable unknown-subverb errors", () => {
-  test("unknown session subverb lists the valid subverbs", async () => {
-    const cap = capture();
-    const result = await dispatch(["session", "bogus"]);
-    cap.restore();
-    expect(result.code).toBe(1);
-    expect(cap.err()).toContain("start");
-    expect(cap.err()).toContain("show");
-  });
-
   test("unknown vault action lists the valid actions", async () => {
     const cap = capture();
     const result = await dispatch(["vault", "bogus"]);

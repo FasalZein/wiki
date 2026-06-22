@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -10,28 +10,7 @@ afterEach(async () => {
   await Promise.all(tempPaths.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
-describe("status and session CLI", () => {
-  test("session start writes repo-local session.json with {project, updated}", async () => {
-    const fixture = await createFixture();
-
-    const result = await runWiki(["session", "start", "--project", "wiki-v2"], fixture);
-
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe(`${join(fixture.repoPath, ".wiki", "state", "session.json")}\n`);
-    const session = JSON.parse(await readFile(join(fixture.repoPath, ".wiki", "state", "session.json"), "utf8"));
-    expect(session.project).toBe("wiki-v2");
-    expect(session.updated).toBeString();
-  });
-
-  test("session show without a session exits 0 with a helpful message", async () => {
-    const fixture = await createFixture();
-
-    const show = await runWiki(["session", "show", "--project", "wiki-v2"], fixture);
-
-    expect(show.exitCode).toBe(0);
-    expect(show.stdout).toContain("No active session");
-  });
-
+describe("status and repo-project binding CLI", () => {
   test("status on a project with no artifacts names the project and how to create", async () => {
     const fixture = await createFixture();
 
@@ -72,29 +51,15 @@ describe("status and session CLI", () => {
     expect(payload.recent).toEqual([join("projects", "wiki-v2", "docs", "DOC-0001-thing.md")]);
   });
 
-  test("status and session show read the current repo session without --project", async () => {
+  test("status reads the repo's linked project from the pointer block without --project", async () => {
     const fixture = await createFixture();
-    await runWiki(["session", "start", "--project", "wiki-v2"], fixture);
     const repoFixture = { ...fixture, cwd: fixture.repoPath };
+    await runWiki(["project", "link", "--project", "wiki-v2"], repoFixture);
 
     const status = await runWiki(["status"], repoFixture);
-    const show = await runWiki(["session", "show"], repoFixture);
 
     expect(status.exitCode).toBe(0);
     expect(status.stdout).toContain("Project: wiki-v2");
-    expect(show.exitCode).toBe(0);
-    expect(JSON.parse(show.stdout).project).toBe("wiki-v2");
-  });
-
-  test("session clear removes session.json", async () => {
-    const fixture = await createFixture();
-    await runWiki(["session", "start", "--project", "wiki-v2"], fixture);
-
-    const result = await runWiki(["session", "clear", "--project", "wiki-v2"], fixture);
-    const show = await runWiki(["session", "show", "--project", "wiki-v2"], fixture);
-
-    expect(result.exitCode).toBe(0);
-    expect(show.stdout).toContain("No active session");
   });
 });
 

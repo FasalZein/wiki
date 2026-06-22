@@ -85,20 +85,16 @@ async function createProject(args: string[]): Promise<CliResult> {
   }
 
   console.error(`created project ${name} (repo: ${repo}, test_command: ${testCommand})`);
-  console.error(`edit projects/${name}/_project.md to change repo/test_command; then: wiki session start --project ${name}`);
+  console.error(`edit projects/${name}/_project.md to change repo/test_command; then: wiki project link --project ${name}`);
   console.log(projPath);
   return { code: 0 };
 }
 
 async function linkProject(args: string[]): Promise<CliResult> {
   const parsed = parseCommand(args, ["repo", "project"]);
-  const repoArg = stringValue(parsed.values, "repo");
+  const repoArg = stringValue(parsed.values, "repo") ?? process.cwd();
   const projectName = stringValue(parsed.values, "project");
 
-  if (repoArg === undefined) {
-    console.error("missing required flag: --repo <path>");
-    return { code: 1 };
-  }
   if (projectName === undefined) {
     console.error("missing required flag: --project <name>");
     return { code: 1 };

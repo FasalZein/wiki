@@ -73,11 +73,11 @@ describe("sync CLI", () => {
     );
   });
 
-  test("sync exits 1 when project is missing and no session is active", async () => {
+  test("sync exits 1 when project is missing and the repo isn't linked", async () => {
     const fixture = await createSyncFixture("wiki-v2");
 
-    await withSession(null, async () => {
-      const result = await runWiki(["sync"], fixture);
+    await withLinkedRepo(null, async (cwd) => {
+      const result = await runWiki(["sync"], fixture, cwd);
 
       expect(result.exitCode).toBe(1);
       expect(result.stdout).toBe("");
@@ -85,24 +85,24 @@ describe("sync CLI", () => {
     });
   });
 
-  // --- session fallback (SLICE-0052): sync resolves the project like create does ---
+  // --- linked-repo fallback (SLICE-0052): sync resolves the project like create does ---
 
-  test("sync with an active session and no --project syncs the session project", async () => {
+  test("sync with a linked repo and no --project syncs the linked project", async () => {
     const fixture = await createSyncFixture("wiki-v2");
 
-    await withSession("wiki-v2", async () => {
-      const result = await runWiki(["sync"], fixture);
+    await withLinkedRepo("wiki-v2", async (cwd) => {
+      const result = await runWiki(["sync"], fixture, cwd);
 
       expect(result.exitCode).toBe(0);
       expect(result.stderr).toContain("synced collection wiki-v2");
     });
   });
 
-  test("sync --project overrides the active session", async () => {
+  test("sync --project overrides the linked repo", async () => {
     const fixture = await createSyncFixture("other-proj");
 
-    await withSession("wiki-v2", async () => {
-      const result = await runWiki(["sync", "--project", "other-proj"], fixture);
+    await withLinkedRepo("wiki-v2", async (cwd) => {
+      const result = await runWiki(["sync", "--project", "other-proj"], fixture, cwd);
 
       expect(result.exitCode).toBe(0);
       expect(result.stderr).toContain("synced collection other-proj");
@@ -139,34 +139,20 @@ type CommandResult = {
 };
 
 const repoRoot = import.meta.dir.replace(/\/tests$/, "");
-const sessionPath = join(repoRoot, ".wiki", "state", "session.json");
 
-/** Run `fn` with the repo session forced to `project` (or absent when null), then restore. */
-async function withSession(project: string | null, fn: () => Promise<void>): Promise<void> {
-  const existing = await readFile(sessionPath, "utf8").catch(() => null);
-  try {
-    if (project === null) {
-      await rm(sessionPath, { force: true });
-    } else {
-      await mkdir(join(repoRoot, ".wiki", "state"), { recursive: true });
-      await writeFile(
-        sessionPath,
-        JSON.stringify({ project, phase: "slice", active_slices: [], updated: "2026-06-10T00:00:00.000Z" }, null, 2),
-      );
-    }
-    await fn();
-  } finally {
-    if (existing === null) {
-      await rm(sessionPath, { force: true });
-    } else {
-      await writeFile(sessionPath, existing);
-    }
+/** Create a temp repo dir linked to `project` via a pointer block (or unlinked when null). */
+async function withLinkedRepo(project: string | null, fn: (cwd: string) => Promise<void>): Promise<void> {
+  const repo = await mkdtemp(join(tmpdir(), "wiki-sync-repo-"));
+  tempPaths.push(repo);
+  if (project !== null) {
+    await writeFile(join(repo, "AGENTS.md"), `<!-- wiki:begin v2 project=${project} -->\n<!-- wiki:end -->\n`);
   }
+  await fn(repo);
 }
 
-async function runWiki(args: string[], fixture: SyncFixture): Promise<CommandResult> {
-  const proc = Bun.spawn(["bun", "src/cli.ts", ...args], {
-    cwd: import.meta.dir.replace(/\/tests$/, ""),
+async function runWiki(args: string[], fixture: SyncFixture, cwd: string = repoRoot): Promise<CommandResult> {
+  const proc = Bun.spawn(["bun", join(repoRoot, "src", "cli.ts"), ...args], {
+    cwd,
     env: { ...process.env, KNOWLEDGE_VAULT_ROOT: fixture.vaultRoot, ...fixture.env },
     stdout: "pipe",
     stderr: "pipe",

@@ -16,7 +16,7 @@ describe("usage registry", () => {
   test("every top-level verb has a usage entry with summary and example", () => {
     const verbs = [
       "create", "doc", "status", "search",
-      "validate", "next-id", "doctor", "sync", "session", "vault", "project",
+      "validate", "next-id", "doctor", "sync", "vault", "project",
     ];
     for (const verb of verbs) {
       const entry = USAGE_REGISTRY[verb];
@@ -28,7 +28,7 @@ describe("usage registry", () => {
   });
 
   test("subverb-bearing verbs declare their subverbs", () => {
-    for (const verb of ["session", "vault", "project", "doc"]) {
+    for (const verb of ["vault", "project", "doc"]) {
       const entry = USAGE_REGISTRY[verb];
       expect(entry?.subverbs, `${verb} should declare subverbs`).toBeDefined();
       expect(Object.keys(entry?.subverbs ?? {}).length).toBeGreaterThan(0);
@@ -70,7 +70,7 @@ describe("--help dispatch", () => {
   });
 
   test("wiki <verb> --help prints that verb's usage and exits 0", async () => {
-    for (const verb of ["create", "status", "search", "doc", "session", "vault", "project"]) {
+    for (const verb of ["create", "status", "search", "doc", "vault", "project"]) {
       const cap = captureStdout();
       const result = await dispatch([verb, "--help"]);
       cap.restore();
@@ -89,7 +89,7 @@ describe("--help dispatch", () => {
 
   test("wiki <verb> <subverb> --help prints subverb usage and exits 0", async () => {
     const cases: [string, string][] = [
-      ["session", "start"], ["vault", "init"], ["project", "create"], ["doc", "retitle"],
+      ["vault", "init"], ["project", "create"], ["doc", "retitle"],
     ];
     for (const [verb, subverb] of cases) {
       const cap = captureStdout();
