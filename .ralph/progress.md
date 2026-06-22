@@ -14,3 +14,10 @@
 - DEVIATION from plan: plan's `setFields(supersededBefore.fields)` restore is WRONG — `setFields` merges onto the *current* (already-mutated) frontmatter, so the added `superseded_by` would survive. Confirmed with advisor. Used file-byte snapshot/restore instead (Bun.file().text() → Bun.write); path is stable across supersede (id/title unchanged). No new import.
 - Test (`tests/cli-dedup.test.ts`): bad `--parent-prd PRD-9999` with `--supersedes SLICE-0001` → nonzero exit, no SLICE-0002, SLICE-0001 still NOT superseded. NOTE: with Part 1 in place this exercises the pre-flight, not the Part 2 restore — supersede never runs. Part 2 is the invariant backstop for future post-supersede failures; no clean seam to trigger it in a test, skipped per lean ethos.
 - Verify: build + tsc clean, 244 pass / 0 fail.
+
+## Item 3 — collision-safe ID allocation (done)
+- `src/artifacts/store.ts createArtifact`: wrapped `nextId → render → write` in a bounded retry loop (MAX_ATTEMPTS=8). Each attempt recomputes `nextId`/aliases/fields/path and writes via node `writeFile(path, content, { flag: "wx" })` — exclusive create throws EEXIST on collision → `continue`. bodySections parsing hoisted out of the loop (same every attempt).
+- Added `isFileExists(error)` helper (EEXIST) next to `isFileNotFound`.
+- DEVIATION from plan: plan kept `writeArtifact` (Bun.write). node `writeFile` does NOT auto-mkdir parents like Bun.write, so added `mkdir(dirname(path), { recursive: true })` before the exclusive write. `relocateArtifact`/`writeFields` untouched (keep overwrite semantics).
+- Test (`tests/id-generation.test.ts`): two concurrent `createArtifact` of same type via Promise.all → distinct ids, both files exist.
+- Verify: build + tsc clean, 245 pass / 0 fail.

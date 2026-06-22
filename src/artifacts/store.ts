@@ -1,6 +1,6 @@
 import matter from "gray-matter";
-import { readdir, readFile, rm } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { dirname, join, relative } from "node:path";
 
 import { loadTemplate, normalizeInlineMaps, resolveTemplatePath, type TemplateType } from "../schema/load";
 import { BodyParseError, parseBodySections } from "./body";
@@ -154,20 +154,9 @@ export async function createArtifact(input: CreateArtifactInput): Promise<Artifa
   const schema = await loadTemplate(input.type);
   const templateFile = Bun.file(resolveTemplatePath(`${input.type}.md`));
   const template = await templateFile.text();
-  const id = await nextId(input.type, input.vaultRoot, input.project);
   const suppliedAliases = Array.isArray(input.fields.aliases) ? input.fields.aliases.map(String) : [];
-  const aliases = suppliedAliases.includes(id) ? suppliedAliases : [id, ...suppliedAliases];
-  const fields = applyDefaults(schema, template, {
-    ...input.fields,
-    id,
-    aliases,
-    project: input.project,
-  });
-  const result = validate(schema, fields);
-  if (!result.ok) {
-    throw new ArtifactValidationError(result.errors);
-  }
 
+  // bodySections parsing is the same every attempt — compute once.
   let bodySections: Record<string, string> | undefined;
   if (input.body !== undefined) {
     const fieldNames = new Set(schema.fields.map((field) => field.name));
@@ -181,16 +170,40 @@ export async function createArtifact(input: CreateArtifactInput): Promise<Artifa
     }
   }
 
-  const content = renderArtifact(template, orderBySchema(schema, result.value), bodySections);
-  const path = artifactPath(input.type, input.vaultRoot, input.project, id, String(result.value.title ?? id), input.category);
-  await writeArtifact(path, content);
+  // ponytail: read-then-write on nextId is a TOCTOU race under parallel creates.
+  // Exclusive create (flag 'wx') + bounded retry is the cheap fix — no lockfile.
+  const MAX_ATTEMPTS = 8;
+  for (let attempt = 0; ; attempt++) {
+    const id = await nextId(input.type, input.vaultRoot, input.project);
+    const aliases = suppliedAliases.includes(id) ? suppliedAliases : [id, ...suppliedAliases];
+    const fields = applyDefaults(schema, template, {
+      ...input.fields,
+      id,
+      aliases,
+      project: input.project,
+    });
+    const result = validate(schema, fields);
+    if (!result.ok) {
+      throw new ArtifactValidationError(result.errors);
+    }
 
-  return {
-    id,
-    path,
-    fields: result.value,
-    body: content,
-  };
+    const content = renderArtifact(template, orderBySchema(schema, result.value), bodySections);
+    const path = artifactPath(input.type, input.vaultRoot, input.project, id, String(result.value.title ?? id), input.category);
+    try {
+      await mkdir(dirname(path), { recursive: true }); // Bun.write auto-mkdirs; node writeFile does not
+      await writeFile(path, content, { flag: "wx" }); // fails if path already exists
+    } catch (error) {
+      if (isFileExists(error) && attempt < MAX_ATTEMPTS) continue; // collision — recompute nextId
+      throw error;
+    }
+
+    return {
+      id,
+      path,
+      fields: result.value,
+      body: content,
+    };
+  }
 }
 
 /**
@@ -355,4 +368,8 @@ function slugifyTitle(title: string): string {
 
 function isFileNotFound(error: unknown): boolean {
   return error instanceof Error && "code" in error && error.code === "ENOENT";
+}
+
+function isFileExists(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "EEXIST";
 }

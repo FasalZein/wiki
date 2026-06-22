@@ -12,7 +12,7 @@
   {
     "id": 3,
     "text": "Collision-safe ID allocation (exclusive 'wx' write + bounded retry in createArtifact). Plan: .ralph/audit-plans/003-nextid-race.md",
-    "done": false
+    "done": true
   },
   {
     "id": 4,

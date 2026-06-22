@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { nextId } from "../src/artifacts/id";
+import { createArtifact } from "../src/artifacts/store";
 
 const tempPaths: string[] = [];
 
@@ -104,5 +105,24 @@ describe("nextId", () => {
     await writeFile(join(docs, "DOC-0002-flat.md"), "existing");
 
     expect(await nextId("doc", vault, "test")).toBe("DOC-0010");
+  });
+});
+
+describe("createArtifact collision safety", () => {
+  test("two concurrent creates of the same type get distinct ids", async () => {
+    const vault = await createVault("test");
+    const make = () =>
+      createArtifact({
+        type: "prd",
+        vaultRoot: vault,
+        project: "test",
+        fields: { title: "Concurrent" },
+      });
+
+    const [a, b] = await Promise.all([make(), make()]);
+
+    expect(a.id).not.toBe(b.id);
+    expect(await Bun.file(a.path).exists()).toBe(true);
+    expect(await Bun.file(b.path).exists()).toBe(true);
   });
 });
