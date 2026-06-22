@@ -1,6 +1,7 @@
 import { handleCreate } from "./verbs/create";
 import { handleDoc } from "./verbs/doc";
 import { handleFmt } from "./verbs/fmt";
+import { handleHooks } from "./verbs/hooks";
 import { handleBlock, handlePath, handleSet, handleSupersede } from "./verbs/mutate";
 import { handleNextId } from "./verbs/next-id";
 import { handleProject } from "./verbs/project";
@@ -90,6 +91,7 @@ export async function dispatch(args: string[]): Promise<CliResult> {
   if (verb === "sync") return handleSync(rest);
   if (verb === "vault") return handleVault(rest);
   if (verb === "project") return handleProject(rest);
+  if (verb === "hooks") return handleHooks(rest);
   console.error(unknownMessage("verb", verb ?? ""));
   return { code: 1 };
 }

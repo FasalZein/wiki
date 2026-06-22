@@ -62,5 +62,13 @@ One validated `wiki` call per intent — never hand-edit frontmatter:
   closest locked one. `wiki doctor` flags rogue folders or loose files under `docs/`.
 - `wiki fmt` reports format drift (exit 1); `wiki fmt --write` applies mechanical fixes.
 
+## Auto-persist skill output (optional, one-time)
+
+`wiki hooks install --runtime <claude-code|codex|pi> [--global]` wires a native hook
+into the runtime's config. When you invoke a skill that authors an artifact (the
+`skill` field in `wiki.json` maps it to a kind), the hook reminds you to persist its
+output via `wiki create <kind>` — so a skill's result lands in the vault, not just chat.
+It captures; closing an artifact stays an explicit `wiki set <id> status closed`.
+
 Breaking a PRD into slices? Load `to-slices`. Otherwise the CLI is self-describing —
 `wiki <verb> --help`.

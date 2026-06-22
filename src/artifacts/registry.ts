@@ -91,6 +91,14 @@ export const FOLDER_TO_TYPE: Readonly<Record<string, TemplateType>> = Object.fro
   (Object.entries(ARTIFACTS) as [TemplateType, ArtifactSpec][]).map(([type, spec]) => [spec.folder, type]),
 );
 
+/** Reverse map (authoring skill -> artifact kind) read by per-runtime hooks to
+ *  route a skill's output into the vault. Only kinds with a `skill` appear. */
+export const SKILL_TO_KIND: Readonly<Record<string, TemplateType>> = Object.fromEntries(
+  (Object.entries(ARTIFACTS) as [TemplateType, ArtifactSpec][])
+    .filter(([, spec]) => spec.skill !== undefined)
+    .map(([type, spec]) => [spec.skill as string, type]),
+);
+
 /** Reverse map (id prefix -> artifact type) for id-based type inference. */
 export const PREFIX_TO_TYPE: Readonly<Record<string, TemplateType>> = Object.fromEntries(
   (Object.entries(ARTIFACTS) as [TemplateType, ArtifactSpec][]).map(([type, spec]) => [spec.prefix, type]),
