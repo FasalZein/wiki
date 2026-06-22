@@ -31,3 +31,9 @@
 - `src/schema/validate.ts`: `const value = input[field.name] ?? undefined` — coalesces null/undefined only (not 0/false/""), so a blank Obsidian key (gray-matter → null) is treated as absent: blank optional passes, blank required → "required" (not "type mismatch"). Matched plan excerpt exactly. matchesType untouched; return still passes `input` through (null preserved on disk).
 - Tests: `tests/schema.test.ts` — null optional → ok:true; null required → ok:false reason "required". `tests/artifacts.test.ts` — inject blank `related_prd:` into a decision's frontmatter, then setField unrelated `status` succeeds (would throw "type mismatch" pre-fix).
 - Verify: build + tsc clean, 253 pass / 0 fail.
+
+## Item 6 — project-resolution consolidation (done)
+- Part A: routed 9 inline `join(vaultRoot,"projects",x)` through `projectPath()` (path-containment seam) in status/search(×3)/doc/create/fmt/sync/resolve-project/project.ts. Renamed local `projectPath` consts to `projPath` to avoid shadowing the imported fn. Dropped now-unused `join` imports in search/doc/sync/resolve-project.
+- Part B: fmt + sync now run the status.ts pattern (loadProjectConfig → ProjectConfigError → projectErrorMessage + exit 10) for a nonexistent `--project`; the "no project at all" terse exit-1 path unchanged. fmt keeps assertProjectStructure after the config check; sync's pre-flight is added before the docs gate.
+- Test: cli-fmt.test.ts — nonexistent `--project` exits 10 and lists wiki-v2.
+- Verify: build + tsc clean, 254 pass / 0 fail.

@@ -102,7 +102,7 @@ async function linkProject(args: string[]): Promise<CliResult> {
 
   const repoDir = resolve(repoArg);
   const vaultRoot = await getVaultRoot();
-  const projDir = join(vaultRoot, "projects", projectName);
+  const projDir = projectPath(vaultRoot, projectName);
   const projectMdPath = join(projDir, "_project.md");
 
   // Verify project exists

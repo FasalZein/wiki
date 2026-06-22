@@ -7,10 +7,9 @@
  * layout already gives a cheap, stable template mapping. If QMD JSON later
  * exposes richer frontmatter, this can move into runQuery.
  */
-import { join } from "node:path";
 
 import { ensureCollection, QmdError, runQuery, updateCollection, type QmdResult } from "../../integrations/qmd";
-import { artifactFolder } from "../../artifacts/paths";
+import { artifactFolder, projectPath } from "../../artifacts/paths";
 import { ARTIFACTS } from "../../artifacts/registry";
 import { assertProjectStructure, listProjects, loadProjectConfig, type ProjectConfig, ProjectConfigError, projectErrorMessage } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
@@ -54,9 +53,9 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
       return { code: 10 };
     }
   } else {
-    const projectPath = join(vaultRoot, "projects", project);
+    const projPath = projectPath(vaultRoot, project);
     try {
-      await loadProjectConfig(projectPath);
+      await loadProjectConfig(projPath);
     } catch (error) {
       if (error instanceof ProjectConfigError) {
         console.error(await projectErrorMessage(vaultRoot, project));
@@ -76,7 +75,7 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
     // must agree, or we reject with an actionable error (ADR-0027 follow-up).
     const configs: Array<readonly [string, ProjectConfig]> = [];
     for (const proj of targetProjects) {
-      const projPath = join(vaultRoot, "projects", proj);
+      const projPath = projectPath(vaultRoot, proj);
       await assertProjectStructure(projPath);
       configs.push([proj, await loadProjectConfig(projPath)]);
     }
@@ -96,7 +95,7 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
 
     const collections: string[] = [];
     for (const [proj] of configs) {
-      await ensureCollection(qmdCommand, proj, join(vaultRoot, "projects", proj));
+      await ensureCollection(qmdCommand, proj, projectPath(vaultRoot, proj));
       collections.push(proj);
     }
     if (booleanValue(parsed.values, "include-research")) {

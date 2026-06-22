@@ -5,7 +5,8 @@ import matter from "gray-matter";
 
 import { orderBySchema } from "../../artifacts/render";
 import { FOLDER_TO_TYPE } from "../../artifacts/registry";
-import { assertProjectStructure } from "../../config/project";
+import { projectPath } from "../../artifacts/paths";
+import { assertProjectStructure, loadProjectConfig, ProjectConfigError, projectErrorMessage } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import { loadTemplate, type TemplateType } from "../../schema/load";
 import type { Schema } from "../../schema/types";
@@ -33,8 +34,17 @@ export async function handleFmt(args: string[]): Promise<CliResult> {
   }
 
   const vaultRoot = await getVaultRoot();
-  const projectPath = join(vaultRoot, "projects", project);
-  await assertProjectStructure(projectPath);
+  const projPath = projectPath(vaultRoot, project);
+  try {
+    await loadProjectConfig(projPath);
+  } catch (error) {
+    if (error instanceof ProjectConfigError) {
+      console.error(await projectErrorMessage(vaultRoot, project));
+      return { code: 10 };
+    }
+    throw error;
+  }
+  await assertProjectStructure(projPath);
 
   const write = booleanValue(parsed.values, "write");
   let total = 0;
@@ -42,14 +52,14 @@ export async function handleFmt(args: string[]): Promise<CliResult> {
   // Renumbering runs before the per-file pipeline: it renames files and
   // rewrites cross-references vault-wide, so the pipeline below sees the
   // post-rename world.
-  const renumber = await renumberLegacyIds(vaultRoot, projectPath, write);
+  const renumber = await renumberLegacyIds(vaultRoot, projPath, write);
   total += renumber.labels.length;
   for (const label of renumber.labels) {
     console.log(write ? `fixed ${label}` : label);
   }
   const manual: string[] = [...renumber.collisions];
 
-  for (const filePath of await markdownFiles(projectPath)) {
+  for (const filePath of await markdownFiles(projPath)) {
     const raw = await readFile(filePath, "utf8");
     const file = relative(vaultRoot, filePath);
     let content = raw;

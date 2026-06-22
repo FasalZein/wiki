@@ -27,7 +27,7 @@
   {
     "id": 6,
     "text": "Consolidate project resolution (projectPath() at 9 sites; converge fmt/sync onto loadProjectConfig+projectErrorMessage+exit-10). Plan: .ralph/audit-plans/006-project-resolution-consolidation.md",
-    "done": false
+    "done": true
   },
   {
     "id": 7,

@@ -1,7 +1,6 @@
-import { join } from "node:path";
-
+import { projectPath } from "../../artifacts/paths";
 import { embedCollection, ensureCollection, QmdError, updateCollection } from "../../integrations/qmd";
-import { assertProjectStructure, loadProjectConfig } from "../../config/project";
+import { assertProjectStructure, loadProjectConfig, ProjectConfigError, projectErrorMessage } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import { checkProjectDocsStructure } from "../../bootstrap/doctor";
 import { booleanValue, parseCommand } from "../parse";
@@ -17,7 +16,16 @@ export async function handleSync(args: string[]): Promise<CliResult> {
   }
 
   const vaultRoot = await getVaultRoot();
-  const projectPath = join(vaultRoot, "projects", project);
+  const projPath = projectPath(vaultRoot, project);
+  try {
+    await loadProjectConfig(projPath);
+  } catch (error) {
+    if (error instanceof ProjectConfigError) {
+      console.error(await projectErrorMessage(vaultRoot, project));
+      return { code: 10 };
+    }
+    throw error;
+  }
 
   // Gate: don't embed a project whose docs/ violates the locked-category invariant
   // (ADR-0028). sync is the natural chokepoint — catch rogue folders / loose docs here
@@ -30,10 +38,10 @@ export async function handleSync(args: string[]): Promise<CliResult> {
   }
 
   try {
-    await assertProjectStructure(projectPath);
-    const config = await loadProjectConfig(projectPath);
+    await assertProjectStructure(projPath);
+    const config = await loadProjectConfig(projPath);
     const qmdCommand = process.env.QMD_COMMAND ?? config.qmd_command;
-    const targets = [{ name: project, path: projectPath }];
+    const targets = [{ name: project, path: projPath }];
     if (booleanValue(parsed.values, "include-research")) {
       targets.push({ name: "research", path: config.research_path });
     }

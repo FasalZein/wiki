@@ -1,6 +1,7 @@
 import { readdir, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
 
+import { projectPath } from "../../artifacts/paths";
 import { ARTIFACT_FOLDERS } from "../../artifacts/registry";
 import { listProjects, loadProjectConfig, ProjectConfigError, projectErrorMessage } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
@@ -24,9 +25,9 @@ export async function handleStatus(args: string[]): Promise<CliResult> {
     project = linked;
   }
 
-  const projectPath = join(vaultRoot, "projects", project);
+  const projPath = projectPath(vaultRoot, project);
   try {
-    await loadProjectConfig(projectPath);
+    await loadProjectConfig(projPath);
   } catch (error) {
     if (error instanceof ProjectConfigError) {
       console.error(await projectErrorMessage(vaultRoot, project));
@@ -35,7 +36,7 @@ export async function handleStatus(args: string[]): Promise<CliResult> {
     throw error;
   }
 
-  const recent = await recentArtifacts(vaultRoot, projectPath);
+  const recent = await recentArtifacts(vaultRoot, projPath);
 
   if (jsonEnabled()) {
     emitJson({ project, recent: recent.map((r) => r.rel) });

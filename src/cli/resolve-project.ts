@@ -5,8 +5,7 @@
  * support a linked repo share this one resolver instead of hard-requiring --project.
  */
 
-import { join } from "node:path";
-
+import { projectPath } from "../artifacts/paths";
 import { assertProjectStructure } from "../config/project";
 import { getVaultRoot } from "../config/vault";
 import { readLinkedProject } from "./repo-link";
@@ -18,7 +17,7 @@ export async function linkedProjectFromCwd(): Promise<string | null> {
   if (project === null) return null;
   try {
     const vaultRoot = await getVaultRoot();
-    await assertProjectStructure(join(vaultRoot, "projects", project));
+    await assertProjectStructure(projectPath(vaultRoot, project));
     return project;
   } catch {
     return null;

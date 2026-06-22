@@ -20,6 +20,7 @@ import {
   supersedeArtifact,
 } from "../../artifacts/store";
 import { authoredSections } from "../../artifacts/body";
+import { projectPath } from "../../artifacts/paths";
 import { ARTIFACTS, defaultCategoryForDocType, DOC_CATEGORIES, isDocCategory, specFor, type DocCategory } from "../../artifacts/registry";
 import { assertProjectStructure, loadProjectConfig, ProjectConfigError } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
@@ -155,8 +156,8 @@ async function createWithSupersede(req: CreateRequest): Promise<CliResult> {
   if (typeof override === "string") { console.error(override); return { code: 1 }; }
 
   const vaultRoot = await getVaultRoot();
-  const projectPath = join(vaultRoot, "projects", project);
-  await assertProjectStructure(projectPath);
+  const projPath = projectPath(vaultRoot, project);
+  await assertProjectStructure(projPath);
   try {
     // Snapshot the to-be-superseded artifact (single read) so a post-write
     // failure can byte-restore it. setFields can't undo the supersede: it merges
@@ -171,7 +172,7 @@ async function createWithSupersede(req: CreateRequest): Promise<CliResult> {
     if (type === "slice" && typeof fields.parent_prd === "string" && fields.parent_prd.length > 0) {
       await readArtifact({ type: "prd", vaultRoot, project, id: fields.parent_prd });
     }
-    const dedupBlock = await advisoryDedup(type, project, projectPath, dedupQuery, override);
+    const dedupBlock = await advisoryDedup(type, project, projPath, dedupQuery, override);
     if (dedupBlock !== null) return dedupBlock;
     const artifact = await createArtifact({
       type,

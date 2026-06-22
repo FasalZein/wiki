@@ -1,8 +1,8 @@
 ---
 running: true
-iteration: 1
-max_iterations: 8
-started_at: 2026-06-22T14:50:52Z
+iteration: 6
+max_iterations: 14
+started_at: 2026-06-22T16:11:30Z
 completed_at: null
 stop_reason: null
 error_count: 0

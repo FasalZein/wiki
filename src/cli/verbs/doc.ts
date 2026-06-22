@@ -1,5 +1,4 @@
-import { join } from "node:path";
-
+import { projectPath } from "../../artifacts/paths";
 import {
   ArtifactNotFoundError,
   ArtifactValidationError,
@@ -51,9 +50,9 @@ async function recategorizeDoc(args: string[]): Promise<CliResult> {
 
 async function relocate(project: string, id: string, change: { title?: string; category?: DocCategory }): Promise<CliResult> {
   const vaultRoot = await getVaultRoot();
-  const projectPath = join(vaultRoot, "projects", project);
+  const projPath = projectPath(vaultRoot, project);
   try {
-    await assertProjectStructure(projectPath);
+    await assertProjectStructure(projPath);
     const artifact = await relocateArtifact({ type: "doc", vaultRoot, project, id, ...change });
     console.log(artifact.id);
     console.error(`updated ${artifact.id}`);

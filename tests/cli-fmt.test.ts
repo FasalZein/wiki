@@ -56,6 +56,15 @@ describe("fmt CLI", () => {
     expect(result.stdout).not.toContain("SLICE-0002-clean-slice.md");
   });
 
+  test("a nonexistent --project exits 10 with the available-projects listing", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+
+    const result = await runWiki(["fmt", "--project", "does-not-exist"], vaultRoot);
+
+    expect(result.exitCode).toBe(10);
+    expect(result.stderr).toContain("wiki-v2");
+  });
+
   test("--write normalizes date fields to quoted YYYY-MM-DD and exits 0", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
     await writeSlice(vaultRoot, "SLICE-0001-test-slice.md", DIRTY_SLICE);
