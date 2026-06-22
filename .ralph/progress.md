@@ -23,3 +23,13 @@
 - Updated tests/schema.test.ts fully-populated-input case to the trimmed schema (phase:slice,
   no dropped fields). 238 pass, tsc/build clean.
 - Files: templates/handoff.md, tests/schema.test.ts
+
+## Iteration 3 — Item 3: Reconcile stale vault slice statuses
+- Confirmed all six candidates are verifiably shipped against code before closing:
+  0050 (doctor contract-drift check → src/bootstrap/doctor.ts DriftIssue/contract-drift),
+  0057/0059/0060 (fmt fixDates/fixFrontmatterShape/renumberLegacyIds → src/cli/verbs/fmt.ts),
+  0069/0070 (createGeneric, "no per-kind branch and no fallback" → src/cli/verbs/create.ts).
+- Closed each via `wiki set <id> status closed --project wiki-v2` (planned→closed).
+  Left obsolete pre-pivot slices (session/gate/obsidian/guidance) untouched.
+- All six `wiki validate` clean. tsc/build clean, 238 tests pass.
+- Vault commit in /Users/tothemoon/Knowledge: SLICE-0050/0057/0059/0060/0069/0070.

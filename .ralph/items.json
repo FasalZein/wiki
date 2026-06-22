@@ -12,6 +12,6 @@
   {
     "id": 3,
     "text": "Reconcile stale vault slice statuses: close verifiably-shipped slices (0050/0057/0059/0060/0069/0070) via wiki set; leave obsolete pre-pivot slices",
-    "done": false
+    "done": true
   }
 ]
