@@ -107,7 +107,7 @@ async function fixture(): Promise<Fixture> {
   tempPaths.push(root);
   const vaultRoot = join(root, "vault");
   const projectPath = join(vaultRoot, "projects", "wiki-v2");
-  for (const dir of ["prds", "slices", "adrs", "handovers", "docs"]) {
+  for (const dir of ["prds", "slices", "adrs", "handoffs", "docs"]) {
     await mkdir(join(projectPath, dir), { recursive: true });
   }
   await writeFile(join(projectPath, "_project.md"), `---\nrepo: /tmp/repo\ntest_command: bun test\n---\n# wiki-v2\n`);

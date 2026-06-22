@@ -61,7 +61,7 @@ function buildLocationLex(query: string): string {
   if (/\b(decision|decisions|forge)\b/u.test(normalizedQuestion)) hints.push("decisions", "forge", "lifecycle", "workflow");
   if (/\bgrill\b/u.test(normalizedQuestion)) hints.push("grill", "challenge", "terminology");
   if (/\bevidence\b/u.test(normalizedQuestion)) hints.push("evidence", "proof", "verification");
-  if (/\bhandover\b/u.test(normalizedQuestion)) hints.push("handover", "handoff", "transfer");
+  if (/\bhand(?:off|over)\b/u.test(normalizedQuestion)) hints.push("handoff", "handover", "transfer");
   if (/\bphase\b/u.test(normalizedQuestion)) hints.push("phase", "stage", "step");
   if (/\bvault\b/u.test(normalizedQuestion)) hints.push("vault", "knowledge", "wiki");
 

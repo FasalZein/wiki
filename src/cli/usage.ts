@@ -115,7 +115,7 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
   },
   "next-id": {
     summary: "Print the next available sequential id for an artifact type.",
-    usage: "wiki next-id <prd|slice|decision|doc|handover> --project <name>",
+    usage: "wiki next-id <prd|slice|decision|doc|handoff> --project <name>",
     flags: { "--project": "project name (required)" },
     example: "wiki next-id slice --project myproj",
   },
@@ -159,7 +159,7 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
   },
   schema: {
     summary: "List an artifact type's fields, types, required flags, and enum values.",
-    usage: "wiki schema <prd|slice|decision|doc|handover> [--json]",
+    usage: "wiki schema <prd|slice|decision|doc|handoff> [--json]",
     flags: { "--json": "emit the schema object to stdout" },
     example: "wiki schema slice",
   },

@@ -8,7 +8,7 @@ import { dispatch } from "../src/cli/dispatch";
 let vaultRoot: string;
 let prevVaultRoot: string | undefined;
 
-const ARTIFACT_FOLDERS = ["prds", "slices", "adrs", "handovers", "docs"];
+const ARTIFACT_FOLDERS = ["prds", "slices", "adrs", "handoffs", "docs"];
 
 async function makeProject(name: string, frontmatter: string): Promise<void> {
   const dir = join(vaultRoot, "projects", name);

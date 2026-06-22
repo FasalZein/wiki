@@ -53,7 +53,7 @@ describe("hookGuidance (skill → artifact persistence)", () => {
 
   test("a registered skill in an unlinked repo prompts for --project", async () => {
     const out = await hookGuidance("handoff", await repoDir(null));
-    expect(out).toContain("wiki create handover --project <name> --body -");
+    expect(out).toContain("wiki create handoff --project <name> --body -");
   });
 });
 

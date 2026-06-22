@@ -245,7 +245,7 @@ async function createDedupFixture(project: string, options: DedupFixtureOptions 
   await mkdir(join(projectPath, "prds"), { recursive: true });
   await mkdir(join(projectPath, "slices"));
   await mkdir(join(projectPath, "adrs"));
-  await mkdir(join(projectPath, "handovers"));
+  await mkdir(join(projectPath, "handoffs"));
   await mkdir(join(projectPath, "docs"));
 
   const stateFile = join(root, "qmd-state.log");

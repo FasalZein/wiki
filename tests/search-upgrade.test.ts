@@ -149,7 +149,7 @@ async function createSearchFixture(project: string): Promise<SearchFixture> {
   await mkdir(join(projectPath, "prds"), { recursive: true });
   await mkdir(join(projectPath, "slices"));
   await mkdir(join(projectPath, "adrs"));
-  await mkdir(join(projectPath, "handovers"));
+  await mkdir(join(projectPath, "handoffs"));
   await mkdir(join(projectPath, "docs"));
   const researchPath = join(root, "research");
   await mkdir(researchPath);

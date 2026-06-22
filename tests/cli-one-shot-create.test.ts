@@ -156,7 +156,7 @@ async function createFixtureVault(project: string): Promise<string> {
   const vaultRoot = await mkdtemp(join(tmpdir(), "wiki-vault-"));
   tempPaths.push(vaultRoot);
   const projectPath = join(vaultRoot, "projects", project);
-  for (const dir of ["prds", "slices", "adrs", "handovers", "docs"]) {
+  for (const dir of ["prds", "slices", "adrs", "handoffs", "docs"]) {
     await mkdir(join(projectPath, dir), { recursive: true });
   }
   const qmdCommand = join(vaultRoot, "fake-qmd");

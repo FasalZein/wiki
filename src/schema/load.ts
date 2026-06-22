@@ -13,7 +13,7 @@ export function resolveTemplatePath(filename: string): string {
 }
 
 /**
- * A kind id (e.g. "prd", "handover"). Kinds are defined in wiki.json and validated
+ * A kind id (e.g. "prd", "handoff"). Kinds are defined in wiki.json and validated
  * at runtime against the loaded registry + a matching templates/<kind>.md — not a
  * compile-time union, so a skill can add a kind by config without touching the type.
  */

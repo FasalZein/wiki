@@ -9,7 +9,7 @@ let vaultRoot: string;
 let prevVaultRoot: string | undefined;
 let prevQmd: string | undefined;
 
-const ARTIFACT_FOLDERS = ["prds", "slices", "adrs", "handovers", "docs", "sessions"];
+const ARTIFACT_FOLDERS = ["prds", "slices", "adrs", "handoffs", "docs", "sessions"];
 
 function capture(): { restore: () => void; out: () => string; err: () => string } {
   const ol = console.log;
@@ -64,14 +64,14 @@ describe("create echoes destination path", () => {
     expect(all).toContain("projects/p/docs/runbooks/DOC-0001");
   });
 
-  test("create handover works through the generic config-driven path (ADR-0035)", async () => {
-    // handover never had a bespoke create fn; it is creatable purely from its
+  test("create handoff works through the generic config-driven path (ADR-0035)", async () => {
+    // handoff never had a bespoke create fn; it is creatable purely from its
     // wiki.json entry + template, proving the full collapse needs no per-kind code.
     const cap = capture();
-    const result = await dispatch(["create", "handover", "--project", "p", "--phase", "plan"]);
+    const result = await dispatch(["create", "handoff", "--project", "p", "--phase", "plan"]);
     cap.restore();
     expect(result.code).toBe(0);
     const all = cap.out() + cap.err();
-    expect(all).toContain("projects/p/handovers/HANDOVER-0001");
+    expect(all).toContain("projects/p/handoffs/HANDOFF-0001");
   });
 });

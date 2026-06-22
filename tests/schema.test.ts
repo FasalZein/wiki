@@ -9,12 +9,12 @@ describe("template schemas", () => {
     const prd = await loadTemplate("prd");
     const slice = await loadTemplate("slice");
     const decision = await loadTemplate("decision");
-    const handover = await loadTemplate("handover");
+    const handoff = await loadTemplate("handoff");
 
     expect(prd.template).toBe("prd");
     expect(slice.template).toBe("slice");
     expect(decision.template).toBe("decision");
-    expect(handover.template).toBe("handover");
+    expect(handoff.template).toBe("handoff");
 
     const prdId = prd.fields.find((field) => field.name === "id");
     expect(prdId).toEqual({
@@ -38,13 +38,13 @@ describe("template schemas", () => {
     });
 
     expect(decision.fields.length).toBeGreaterThan(0);
-    expect(handover.fields.length).toBeGreaterThan(0);
+    expect(handoff.fields.length).toBeGreaterThan(0);
   });
 
   test("validates fully populated input and returns the normalized record", async () => {
-    const schema = await loadTemplate("handover");
+    const schema = await loadTemplate("handoff");
     const input = {
-      id: "HANDOVER-0001",
+      id: "HANDOFF-0001",
       project: "wiki-v2",
       session_date: "2026-05-25",
       phase: "red",

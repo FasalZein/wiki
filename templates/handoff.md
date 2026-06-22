@@ -1,15 +1,15 @@
 ---
-template: handover
+template: handoff
 version: 1
 schema:
-  id:             { type: string,    required: true,  pattern: "HANDOVER-\\d{4,}" }
+  id:             { type: string,    required: true,  pattern: "HANDOFF-\\d{4,}" }
   aliases:         { type: list,      default: [] }
   project:        { type: string,    required: true }
   session_date:   { type: date,      required: true, auto: true }
-  phase:          { type: enum,      required: true,  values: [plan, prd, slice, red, green, review, close, handover, ad-hoc] }
-  next_phase:     { type: enum,      values: [plan, prd, slice, red, green, review, close, handover, ad-hoc] }
+  phase:          { type: enum,      required: true,  values: [plan, prd, slice, red, green, review, close, handoff, ad-hoc] }
+  next_phase:     { type: enum,      values: [plan, prd, slice, red, green, review, close, handoff, ad-hoc] }
   active_prd:     { type: link,      target: prd, description: "PRD this session was operating on, if any" }
-  active_slices:  { type: link_list, target: slice, default: [], description: "Slices in progress at handover time" }
+  active_slices:  { type: link_list, target: slice, default: [], description: "Slices in progress at handoff time" }
   decisions_made: { type: link_list, target: decision, default: [] }
   suggested_skills: { type: list,    default: [], description: "Skills the next agent should load on resume" }
   status:         { type: enum,      required: true, values: [open, completed, archived], default: open }
@@ -22,7 +22,7 @@ const project = await tp.system.prompt("Project name");
 const session_date = tp.date.now("YYYY-MM-DD");
 -%>
 -->
-# Handover {{id}} — {{title}}
+# Handoff {{id}} — {{title}}
 
 > {{project}} · {{session_date}} · phase: {{phase}} → next: {{next_phase}} · `INPUT[select(option(open), option(completed), option(archived)):status]`
 
@@ -59,7 +59,7 @@ const session_date = tp.date.now("YYYY-MM-DD");
 
 {{pointers}}
 
-> Paths to relevant files, research briefs, prior handovers. References, not copies.
+> Paths to relevant files, research briefs, prior handoffs. References, not copies.
 
 ## Sensitive data
 

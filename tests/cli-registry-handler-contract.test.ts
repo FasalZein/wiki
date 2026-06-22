@@ -44,7 +44,7 @@ describe("registry ↔ handler contract (ADR-0023)", () => {
   test("every advertised create subverb is a real kind in wiki.json (config-driven dispatch)", () => {
     // ADR-0035: handleCreate dispatches every kind in ARTIFACTS (wiki.json), not a
     // hardcoded union. USAGE_REGISTRY curates per-form help for a *subset* of those
-    // kinds (handover has none, relying on generic help + `wiki schema`), so the
+    // kinds (handoff has none, relying on generic help + `wiki schema`), so the
     // contract is a subset check: every curated subverb must name a real kind.
     const kinds = Object.keys(ARTIFACTS);
     for (const sub of Object.keys(USAGE_REGISTRY.create?.subverbs ?? {})) {

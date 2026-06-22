@@ -21,7 +21,7 @@ describe("project CLI", () => {
     expect(entries).toContain("prds");
     expect(entries).toContain("slices");
     expect(entries).toContain("adrs");
-    expect(entries).toContain("handovers");
+    expect(entries).toContain("handoffs");
     expect(entries).toContain("docs");
     expect(entries).not.toContain("architecture");
   });

@@ -432,10 +432,10 @@ consequences: What follows.
 The forces at play.
 `;
 
-  const HANDOVER_PROSE = `---
-id: HANDOVER-0001
+  const HANDOFF_PROSE = `---
+id: HANDOFF-0001
 aliases:
-  - HANDOVER-0001
+  - HANDOFF-0001
 project: wiki-v2
 session_date: '2026-05-25'
 phase: plan
@@ -450,11 +450,11 @@ created: '2026-05-25'
 X.
 `;
 
-  const PRE_SCHEMA_HANDOVER = `---
-handover: 0001
+  const PRE_SCHEMA_HANDOFF = `---
+handoff: 0001
 project: wiki-v2
 ---
-# Handover
+# Handoff
 
 Old grilling session notes.
 `;
@@ -496,8 +496,8 @@ X.
     const vaultRoot = await createFixtureVault("wiki-v2");
     const projectPath = join(vaultRoot, "projects", "wiki-v2");
     await writeFile(join(projectPath, "adrs", "ADR-0001-narrative-in-frontmatter.md"), ADR_NARRATIVE);
-    await writeFile(join(projectPath, "handovers", "HANDOVER-0001-prose-decisions.md"), HANDOVER_PROSE);
-    await writeFile(join(projectPath, "handovers", "0001-grilling-session-1.md"), PRE_SCHEMA_HANDOVER);
+    await writeFile(join(projectPath, "handoffs", "HANDOFF-0001-prose-decisions.md"), HANDOFF_PROSE);
+    await writeFile(join(projectPath, "handoffs", "0001-grilling-session-1.md"), PRE_SCHEMA_HANDOFF);
     await writeFile(join(projectPath, "prds", "PRD-0042-empty-draft-prd.md"), GUIDANCE_ONLY_PRD);
     await writeSlice(vaultRoot, "SLICE-0099-no-status-field.md", MISSING_STATUS_SLICE);
 
@@ -582,7 +582,7 @@ async function createFixtureVault(project: string): Promise<string> {
   await mkdir(join(projectPath, "prds"), { recursive: true });
   await mkdir(join(projectPath, "slices"));
   await mkdir(join(projectPath, "adrs"));
-  await mkdir(join(projectPath, "handovers"));
+  await mkdir(join(projectPath, "handoffs"));
   await mkdir(join(projectPath, "docs"));
   await writeFile(join(projectPath, "_project.md"), `# ${project}\n`);
   return vaultRoot;

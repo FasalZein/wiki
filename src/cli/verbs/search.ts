@@ -3,7 +3,7 @@
  * registration, qmd query invocation, and stable stdout formatting only.
  *
  * Type filters use path-prefix filtering (`prds/`, `slices/`, `adrs/`,
- * `handovers/`) rather than QMD frontmatter filters because the locked vault
+ * `handoffs/`) rather than QMD frontmatter filters because the locked vault
  * layout already gives a cheap, stable template mapping. If QMD JSON later
  * exposes richer frontmatter, this can move into runQuery.
  */
