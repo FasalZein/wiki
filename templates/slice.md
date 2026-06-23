@@ -26,18 +26,9 @@ schema:
   created:         { type: date,      auto: true }
   updated:         { type: date,      auto: true }
 ---
-<!--
-<%*
-// Only runs when created via Templater in Obsidian
-const title = await tp.system.prompt("Title");
-const project = await tp.system.prompt("Project name");
-const parent_prd = await tp.system.prompt("Parent PRD (e.g. PRD-001)");
-const type = await tp.system.suggester(["AFK", "HITL"], ["AFK", "HITL"]);
--%>
--->
 # {{title}}
 
-> {{id}} · {{project}} · `INPUT[select(option(planned), option(red), option(green), option(closed), option(blocked), option(superseded)):status]` · `INPUT[select(option(AFK), option(HITL)):type]`
+> {{id}} · {{project}} · {{status}} · {{type}}
 
 {{summary}}
 
@@ -48,9 +39,6 @@ const type = await tp.system.suggester(["AFK", "HITL"], ["AFK", "HITL"]);
 ## What to build
 
 {{what_to_build}}
-
-> A concise description of this vertical slice. Describe the end-to-end behavior, not layer-by-layer implementation.
-> No file paths. No code snippets except: a prototype snippet that encodes a decision more precisely than prose can. Trim to the decision-rich parts.
 
 ## Acceptance criteria
 
@@ -63,8 +51,6 @@ const type = await tp.system.suggester(["AFK", "HITL"], ["AFK", "HITL"]);
 - [ ] Implement feature
 - [ ] Verify acceptance criteria
 
-> Slice close (`wiki slice close`) is gated on every item above being done.
-
 ## Blocked by
 
 {{#each blocked_by}}- [[{{this}}]]
@@ -76,5 +62,3 @@ const type = await tp.system.suggester(["AFK", "HITL"], ["AFK", "HITL"]);
 - **Red log:** {{red_log_ref}}
 - **Green log:** {{green_log_ref}}
 - **Review verdict:** {{review_verdict}}
-
-> Set automatically by the slice state machine. See ADR-0005.

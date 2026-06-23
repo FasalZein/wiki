@@ -26,8 +26,6 @@ schema:
 
 {{content}}
 
-> The main body of this knowledge artifact.
-
 ## Tags
 
 {{#each tags}}`{{this}}` {{else}}_none_{{/each}}

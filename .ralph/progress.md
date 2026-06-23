@@ -24,3 +24,12 @@
 - ponytail: groups sorted alpha, General last — deterministic & idempotent, no config knob.
 - Test (cli-sync): grouped SLICE under `## Backend`, ungrouped PRD under `## General`, Backend heading before General. Existing SLICE-0072 test still green (entries now under `## General` but assertions are substring/order — unaffected).
 - Verify: bun run build && bunx tsc --noEmit && bun test tests/ → 259 pass, 0 fail.
+
+## Iter 4 — SLICE-0074 (strip template-bleed, source-only) ✅
+- Read SLICE-0058: renderer already strips `<!-- <%* ... -->` Templater blocks and guidance blockquotes for FILLED sections (render.ts). SLICE-0074 is the SOURCE fix so clean templates don't depend on the renderer scrubbing them.
+- Edited all 5 templates/*.md: removed the `<!-- <%* ... -->` Templater comment blocks (prd/slice/decision), replaced `INPUT[select(...):status]`/`:type]`/`:triage_label]` widgets with plain `{{status}}`/`{{type}}`/`{{triage_label}}` placeholders (substituted from values at render), and removed every instructional `>` blockquote. Kept fixed section headings + the summary line.
+- handoff "## Sensitive data" had only a guidance blockquote → replaced with a `{{sensitive_data}}` authored-body placeholder (consistent with produced/open/pointers, renders empty when unfilled).
+- slice: also dropped the close-gate blockquote under Todo and the state-machine blockquote under Evidence (de-workflow guardrail).
+- Did NOT touch existing vault artifacts (deferred SLICE-0075).
+- New test tests/cli-template-bleed.test.ts: creates all 5 kinds in a temp vault, asserts no `INPUT[select`, no `<%*`, no instructional blockquotes in the body.
+- Verify: bun run build && bunx tsc --noEmit && bun test tests/ → 264 pass, 0 fail.

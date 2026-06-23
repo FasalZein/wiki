@@ -52,7 +52,7 @@
         "Do NOT modify existing vault artifacts (that is deferred SLICE-0075)",
         "Verify: bun run build && bunx tsc --noEmit && bun test tests/"
       ],
-      "passes": false,
+      "passes": true,
       "regression_notes": ""
     }
   ],
