@@ -38,7 +38,7 @@
         "Add a test (temp vault): grouped artifacts appear under their group heading, ungrouped under General",
         "Verify: bun run build && bunx tsc --noEmit && bun test tests/"
       ],
-      "passes": false,
+      "passes": true,
       "regression_notes": ""
     },
     {

@@ -17,3 +17,10 @@
 - ponytail: list not table — summaries can contain `|`.
 - Tests: cli-sync — sync writes index, sorted PRD<SLICE-0001<SLICE-0002, grandfathered PRD without summary renders, re-run byte-identical. cli-prd — create never writes index.md (AC#4, create stays pure).
 - Verify: bun run build && bunx tsc --noEmit && bun test tests/ → 258 pass, 0 fail.
+
+## Iter 3 — SLICE-0073 (group: sections the index) ✅
+- Added optional `group: { type: string }` to all 5 template schemas (after summary; handoff after summary too). Not required → grandfathered files & existing fixtures unaffected.
+- index-md.ts: Entry gains `group` (`field(data,"group") || "General"`). After the kind/id sort, derive unique groups sorted alphabetically with `General` forced LAST, then emit a `## <group>` heading per group and its filtered entries. Within a group, original kind-then-id order is preserved (filter is stable).
+- ponytail: groups sorted alpha, General last — deterministic & idempotent, no config knob.
+- Test (cli-sync): grouped SLICE under `## Backend`, ungrouped PRD under `## General`, Backend heading before General. Existing SLICE-0072 test still green (entries now under `## General` but assertions are substring/order — unaffected).
+- Verify: bun run build && bunx tsc --noEmit && bun test tests/ → 259 pass, 0 fail.

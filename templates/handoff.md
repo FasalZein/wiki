@@ -6,6 +6,7 @@ schema:
   aliases:         { type: list,      default: [] }
   project:        { type: string,    required: true }
   summary:        { type: string,    required: true,  min: 10, max: 200, description: "One-line scannable summary, rendered atop the body" }
+  group:          { type: string,    description: "Optional section heading for this artifact in the generated index.md" }
   session_date:   { type: date,      required: true, auto: true }
   phase:          { type: enum,      required: true,  values: [plan, prd, slice, handoff, ad-hoc] }
   decisions_made: { type: link_list, target: decision, default: [] }

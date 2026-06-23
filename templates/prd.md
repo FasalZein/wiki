@@ -6,6 +6,7 @@ schema:
   aliases:         { type: list,      default: [] }
   title:        { type: string,    required: true,  min: 5, max: 100 }
   summary:      { type: string,    required: true,  min: 10, max: 200, description: "One-line scannable summary, rendered atop the body" }
+  group:        { type: string,    description: "Optional section heading for this artifact in the generated index.md" }
   project:      { type: string,    required: true,  description: "Project name; must match project folder" }
   status:       { type: enum,      required: true,  values: [draft, ready, in-progress, closed, superseded], default: draft }
   triage_label: { type: enum,      values: [needs-triage, ready-for-agent, blocked, deferred], default: needs-triage }

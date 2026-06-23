@@ -6,6 +6,7 @@ schema:
   aliases:         { type: list,      default: [] }
   title:           { type: string,    required: true,  min: 5, max: 80 }
   summary:         { type: string,    required: true,  min: 10, max: 200, description: "One-line scannable summary, rendered atop the body" }
+  group:           { type: string,    description: "Optional section heading for this artifact in the generated index.md" }
   project:         { type: string,    required: true }
   parent_prd:      { type: link,      target: prd }
   status:          { type: enum,      required: true, values: [planned, red, green, closed, blocked, superseded], default: planned }

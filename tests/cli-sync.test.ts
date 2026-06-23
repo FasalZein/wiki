@@ -140,6 +140,28 @@ describe("sync CLI", () => {
     expect(await readFile(indexPath, "utf8")).toBe(first);
   });
 
+  test("sync sections index.md by group: frontmatter; ungrouped fall under General (SLICE-0073)", async () => {
+    const fixture = await createSyncFixture("wiki-v2");
+    await writeFile(
+      join(fixture.projectPath, "slices", "SLICE-0001.md"),
+      "---\nid: SLICE-0001\ntitle: Grouped slice\nsummary: A grouped slice.\nstatus: green\ngroup: Backend\n---\nbody\n",
+    );
+    await writeFile(
+      join(fixture.projectPath, "prds", "PRD-0001.md"),
+      "---\nid: PRD-0001\ntitle: Ungrouped PRD\nsummary: No group here.\nstatus: draft\n---\nbody\n",
+    );
+
+    expect((await runWiki(["sync", "--project", "wiki-v2"], fixture)).exitCode).toBe(0);
+
+    const index = await readFile(join(fixture.projectPath, "index.md"), "utf8");
+    expect(index).toContain("## Backend");
+    expect(index).toContain("## General");
+    // grouped artifact under its heading; ungrouped under General (which sorts last)
+    expect(index.indexOf("## Backend")).toBeLessThan(index.indexOf("[[SLICE-0001]]"));
+    expect(index.indexOf("## General")).toBeLessThan(index.indexOf("[[PRD-0001]]"));
+    expect(index.indexOf("## Backend")).toBeLessThan(index.indexOf("## General"));
+  });
+
   test("sync exits 10 and surfaces qmd stderr when qmd fails", async () => {
     const fixture = await createSyncFixture("wiki-v2", { failUpdate: true });
 

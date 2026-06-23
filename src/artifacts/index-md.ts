@@ -12,7 +12,10 @@ type Entry = {
   title: string;
   summary: string;
   status: string;
+  group: string;
 };
+
+const DEFAULT_GROUP = "General";
 
 /** Definition-order kind ranking from wiki.json — a stable total order for sort,
  *  independent of readdir's unstable traversal order. */
@@ -47,6 +50,7 @@ export async function writeProjectIndex(vaultRoot: string, project: string): Pro
       title: field(data, "title"),
       summary: field(data, "summary"),
       status: field(data, "status"),
+      group: field(data, "group") || DEFAULT_GROUP,
     });
   }
 
@@ -55,13 +59,23 @@ export async function writeProjectIndex(vaultRoot: string, project: string): Pro
     return k !== 0 ? k : a.id.localeCompare(b.id);
   });
 
+  // Group headings ordered alphabetically, but General always last.
+  const groups = [...new Set(entries.map((e) => e.group))].sort((a, b) => {
+    if (a === DEFAULT_GROUP) return 1;
+    if (b === DEFAULT_GROUP) return -1;
+    return a.localeCompare(b);
+  });
+
   const lines = [`# ${project} index`, ""];
-  for (const e of entries) {
-    const status = e.status === "" ? "" : ` (${e.status})`;
-    const summary = e.summary === "" ? "" : ` — ${e.summary}`;
-    lines.push(`- [[${e.id}]] ${e.title}${status}${summary}`);
+  for (const group of groups) {
+    lines.push(`## ${group}`, "");
+    for (const e of entries.filter((e) => e.group === group)) {
+      const status = e.status === "" ? "" : ` (${e.status})`;
+      const summary = e.summary === "" ? "" : ` — ${e.summary}`;
+      lines.push(`- [[${e.id}]] ${e.title}${status}${summary}`);
+    }
+    lines.push("");
   }
-  lines.push("");
 
   await writeFile(join(root, "index.md"), lines.join("\n"));
 }
