@@ -10,3 +10,10 @@
 - Fixtures: added `--summary`/`summary:` to every create/createArtifact call and exact-error `validate()` assertions across artifacts, schema, path-containment, id-generation, cli-prd/doc/decision/slice/dedup/mutate/one-shot/create-path-echo/fmt tests.
 - New tests: prd renders summary line; prd create without --summary exits 1 naming summary; decision artifact stripped of summary still reads (grandfather).
 - Verify: `bun run build && bunx tsc --noEmit && bun test tests/` → 256 pass, 0 fail.
+
+## Iter 2 — SLICE-0072 (per-project index.md at sync) ✅
+- New `src/artifacts/index-md.ts`: `writeProjectIndex(vaultRoot, project)` recursively scans `projects/<project>/` for *.md (excludes index.md/_project.md), parses frontmatter via gray-matter, skips files whose id prefix doesn't resolve to a kind (typeForId undefined). Sorts by KIND_ORDER (wiki.json definition order — stable, not readdir order) then id.localeCompare. Renders plain markdown list `- [[id]] title (status) — summary`; missing status/summary render empty (grandfathered files don't crash). Fixed header `# <project> index`, trailing newline → byte-identical re-run.
+- sync.ts: import + one call after the embed loop, inside the try, before `return {code:0}`, called once with `project` (not per-target — research isn't a project dir; qmd failure correctly skips index). No stdout writes.
+- ponytail: list not table — summaries can contain `|`.
+- Tests: cli-sync — sync writes index, sorted PRD<SLICE-0001<SLICE-0002, grandfathered PRD without summary renders, re-run byte-identical. cli-prd — create never writes index.md (AC#4, create stays pure).
+- Verify: bun run build && bunx tsc --noEmit && bun test tests/ → 258 pass, 0 fail.

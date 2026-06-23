@@ -63,6 +63,17 @@ describe("prd CLI", () => {
     expect(result.stdout).toBe("");
   });
 
+  test("prd create never writes index.md (create stays pure, SLICE-0072)", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+
+    expect((await runWiki(createArgs(), vaultRoot)).exitCode).toBe(0);
+
+    const indexExists = await readFile(join(vaultRoot, "projects", "wiki-v2", "index.md"), "utf8")
+      .then(() => true)
+      .catch(() => false);
+    expect(indexExists).toBe(false);
+  });
+
   test("prd create exits 1 and names a schema-invalid field", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
     const args = createArgs();

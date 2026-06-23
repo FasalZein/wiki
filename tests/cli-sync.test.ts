@@ -109,6 +109,37 @@ describe("sync CLI", () => {
     });
   });
 
+  test("sync writes a per-project index.md listing artifacts; re-run is byte-identical (SLICE-0072)", async () => {
+    const fixture = await createSyncFixture("wiki-v2");
+    await writeFile(
+      join(fixture.projectPath, "slices", "SLICE-0002-b.md"),
+      "---\nid: SLICE-0002\ntitle: Second slice\nsummary: The second slice.\nstatus: planned\n---\nbody\n",
+    );
+    await writeFile(
+      join(fixture.projectPath, "slices", "SLICE-0001-a.md"),
+      "---\nid: SLICE-0001\ntitle: First slice\nsummary: The first slice.\nstatus: green\n---\nbody\n",
+    );
+    // grandfathered: no summary field — must render without crashing
+    await writeFile(
+      join(fixture.projectPath, "prds", "PRD-0001.md"),
+      "---\nid: PRD-0001\ntitle: A PRD\nstatus: draft\n---\nbody\n",
+    );
+
+    expect((await runWiki(["sync", "--project", "wiki-v2"], fixture)).exitCode).toBe(0);
+
+    const indexPath = join(fixture.projectPath, "index.md");
+    const first = await readFile(indexPath, "utf8");
+    expect(first).toContain("# wiki-v2 index");
+    expect(first).toContain("[[PRD-0001]] A PRD (draft)");
+    expect(first).toContain("[[SLICE-0001]] First slice (green) — The first slice.");
+    // sorted by kind then id: PRD before SLICE, SLICE-0001 before SLICE-0002
+    expect(first.indexOf("PRD-0001")).toBeLessThan(first.indexOf("SLICE-0001"));
+    expect(first.indexOf("SLICE-0001")).toBeLessThan(first.indexOf("SLICE-0002"));
+
+    expect((await runWiki(["sync", "--project", "wiki-v2"], fixture)).exitCode).toBe(0);
+    expect(await readFile(indexPath, "utf8")).toBe(first);
+  });
+
   test("sync exits 10 and surfaces qmd stderr when qmd fails", async () => {
     const fixture = await createSyncFixture("wiki-v2", { failUpdate: true });
 

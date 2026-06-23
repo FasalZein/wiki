@@ -1,11 +1,19 @@
 ---
-running: false
-iteration: 8
-max_iterations: 14
-started_at: 2026-06-22T16:11:30Z
-completed_at: 2026-06-22T17:57:58Z
-stop_reason: complete
-error_count: 1
+running: true
+iteration: 2
+max_iterations: 8
+started_at: 2026-06-23T16:26:00Z
+completed_at: null
+stop_reason: null
+error_count: 0
+bundle_mode: true
+bundle_rejection_count: 0
+owner_pid: 64112
+model_id: default
+thinking_level: default
+last_promise: NEXT
+last_subtype: success
+retry_count: 0
 ---
 
 @.ralph/plan.md @.ralph/progress.md
