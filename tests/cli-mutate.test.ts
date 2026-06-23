@@ -122,10 +122,10 @@ async function fixture(): Promise<Fixture> {
 /** Seed one slice (and its parent PRD once) via the real create path; return the new slice id. */
 async function seedSlice(f: Fixture): Promise<string> {
   if ((await readdir(join(f.projectPath, "prds"))).length === 0) {
-    const prd = await runWiki(["create", "prd", "--title", "Parent PRD for mutate tests", "--project", "wiki-v2", "--force-new", "Seeding a parent PRD for the mutation verb tests"], f);
+    const prd = await runWiki(["create", "prd", "--title", "Parent PRD for mutate tests", "--summary", "Parent PRD for mutate tests.", "--project", "wiki-v2", "--force-new", "Seeding a parent PRD for the mutation verb tests"], f);
     expect(prd.exitCode).toBe(0);
   }
-  const result = await runWiki(["create", "slice", "--title", "Slice under test for mutation", "--project", "wiki-v2", "--parent-prd", "PRD-0001", "--acceptance", "does the thing", "--force-new", "Seeding a slice to mutate in the verb tests"], f);
+  const result = await runWiki(["create", "slice", "--title", "Slice under test for mutation", "--summary", "Slice under test for mutation.", "--project", "wiki-v2", "--parent-prd", "PRD-0001", "--acceptance", "does the thing", "--force-new", "Seeding a slice to mutate in the verb tests"], f);
   expect(result.exitCode).toBe(0);
   return result.stdout.trim();
 }

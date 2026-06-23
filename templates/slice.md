@@ -5,6 +5,7 @@ schema:
   id:              { type: string,    required: true,  pattern: "SLICE-\\d{3,}" }
   aliases:         { type: list,      default: [] }
   title:           { type: string,    required: true,  min: 5, max: 80 }
+  summary:         { type: string,    required: true,  min: 10, max: 200, description: "One-line scannable summary, rendered atop the body" }
   project:         { type: string,    required: true }
   parent_prd:      { type: link,      target: prd }
   status:          { type: enum,      required: true, values: [planned, red, green, closed, blocked, superseded], default: planned }
@@ -36,6 +37,8 @@ const type = await tp.system.suggester(["AFK", "HITL"], ["AFK", "HITL"]);
 # {{title}}
 
 > {{id}} · {{project}} · `INPUT[select(option(planned), option(red), option(green), option(closed), option(blocked), option(superseded)):status]` · `INPUT[select(option(AFK), option(HITL)):type]`
+
+{{summary}}
 
 ## Parent
 

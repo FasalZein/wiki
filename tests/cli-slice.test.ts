@@ -55,7 +55,7 @@ describe("slice CLI", () => {
     const first = await runWiki(createArgs(), vaultRoot);
     expect(first.exitCode).toBe(0);
     const second = await runWiki(
-      ["create", "slice", "--title", "Second slice authoring", "--project", "wiki-v2", "--parent-prd", "PRD-0001"],
+      ["create", "slice", "--title", "Second slice authoring", "--summary", "The second slice authoring flow.", "--project", "wiki-v2", "--parent-prd", "PRD-0001"],
       vaultRoot,
     );
     expect(second.exitCode).toBe(0);
@@ -144,6 +144,8 @@ function createArgs(): string[] {
     "slice",
     "--title",
     "Build slice authoring",
+    "--summary",
+    "Build the slice authoring flow.",
     "--project",
     "wiki-v2",
     "--parent-prd",
@@ -152,7 +154,7 @@ function createArgs(): string[] {
 }
 
 async function seedPrd(vaultRoot: string): Promise<void> {
-  const result = await runWiki(["create", "prd", "--title", "Core wiki CLI", "--project", "wiki-v2"], vaultRoot);
+  const result = await runWiki(["create", "prd", "--title", "Core wiki CLI", "--summary", "The core wiki CLI surface.", "--project", "wiki-v2"], vaultRoot);
   expect(result.exitCode).toBe(0);
 }
 

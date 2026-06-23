@@ -54,6 +54,8 @@ function createArgs(): string[] {
     "decision",
     "--title",
     "Use SQLite",
+    "--summary",
+    "Use SQLite for the local index.",
     "--context",
     "Need a durable local index.",
     "--decision",

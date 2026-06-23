@@ -1,42 +1,77 @@
-[
-  {
-    "id": 1,
-    "text": "Path-traversal containment for --project and artifact id (assertSafeSegment in paths.ts; validate id in store.ts; refuse colliding relocate). Plan: .ralph/audit-plans/001-path-containment.md",
-    "done": true
-  },
-  {
-    "id": 2,
-    "text": "Roll back the supersede mutation on a failed create (pre-flight parent_prd read + restore superseded artifact in catch). Plan: .ralph/audit-plans/002-supersede-rollback.md",
-    "done": true
-  },
-  {
-    "id": 3,
-    "text": "Collision-safe ID allocation (exclusive 'wx' write + bounded retry in createArtifact). Plan: .ralph/audit-plans/003-nextid-race.md",
-    "done": true
-  },
-  {
-    "id": 4,
-    "text": "Guard the qmd JSON.parse -> QmdError + export & unit-test parseQmdResults. Plan: .ralph/audit-plans/004-qmd-parse-hardening.md",
-    "done": true
-  },
-  {
-    "id": 5,
-    "text": "Treat null frontmatter value as absent in validate (coalesce null->undefined). Plan: .ralph/audit-plans/005-null-field-validate.md",
-    "done": true
-  },
-  {
-    "id": 6,
-    "text": "Consolidate project resolution (projectPath() at 9 sites; converge fmt/sync onto loadProjectConfig+projectErrorMessage+exit-10). Plan: .ralph/audit-plans/006-project-resolution-consolidation.md",
-    "done": true
-  },
-  {
-    "id": 7,
-    "text": "Remove de-workflow dead code (test_command flag/field/usage, appendField+AppendFieldInput+test, research.sources, js-yaml.d.ts). Plan: .ralph/audit-plans/007-deworkflow-dead-code.md",
-    "done": true
-  },
-  {
-    "id": 8,
-    "text": "Fix the test script footgun (package.json: bun test -> bun test tests/). Plan: .ralph/audit-plans/008-test-script-footgun.md",
-    "done": true
+{
+  "version": 1,
+  "items": [
+    {
+      "category": "feature",
+      "description": "SLICE-0071: required summary field on all 5 template schemas, rendered atop the body, exposed as the --summary create flag",
+      "steps": [
+        "Add `summary: { type: string, required: true, min: 10, max: 200 }` to the schema block of all five templates/*.md (prd, slice, decision, doc, handoff)",
+        "Render a summary line at the top of each template body (under the id/title line)",
+        "Confirm createGeneric auto-derives the --summary flag and validation enforces min/max; omitting --summary fails with a missing-required-field error",
+        "Update existing test fixtures / create calls that now miss the required summary so the suite stays green",
+        "Add a test: create with --summary succeeds and renders the line; create without --summary fails; an existing artifact lacking summary still validates on read (grandfathered)",
+        "Verify: bun run build && bunx tsc --noEmit && bun test tests/"
+      ],
+      "passes": true,
+      "regression_notes": ""
+    },
+    {
+      "category": "feature",
+      "description": "SLICE-0072: generate a static per-project index.md at wiki sync (id, title, summary, status from frontmatter)",
+      "steps": [
+        "In src/cli/verbs/sync.ts, after the qmd embed loop, scan every artifact under projects/<project>/, read frontmatter (id, title, summary, status, group)",
+        "Write projects/<project>/index.md as plain markdown (table or list), sorted by kind then id, linked ids, no prose duplication, NO Dataview/Bases",
+        "Idempotent overwrite each sync; create must never write index.md",
+        "Add a test against a TEMP vault fixture (follow existing tests/ patterns): sync writes index.md listing the artifacts; re-running yields identical bytes",
+        "Verify: bun run build && bunx tsc --noEmit && bun test tests/"
+      ],
+      "passes": false,
+      "regression_notes": ""
+    },
+    {
+      "category": "feature",
+      "description": "SLICE-0073: group: frontmatter sections the generated index.md (no folders)",
+      "steps": [
+        "Add optional `group: { type: string }` to the kind schemas",
+        "In the index.md generator, section artifacts under ## <group> headings; ungrouped fall under ## General",
+        "No physical folder nesting; path-containment guard unchanged",
+        "Add a test (temp vault): grouped artifacts appear under their group heading, ungrouped under General",
+        "Verify: bun run build && bunx tsc --noEmit && bun test tests/"
+      ],
+      "passes": false,
+      "regression_notes": ""
+    },
+    {
+      "category": "chore",
+      "description": "SLICE-0074: strip template-bleed from all 5 templates (source fix only)",
+      "steps": [
+        "Read SLICE-0058 first to avoid duplicating the renderer work it already did on existing files",
+        "Edit all five templates/*.md: remove the Templater <%* ... %> comment block, the INPUT[select(...)] status widget, and the instructional > blockquotes under each section",
+        "Keep clean fixed section headings the author fills, and the summary line added in item 1",
+        "Verify wiki create of each of the 5 kinds (against a temp vault) produces an artifact with no bleed markers (INPUT[select, <%*, instructional blockquotes)",
+        "Do NOT modify existing vault artifacts (that is deferred SLICE-0075)",
+        "Verify: bun run build && bunx tsc --noEmit && bun test tests/"
+      ],
+      "passes": false,
+      "regression_notes": ""
+    }
+  ],
+  "runtime_contract": {
+    "verification_gates": [
+      {
+        "name": "build+tsc+tests",
+        "command": "bun run build && bunx tsc --noEmit && bun test tests/"
+      }
+    ],
+    "source_docs": [
+      "/Users/tothemoon/Knowledge/projects/wiki-v2/adrs/ADR-0036-compiled-wiki-structure-summary-field-sync-generated-index-md-group-frontmatter.md",
+      "/Users/tothemoon/Knowledge/projects/wiki-v2/slices/SLICE-0071-required-summary-field-on-every-kind-schema.md",
+      "/Users/tothemoon/Knowledge/projects/wiki-v2/slices/SLICE-0072-generate-per-project-index-md-at-wiki-sync.md",
+      "/Users/tothemoon/Knowledge/projects/wiki-v2/slices/SLICE-0073-group-frontmatter-sections-the-generated-index-md.md",
+      "/Users/tothemoon/Knowledge/projects/wiki-v2/slices/SLICE-0074-strip-template-bleed-from-all-five-templates.md"
+    ],
+    "require_commit": true,
+    "require_progress_append": true,
+    "require_one_item_per_iteration": true
   }
-]
+}

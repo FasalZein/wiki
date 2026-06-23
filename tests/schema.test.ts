@@ -46,6 +46,7 @@ describe("template schemas", () => {
     const input = {
       id: "HANDOFF-0001",
       project: "wiki-v2",
+      summary: "Handoff summary for the session.",
       session_date: "2026-05-25",
       phase: "slice",
       decisions_made: ["ADR-0001"],
@@ -59,7 +60,7 @@ describe("template schemas", () => {
   test("rejects input missing a required field with the field name", async () => {
     const schema = await loadTemplate("prd");
 
-    expect(validate(schema, { id: "PRD-001", project: "wiki-v2", status: "draft" })).toEqual({
+    expect(validate(schema, { id: "PRD-001", summary: "A populated summary here.", project: "wiki-v2", status: "draft" })).toEqual({
       ok: false,
       errors: [{ field: "title", reason: "required", expected: "string" }],
     });
@@ -72,6 +73,7 @@ describe("template schemas", () => {
       validate(schema, {
         id: "SLICE-001",
         title: "Template schema loader",
+        summary: "A populated summary here.",
         project: "wiki-v2",
         parent_prd: "PRD-001",
         status: "planned",
@@ -91,6 +93,7 @@ describe("template schemas", () => {
       validate(schema, {
         id: "ADR-0001",
         title: "Template schemas carry validation rules",
+        summary: "A populated summary here.",
         project: "wiki-v2",
         status: "maybe",
       }),
@@ -122,7 +125,7 @@ describe("template schemas", () => {
   test("rejects a string below its minimum length with the field name and minimum", async () => {
     const schema = await loadTemplate("prd");
 
-    expect(validate(schema, { id: "PRD-001", title: "Tiny", project: "wiki-v2", status: "draft" })).toEqual({
+    expect(validate(schema, { id: "PRD-001", title: "Tiny", summary: "A populated summary here.", project: "wiki-v2", status: "draft" })).toEqual({
       ok: false,
       errors: [{ field: "title", reason: "below minimum length", expected: "at least 5 characters" }],
     });
@@ -135,6 +138,7 @@ describe("template schemas", () => {
       validate(schema, {
         id: "TASK-001",
         title: "Template schema loader",
+        summary: "A populated summary here.",
         project: "wiki-v2",
         parent_prd: "PRD-001",
         status: "planned",

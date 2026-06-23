@@ -47,7 +47,7 @@ afterEach(async () => {
 describe("create echoes destination path", () => {
   test("create prd prints the vault-relative path it wrote", async () => {
     const cap = capture();
-    const result = await dispatch(["create", "prd", "--project", "p", "--title", "Some new requirement doc"]);
+    const result = await dispatch(["create", "prd", "--project", "p", "--title", "Some new requirement doc", "--summary", "Some new requirement doc summary."]);
     cap.restore();
     expect(result.code).toBe(0);
     const all = cap.out() + cap.err();
@@ -57,7 +57,7 @@ describe("create echoes destination path", () => {
 
   test("create doc prints the docs/<category>/ path", async () => {
     const cap = capture();
-    const result = await dispatch(["create", "doc", "--project", "p", "--title", "Deploy runbook for prod", "--type", "runbook"]);
+    const result = await dispatch(["create", "doc", "--project", "p", "--title", "Deploy runbook for prod", "--type", "runbook", "--summary", "Deploy runbook for prod summary."]);
     cap.restore();
     expect(result.code).toBe(0);
     const all = cap.out() + cap.err();
@@ -68,7 +68,7 @@ describe("create echoes destination path", () => {
     // handoff never had a bespoke create fn; it is creatable purely from its
     // wiki.json entry + template, proving the full collapse needs no per-kind code.
     const cap = capture();
-    const result = await dispatch(["create", "handoff", "--project", "p", "--phase", "plan"]);
+    const result = await dispatch(["create", "handoff", "--project", "p", "--phase", "plan", "--summary", "Plan-phase handoff summary."]);
     cap.restore();
     expect(result.code).toBe(0);
     const all = cap.out() + cap.err();

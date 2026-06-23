@@ -55,7 +55,7 @@ describe("artifact store", () => {
       type: "prd",
       vaultRoot,
       project: "wiki-v2",
-      fields: { title: "Core wiki CLI" },
+      fields: { title: "Core wiki CLI", summary: "The core wiki CLI surface." },
     });
 
     expect(artifact.id).toBe("PRD-0001");
@@ -74,7 +74,7 @@ describe("artifact store", () => {
       type: "prd",
       vaultRoot,
       project: "wiki-v2",
-      fields: { title: "Core wiki CLI" },
+      fields: { title: "Core wiki CLI", summary: "The core wiki CLI surface." },
     });
 
     expect(artifact.fields.aliases).toEqual(["PRD-0001"]);
@@ -89,7 +89,7 @@ describe("artifact store", () => {
       type: "prd",
       vaultRoot,
       project: "wiki-v2",
-      fields: { title: "Core wiki CLI" },
+      fields: { title: "Core wiki CLI", summary: "The core wiki CLI surface." },
     });
 
     const artifact = await readArtifact({ type: "prd", vaultRoot, project: "wiki-v2", id: "PRD-0001" });
@@ -105,7 +105,7 @@ describe("artifact store", () => {
       vaultRoot,
       project: "wiki-v2",
       category: "research",
-      fields: { title: "Native search benchmark", type: "research" },
+      fields: { title: "Native search benchmark", type: "research", summary: "Benchmark of native search options." },
     });
 
     expect(artifact.id).toBe("DOC-0001");
@@ -119,7 +119,7 @@ describe("artifact store", () => {
       vaultRoot,
       project: "wiki-v2",
       category: "runbooks",
-      fields: { title: "Deploy runbook", type: "runbook" },
+      fields: { title: "Deploy runbook", type: "runbook", summary: "How to deploy to prod." },
     });
 
     const artifact = await readArtifact({ type: "doc", vaultRoot, project: "wiki-v2", id: "DOC-0001" });
@@ -133,7 +133,7 @@ describe("artifact store", () => {
       type: "slice",
       vaultRoot,
       project: "wiki-v2",
-      fields: { title: "Build slice authoring", parent_prd: "PRD-0001", acceptance: [] },
+      fields: { title: "Build slice authoring", summary: "Build the slice authoring flow.", parent_prd: "PRD-0001", acceptance: [] },
     });
 
     expect(artifact.id).toBe("SLICE-0001");
@@ -198,6 +198,18 @@ describe("artifact store", () => {
     expect(after.fields.status).toBe("proposed");
   });
 
+  test("grandfathers an existing artifact lacking the required summary on read (SLICE-0071)", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    const created = await createArtifact({ type: "decision", vaultRoot, project: "wiki-v2", fields: decisionFields() });
+    // Simulate a pre-summary artifact: strip the summary field from disk.
+    const raw = await readFile(created.path, "utf8");
+    await writeFile(created.path, raw.replace(/^summary:.*$\n/m, ""));
+
+    const read = await readArtifact({ type: "decision", vaultRoot, project: "wiki-v2", id: "ADR-0001" });
+    expect(read.fields.summary).toBeUndefined();
+    expect(read.fields.title).toBe("Use SQLite");
+  });
+
   test("rejects setting a field not declared by the template schema", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
     await createArtifact({ type: "decision", vaultRoot, project: "wiki-v2", fields: decisionFields() });
@@ -218,6 +230,7 @@ describe("artifact store", () => {
 function decisionFields(): Record<string, unknown> {
   return {
     title: "Use SQLite",
+    summary: "Use SQLite for the local index.",
     context: "Need a durable local index.",
     decision: "Use SQLite for local persistence.",
     consequences: "Keep migrations small and explicit.",

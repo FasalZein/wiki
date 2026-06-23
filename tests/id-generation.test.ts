@@ -116,7 +116,7 @@ describe("createArtifact collision safety", () => {
         type: "prd",
         vaultRoot: vault,
         project: "test",
-        fields: { title: "Concurrent" },
+        fields: { title: "Concurrent", summary: "A populated summary here." },
       });
 
     const [a, b] = await Promise.all([make(), make()]);

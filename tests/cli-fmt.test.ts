@@ -212,7 +212,7 @@ Something with - [ ] outside the Todo section.
     const vaultRoot = await createFixtureVault("wiki-v2");
 
     const prd = await runWiki(
-      ["create", "prd", "--project", "wiki-v2", "--title", "No templater leak", "--force-new", "fixture vault has no qmd so dedup is skipped anyway"],
+      ["create", "prd", "--project", "wiki-v2", "--title", "No templater leak", "--summary", "No templater leak in output.", "--force-new", "fixture vault has no qmd so dedup is skipped anyway"],
       vaultRoot,
     );
     expect(prd.exitCode).toBe(0);
@@ -230,7 +230,7 @@ Something with - [ ] outside the Todo section.
     const vaultRoot = await createFixtureVault("wiki-v2");
 
     const prd = await runWiki(
-      ["create", "prd", "--project", "wiki-v2", "--title", "Aliases and order", "--force-new", "fixture vault has no qmd so dedup is skipped anyway"],
+      ["create", "prd", "--project", "wiki-v2", "--title", "Aliases and order", "--summary", "Aliases and order test.", "--force-new", "fixture vault has no qmd so dedup is skipped anyway"],
       vaultRoot,
     );
     expect(prd.exitCode).toBe(0);

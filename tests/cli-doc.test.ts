@@ -32,6 +32,7 @@ describe("doc CLI", () => {
     const result = await runWiki([
       "create", "doc",
       "--title", "Evidence-first architecture",
+      "--summary", "Evidence-first architecture overview.",
       "--project", "test-project",
       "--type", "reference",
       "--category", "architecture",
@@ -58,6 +59,7 @@ describe("doc CLI", () => {
     await runWiki([
       "create", "doc",
       "--title", "Some reference doc title",
+      "--summary", "A reference doc for routing test.",
       "--project", "test-project",
       "--type", "reference",
     ], vaultRoot);
@@ -87,6 +89,7 @@ describe("doc CLI", () => {
     const result = await runWiki([
       "create", "doc",
       "--title", "AWS migration research",
+      "--summary", "Research on the AWS migration.",
       "--project", "test-project",
       "--type", "research",
       "--tags", "aws,migration,infra",
@@ -146,6 +149,7 @@ describe("doc CLI", () => {
     const result = await runWiki([
       "create", "doc",
       "--title", "Another knowledge doc here",
+      "--summary", "Another knowledge doc for IDs.",
       "--project", "test-project",
       "--type", "guide",
       "--force-new", "Testing sequential ID generation for doc artifacts",
@@ -232,7 +236,7 @@ describe("doc CLI", () => {
 });
 
 function createArgs(): string[] {
-  return ["create", "doc", "--title", "Pre-deploy checklist for Kamal services", "--project", "test-project", "--type", "runbook"];
+  return ["create", "doc", "--title", "Pre-deploy checklist for Kamal services", "--summary", "Pre-deploy checklist for Kamal.", "--project", "test-project", "--type", "runbook"];
 }
 
 type CommandResult = {

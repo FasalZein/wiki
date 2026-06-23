@@ -27,6 +27,32 @@ describe("prd CLI", () => {
     expect(file).toContain("# Core wiki CLI");
   });
 
+  test("prd create renders the summary line atop the body (SLICE-0071)", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+
+    await runWiki(createArgs(), vaultRoot);
+
+    const file = await readPrd(vaultRoot, "PRD-0001");
+    expect(file).toContain("summary: The core wiki CLI surface.");
+    // rendered as a body line under the metadata `>` line, above the first heading
+    const body = file.split("\n---\n")[1] ?? file;
+    expect(body).toContain("The core wiki CLI surface.");
+    expect(body.indexOf("The core wiki CLI surface.")).toBeLessThan(body.indexOf("## Problem Statement"));
+  });
+
+  test("prd create exits 1 when --summary is omitted (SLICE-0071)", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+
+    const result = await runWiki(
+      createArgs().filter((arg) => arg !== "--summary" && arg !== "The core wiki CLI surface."),
+      vaultRoot,
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("summary");
+    expect(result.stdout).toBe("");
+  });
+
   test("prd create exits 1 and names a missing required field", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
 
@@ -51,7 +77,7 @@ describe("prd CLI", () => {
 });
 
 function createArgs(): string[] {
-  return ["create", "prd", "--title", "Core wiki CLI", "--project", "wiki-v2"];
+  return ["create", "prd", "--title", "Core wiki CLI", "--summary", "The core wiki CLI surface.", "--project", "wiki-v2"];
 }
 
 type CommandResult = {

@@ -5,6 +5,7 @@ schema:
   id:             { type: string,    required: true,  pattern: "HANDOFF-\\d{4,}" }
   aliases:         { type: list,      default: [] }
   project:        { type: string,    required: true }
+  summary:        { type: string,    required: true,  min: 10, max: 200, description: "One-line scannable summary, rendered atop the body" }
   session_date:   { type: date,      required: true, auto: true }
   phase:          { type: enum,      required: true,  values: [plan, prd, slice, handoff, ad-hoc] }
   decisions_made: { type: link_list, target: decision, default: [] }
@@ -14,6 +15,8 @@ schema:
 # Handoff {{id}} — {{title}}
 
 > {{project}} · {{session_date}} · phase: {{phase}} · `INPUT[select(option(open), option(completed), option(archived)):status]`
+
+{{summary}}
 
 ## What this session produced
 

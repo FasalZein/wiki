@@ -61,6 +61,7 @@ describe("path containment", () => {
 function decisionFields(title = "Use SQLite"): Record<string, string> {
   return {
     title,
+    summary: "A populated summary here.",
     project: "wiki-v2",
     status: "accepted",
     body: "Use SQLite for local persistence.",
