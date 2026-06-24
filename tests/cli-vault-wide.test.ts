@@ -17,7 +17,7 @@ async function makeVault(projects: string[]): Promise<Fixture> {
   const vaultRoot = join(root, "vault");
   for (const p of projects) {
     const pp = join(vaultRoot, "projects", p);
-    for (const f of ["prds", "slices", "adrs", "handovers", "docs"]) await mkdir(join(pp, f), { recursive: true });
+    for (const f of ["prds", "slices", "adrs", "handoffs", "docs"]) await mkdir(join(pp, f), { recursive: true });
     await writeFile(join(pp, "_project.md"), `---\nproject: ${p}\nrepo: /tmp/${p}\ntest_command: bun test\n---\n`);
   }
   const stateFile = join(root, "qmd-state.log");
@@ -56,7 +56,7 @@ async function makeVaultWithQmd(projectQmd: Record<string, string>): Promise<Fix
   const vaultRoot = join(root, "vault");
   for (const [p, qmd] of Object.entries(projectQmd)) {
     const pp = join(vaultRoot, "projects", p);
-    for (const f of ["prds", "slices", "adrs", "handovers", "docs"]) await mkdir(join(pp, f), { recursive: true });
+    for (const f of ["prds", "slices", "adrs", "handoffs", "docs"]) await mkdir(join(pp, f), { recursive: true });
     await writeFile(join(pp, "_project.md"), `---\nproject: ${p}\nrepo: /tmp/${p}\ntest_command: bun test\nqmd_command: ${qmd}\n---\n`);
   }
   const stateFile = join(root, "qmd-state.log");
@@ -88,7 +88,7 @@ async function runWiki(args: string[], fixture: Fixture, cwd?: string): Promise<
   const cliPath = join(repoRoot, "src", "cli.ts");
   const proc = Bun.spawn(["bun", cliPath, ...args], {
     cwd: cwd ?? repoRoot,
-    env: { ...process.env, KNOWLEDGE_VAULT_ROOT: fixture.vaultRoot, OBSIDIAN_BIN: join(import.meta.dir, "fixtures", "mock-obsidian.sh"), ...fixture.env },
+    env: { ...process.env, KNOWLEDGE_VAULT_ROOT: fixture.vaultRoot, ...fixture.env },
     stdout: "pipe", stderr: "pipe",
   });
   const [stdout, stderr, exitCode] = await Promise.all([

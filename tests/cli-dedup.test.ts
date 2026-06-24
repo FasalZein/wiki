@@ -18,8 +18,17 @@ describe("advisory dedup", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("ADR-0001\n");
     expect(await readFile(fixture.stateFile, "utf8")).toContain(
-      "query Use SQLite Need a durable local index. Use SQLite for local persistence. --json --collection wiki-v2\n",
+      "query Use SQLite Need a durable local index. Use SQLite for local persistence. Keep migrations small and explicit. --json --collection wiki-v2\n",
     );
+  });
+
+  test("create no longer nags to run wiki sync (SLICE-0064: lean delivery loop)", async () => {
+    const fixture = await createDedupFixture("wiki-v2");
+
+    const result = await runWiki(decisionArgs(), fixture);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).not.toContain("wiki sync");
   });
 
   test("prd create warns on a match but proceeds (advisory dedup)", async () => {
@@ -29,7 +38,7 @@ describe("advisory dedup", () => {
       JSON.stringify([{ path: join(fixture.projectPath, "prds", "PRD-0007.md"), score: 0.7, snippet: "Same feature" }]),
     );
 
-    const result = await runWiki(["create", "prd", "--title", "Core wiki CLI", "--project", "wiki-v2"], fixture);
+    const result = await runWiki(["create", "prd", "--title", "Core wiki CLI", "--summary", "The core wiki CLI surface.", "--project", "wiki-v2"], fixture);
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("PRD-0001\n");
@@ -64,6 +73,8 @@ describe("advisory dedup", () => {
         "prd",
         "--title",
         "Core wiki CLI",
+        "--summary",
+        "The core wiki CLI surface.",
         "--project",
         "wiki-v2",
         "--force-new",
@@ -94,7 +105,7 @@ describe("advisory dedup", () => {
   test("related-to bypasses the gate and records the link", async () => {
     const fixture = await createDedupFixture("wiki-v2");
 
-    const result = await runWiki(["create", "prd", "--title", "Core wiki CLI", "--project", "wiki-v2", "--related-to", "PRD-0007"], fixture);
+    const result = await runWiki(["create", "prd", "--title", "Core wiki CLI", "--summary", "The core wiki CLI surface.", "--project", "wiki-v2", "--related-to", "PRD-0007"], fixture);
 
     expect(result.exitCode).toBe(0);
     expect(await readFile(join(fixture.projectPath, "prds", "PRD-0001-core-wiki-cli.md"), "utf8")).toContain("related:\n  - PRD-0007");
@@ -102,9 +113,9 @@ describe("advisory dedup", () => {
 
   test("supersedes bypasses the gate and updates the old same-type artifact", async () => {
     const fixture = await createDedupFixture("wiki-v2");
-    await runWiki(["create", "prd", "--title", "Old wiki CLI", "--project", "wiki-v2", "--force-new", "Seeding old PRD without checking duplicates"], fixture);
+    await runWiki(["create", "prd", "--title", "Old wiki CLI", "--summary", "The old wiki CLI surface.", "--project", "wiki-v2", "--force-new", "Seeding old PRD without checking duplicates"], fixture);
 
-    const result = await runWiki(["create", "prd", "--title", "Core wiki CLI", "--project", "wiki-v2", "--supersedes", "PRD-0001"], fixture);
+    const result = await runWiki(["create", "prd", "--title", "Core wiki CLI", "--summary", "The core wiki CLI surface.", "--project", "wiki-v2", "--supersedes", "PRD-0001"], fixture);
 
     expect(result.exitCode).toBe(0);
     expect(await readFile(join(fixture.projectPath, "prds", "PRD-0002-core-wiki-cli.md"), "utf8")).toContain("supersedes: PRD-0001");
@@ -113,13 +124,80 @@ describe("advisory dedup", () => {
     expect(old).toContain("superseded_by: PRD-0002");
   });
 
-  test("handover create does not call QMD", async () => {
-    const fixture = await createDedupFixture("wiki-v2", { failQmd: true });
+  test("a strong dedup match is advisory by default — create proceeds (memory-layer default)", async () => {
+    const fixture = await createDedupFixture("wiki-v2");
+    await writeFile(
+      fixture.resultsFile,
+      JSON.stringify([{ path: join(fixture.projectPath, "prds", "PRD-0007.md"), score: 0.95, snippet: "Same feature" }]),
+    );
 
-    const handover = await runWiki(["handover", "--project", "wiki-v2", "--phase", "ad-hoc"], fixture);
+    const result = await runWiki(["create", "prd", "--title", "Core wiki CLI", "--summary", "The core wiki CLI surface.", "--project", "wiki-v2"], fixture);
 
-    expect(handover.exitCode).toBe(0);
-    expect(await readFile(fixture.stateFile, "utf8")).toBe("");
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toContain("advisory");
+    const prds = (await readdir(join(fixture.projectPath, "prds"))).filter((name) => name.startsWith("PRD-"));
+    expect(prds.length).toBe(1);
+  });
+
+  test("a strong dedup match blocks create when dedup_strong_blocks is opt-in enabled (strict mode)", async () => {
+    const fixture = await createDedupFixture("wiki-v2", { projectFrontmatter: "dedup_strong_blocks: true\n" });
+    await writeFile(
+      fixture.resultsFile,
+      JSON.stringify([{ path: join(fixture.projectPath, "prds", "PRD-0007.md"), score: 0.95, snippet: "Same feature" }]),
+    );
+
+    const result = await runWiki(["create", "prd", "--title", "Core wiki CLI", "--summary", "The core wiki CLI surface.", "--project", "wiki-v2"], fixture);
+
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain("refusing to create");
+    const prds = (await readdir(join(fixture.projectPath, "prds"))).filter((name) => name.startsWith("PRD-"));
+    expect(prds.length).toBe(0);
+  });
+
+  test("slice supersedes marks the old slice superseded (P0.1 regression)", async () => {
+    const fixture = await createDedupFixture("wiki-v2");
+    await seedPrd(fixture);
+    const first = await runWiki([...sliceArgs(), "--force-new", "Seeding the slice that will be superseded"], fixture);
+    expect(first.exitCode).toBe(0);
+
+    const result = await runWiki(["create", "slice", "--title", "Rebuild slice authoring", "--summary", "Rebuild the slice authoring flow.", "--project", "wiki-v2", "--parent-prd", "PRD-0001", "--supersedes", "SLICE-0001"], fixture);
+
+    expect(result.exitCode).toBe(0);
+    const sliceFiles = await readdir(join(fixture.projectPath, "slices"));
+    const newSlice = await readFile(join(fixture.projectPath, "slices", sliceFiles.find((f) => f.startsWith("SLICE-0002"))!), "utf8");
+    expect(newSlice).toContain("supersedes: SLICE-0001");
+    const oldSlice = await readFile(join(fixture.projectPath, "slices", sliceFiles.find((f) => f.startsWith("SLICE-0001"))!), "utf8");
+    expect(oldSlice).toContain("status: superseded");
+    expect(oldSlice).toContain("superseded_by: SLICE-0002");
+  });
+
+  test("a post-write supersede failure leaves no orphan (P0.2 rollback)", async () => {
+    // docs have no `superseded_by` field, so superseding one fails AFTER the new
+    // doc is written — exercising the rollback that prevents orphan + id-gap.
+    const fixture = await createDedupFixture("wiki-v2");
+    await runWiki(["create", "doc", "--title", "Old reference doc", "--summary", "An old reference doc.", "--project", "wiki-v2", "--type", "reference", "--force-new", "Seeding a doc to attempt superseding"], fixture);
+
+    const result = await runWiki(["create", "doc", "--title", "New reference doc", "--summary", "A new reference doc.", "--project", "wiki-v2", "--type", "reference", "--supersedes", "DOC-0001"], fixture);
+
+    expect(result.exitCode).not.toBe(0);
+    const remaining = await listMarkdownRecursive(join(fixture.projectPath, "docs"));
+    expect(remaining.some((name) => name.startsWith("DOC-0002"))).toBe(false);
+  });
+
+  test("a bad --parent-prd aborts before superseding the old slice (P0.2 pre-flight)", async () => {
+    const fixture = await createDedupFixture("wiki-v2");
+    await seedPrd(fixture);
+    const first = await runWiki([...sliceArgs(), "--force-new", "Seeding the slice that must stay un-superseded"], fixture);
+    expect(first.exitCode).toBe(0);
+
+    const result = await runWiki(["create", "slice", "--title", "Rebuild slice authoring", "--summary", "Rebuild the slice authoring flow.", "--project", "wiki-v2", "--parent-prd", "PRD-9999", "--supersedes", "SLICE-0001"], fixture);
+
+    expect(result.exitCode).not.toBe(0);
+    const sliceFiles = await readdir(join(fixture.projectPath, "slices"));
+    expect(sliceFiles.some((name) => name.startsWith("SLICE-0002"))).toBe(false);
+    const oldSlice = await readFile(join(fixture.projectPath, "slices", sliceFiles.find((f) => f.startsWith("SLICE-0001"))!), "utf8");
+    expect(oldSlice).not.toContain("status: superseded");
+    expect(oldSlice).not.toContain("superseded_by:");
   });
 });
 
@@ -129,6 +207,8 @@ function decisionArgs(): string[] {
     "decision",
     "--title",
     "Use SQLite",
+    "--summary",
+    "Use SQLite for the local index.",
     "--context",
     "Need a durable local index.",
     "--decision",
@@ -141,7 +221,7 @@ function decisionArgs(): string[] {
 }
 
 function sliceArgs(): string[] {
-  return ["create", "slice", "--title", "Build slice authoring", "--project", "wiki-v2", "--parent-prd", "PRD-0001"];
+  return ["create", "slice", "--title", "Build slice authoring", "--summary", "Build the slice authoring flow.", "--project", "wiki-v2", "--parent-prd", "PRD-0001"];
 }
 
 type DedupFixture = {
@@ -154,7 +234,6 @@ type DedupFixture = {
 
 type DedupFixtureOptions = {
   projectFrontmatter?: string;
-  failQmd?: boolean;
 };
 
 type CommandResult = {
@@ -166,7 +245,7 @@ type CommandResult = {
 async function runWiki(args: string[], fixture: DedupFixture): Promise<CommandResult> {
   const proc = Bun.spawn(["bun", "src/cli.ts", ...args], {
     cwd: import.meta.dir.replace(/\/tests$/, ""),
-    env: { ...process.env, KNOWLEDGE_VAULT_ROOT: fixture.vaultRoot, OBSIDIAN_BIN: join(import.meta.dir, "fixtures", "mock-obsidian.sh"), ...fixture.env },
+    env: { ...process.env, KNOWLEDGE_VAULT_ROOT: fixture.vaultRoot, ...fixture.env },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -186,7 +265,7 @@ async function createDedupFixture(project: string, options: DedupFixtureOptions 
   await mkdir(join(projectPath, "prds"), { recursive: true });
   await mkdir(join(projectPath, "slices"));
   await mkdir(join(projectPath, "adrs"));
-  await mkdir(join(projectPath, "handovers"));
+  await mkdir(join(projectPath, "handoffs"));
   await mkdir(join(projectPath, "docs"));
 
   const stateFile = join(root, "qmd-state.log");
@@ -204,10 +283,6 @@ async function createDedupFixture(project: string, options: DedupFixtureOptions 
     `#!/usr/bin/env bash
 set -euo pipefail
 echo "$@" >> "$STATE_FILE"
-if [ "\${FAIL_QMD:-0}" = "1" ]; then
-  echo "fake qmd should not have been called" >&2
-  exit 9
-fi
 case "\${1:-}" in
   collection)
     case "\${2:-}" in
@@ -239,13 +314,22 @@ esac
       STATE_FILE: stateFile,
       REGISTERED_FILE: registeredFile,
       RESULTS_FILE: resultsFile,
-      FAIL_QMD: options.failQmd === true ? "1" : "0",
     },
   };
 }
 
 async function seedPrd(fixture: DedupFixture): Promise<void> {
-  const result = await runWiki(["create", "prd", "--title", "Core wiki CLI", "--project", "wiki-v2", "--force-new", "Seeding parent PRD for the slice dedup test"], fixture);
+  const result = await runWiki(["create", "prd", "--title", "Core wiki CLI", "--summary", "The core wiki CLI surface.", "--project", "wiki-v2", "--force-new", "Seeding parent PRD for the slice dedup test"], fixture);
   expect(result.exitCode).toBe(0);
   await writeFile(fixture.resultsFile, "[]");
+}
+
+async function listMarkdownRecursive(directory: string): Promise<string[]> {
+  const names: string[] = [];
+  const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    if (entry.isDirectory()) names.push(...await listMarkdownRecursive(join(directory, entry.name)));
+    else if (entry.isFile()) names.push(entry.name);
+  }
+  return names;
 }

@@ -44,8 +44,6 @@ async function makeVaultWithLinkedRepo(opts: {
   return vaultRoot;
 }
 
-const DUMMY_REPO_ROOT = "/nonexistent";
-
 describe("doctor repo-binding checks", () => {
   test("reports healthy when both AGENTS.md and CLAUDE.md have current-version block", async () => {
     const repoDir = await makeTempDir();
@@ -58,7 +56,7 @@ describe("doctor repo-binding checks", () => {
       claudeMd: block + "\n",
     });
 
-    const result = await runDoctor(vaultRoot, DUMMY_REPO_ROOT);
+    const result = await runDoctor(vaultRoot);
 
     const repoBindingIssues = result.issues.filter((i) => i.type === "repo-binding");
     expect(repoBindingIssues).toHaveLength(0);
@@ -75,7 +73,7 @@ describe("doctor repo-binding checks", () => {
       claudeMd: block + "\n",
     });
 
-    const result = await runDoctor(vaultRoot, DUMMY_REPO_ROOT);
+    const result = await runDoctor(vaultRoot);
 
     const repoIssues = result.issues.filter((i) => i.type === "repo-binding");
     expect(repoIssues.length).toBeGreaterThanOrEqual(1);
@@ -97,7 +95,7 @@ describe("doctor repo-binding checks", () => {
       claudeMd: "# Normal content\n", // no wiki block
     });
 
-    const result = await runDoctor(vaultRoot, DUMMY_REPO_ROOT);
+    const result = await runDoctor(vaultRoot);
 
     const claudeIssue = result.issues.filter((i) => i.type === "repo-binding" && i.message.includes("CLAUDE.md"));
     expect(claudeIssue.length).toBeGreaterThanOrEqual(1);
@@ -123,7 +121,7 @@ describe("doctor repo-binding checks", () => {
       claudeMd: currentBlock + "\n",
     });
 
-    const result = await runDoctor(vaultRoot, DUMMY_REPO_ROOT);
+    const result = await runDoctor(vaultRoot);
 
     const staleIssues = result.issues.filter(
       (i) => i.type === "repo-binding" && i.message.includes("AGENTS.md"),
@@ -145,7 +143,7 @@ describe("doctor repo-binding checks", () => {
       // agentsMd not provided → file absent
     });
 
-    const result = await runDoctor(vaultRoot, DUMMY_REPO_ROOT);
+    const result = await runDoctor(vaultRoot);
 
     const agentsIssues = result.issues.filter(
       (i) => i.type === "repo-binding" && i.message.includes("AGENTS.md"),
@@ -165,7 +163,7 @@ describe("doctor repo-binding checks", () => {
     await writeFile(join(projDir, "_project.md"), projectMd);
 
     // Should not throw
-    const result = await runDoctor(vaultRoot, DUMMY_REPO_ROOT);
+    const result = await runDoctor(vaultRoot);
 
     const warningIssues = result.issues.filter(
       (i) => i.type === "repo-binding-warning" || (i.type === "repo-binding" && i.message.toLowerCase().includes("warn")),
@@ -187,7 +185,7 @@ describe("doctor repo-binding checks", () => {
     const projectMd = `---\nproject: nolinks\nstatus: planning\ncreated: ${today}\nrepo: /tmp/x\ntest_command: bun test\n---\n# nolinks\n`;
     await writeFile(join(projDir, "_project.md"), projectMd);
 
-    const result = await runDoctor(vaultRoot, DUMMY_REPO_ROOT);
+    const result = await runDoctor(vaultRoot);
 
     const repoIssues = result.issues.filter((i) => i.type === "repo-binding" || i.type === "repo-binding-warning");
     expect(repoIssues).toHaveLength(0);
@@ -210,7 +208,7 @@ describe("doctor contract-drift checks", () => {
       claudeMd: block + "\n",
     });
 
-    const result = await runDoctor(vaultRoot, DUMMY_REPO_ROOT);
+    const result = await runDoctor(vaultRoot);
 
     const drift = result.issues.filter((i) => i.type === "contract-drift");
     expect(drift).toHaveLength(1);
@@ -230,7 +228,7 @@ describe("doctor contract-drift checks", () => {
       claudeMd: block + "\n",
     });
 
-    const result = await runDoctor(vaultRoot, DUMMY_REPO_ROOT);
+    const result = await runDoctor(vaultRoot);
 
     const drift = result.issues.filter((i) => i.type === "contract-drift");
     expect(drift).toHaveLength(1);
@@ -248,7 +246,7 @@ describe("doctor contract-drift checks", () => {
       claudeMd: block + "\n",
     });
 
-    const result = await runDoctor(vaultRoot, DUMMY_REPO_ROOT);
+    const result = await runDoctor(vaultRoot);
 
     expect(result.issues.filter((i) => i.type === "contract-drift")).toHaveLength(0);
   });
@@ -265,7 +263,7 @@ describe("doctor contract-drift checks", () => {
       `---\nproject: nolinks\nstatus: planning\ncreated: ${today}\nrepo: /tmp/x\ntest_command: bun test\n---\n# nolinks\n`,
     );
 
-    const result = await runDoctor(vaultRoot, DUMMY_REPO_ROOT);
+    const result = await runDoctor(vaultRoot);
 
     expect(result.issues.filter((i) => i.type === "contract-drift")).toHaveLength(0);
   });

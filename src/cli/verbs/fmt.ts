@@ -1,12 +1,13 @@
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, rename } from "node:fs/promises";
 import { join, relative } from "node:path";
 
 import matter from "gray-matter";
 
 import { orderBySchema } from "../../artifacts/render";
-import { assertProjectStructure } from "../../config/project";
+import { FOLDER_TO_TYPE } from "../../artifacts/registry";
+import { projectPath } from "../../artifacts/paths";
+import { assertProjectStructure, loadProjectConfig, ProjectConfigError, projectErrorMessage } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
-import { obsidianCreate, obsidianRename } from "../../integrations/obsidian";
 import { loadTemplate, type TemplateType } from "../../schema/load";
 import type { Schema } from "../../schema/types";
 import { booleanValue, parseCommand } from "../parse";
@@ -28,13 +29,22 @@ export async function handleFmt(args: string[]): Promise<CliResult> {
   const parsed = parseCommand(args, ["project"], [], ["write"]);
   const project = await resolveProject(parsed);
   if (project === undefined) {
-    console.error("missing required field: project (pass --project or start a session with wiki session start)");
+    console.error("missing required field: project (pass --project or link the repo with wiki project link)");
     return { code: 1 };
   }
 
   const vaultRoot = await getVaultRoot();
-  const projectPath = join(vaultRoot, "projects", project);
-  await assertProjectStructure(projectPath);
+  const projPath = projectPath(vaultRoot, project);
+  try {
+    await loadProjectConfig(projPath);
+  } catch (error) {
+    if (error instanceof ProjectConfigError) {
+      console.error(await projectErrorMessage(vaultRoot, project));
+      return { code: 10 };
+    }
+    throw error;
+  }
+  await assertProjectStructure(projPath);
 
   const write = booleanValue(parsed.values, "write");
   let total = 0;
@@ -42,14 +52,14 @@ export async function handleFmt(args: string[]): Promise<CliResult> {
   // Renumbering runs before the per-file pipeline: it renames files and
   // rewrites cross-references vault-wide, so the pipeline below sees the
   // post-rename world.
-  const renumber = await renumberLegacyIds(vaultRoot, projectPath, write);
+  const renumber = await renumberLegacyIds(vaultRoot, projPath, write);
   total += renumber.labels.length;
   for (const label of renumber.labels) {
     console.log(write ? `fixed ${label}` : label);
   }
   const manual: string[] = [...renumber.collisions];
 
-  for (const filePath of await markdownFiles(projectPath)) {
+  for (const filePath of await markdownFiles(projPath)) {
     const raw = await readFile(filePath, "utf8");
     const file = relative(vaultRoot, filePath);
     let content = raw;
@@ -69,7 +79,7 @@ export async function handleFmt(args: string[]): Promise<CliResult> {
       console.log(write ? `fixed ${label}` : label);
     }
     if (write) {
-      await writeBack(vaultRoot, filePath, content);
+      await writeBack(filePath, content);
     }
   }
 
@@ -118,7 +128,7 @@ const DIAGNOSTICS: Diagnostic[] = [
 
 function artifactTypeOf(file: string): TemplateType | undefined {
   const folder = file.split("/")[2];
-  return folder === undefined ? undefined : TYPE_BY_FOLDER[folder];
+  return folder === undefined ? undefined : FOLDER_TO_TYPE[folder];
 }
 
 function diagnoseIdentity(content: string, file: string): string[] {
@@ -146,7 +156,7 @@ async function diagnoseCoreFields(content: string, file: string): Promise<string
     .filter((field) => data[field.name] === undefined)
     .map((field) => field.name);
   if (missing.length === 0) return [];
-  return [`${file}: missing required fields: ${missing.join(", ")} — hint: set them via obsidian eval with app.fileManager.processFrontMatter`];
+  return [`${file}: missing required fields: ${missing.join(", ")} — hint: set them with 'wiki set <id> <field> <value>'`];
 }
 
 const ARTIFACT_ID = /^[A-Z]+-\d+$/;
@@ -251,7 +261,7 @@ async function renumberLegacyIds(
       content = content.replace(new RegExp(`\\b${oldId}(?!\\d)`, "g"), newId);
     }
     if (content !== raw) {
-      await writeBack(vaultRoot, filePath, content);
+      await writeBack(filePath, content);
     }
   }
   for (const [oldId, newId] of map) {
@@ -261,7 +271,7 @@ async function renumberLegacyIds(
     const folder = rel.slice(0, rel.lastIndexOf("/"));
     const base = rel.slice(rel.lastIndexOf("/") + 1);
     const newBase = base.replace(new RegExp(`^${oldId}(?!\\d)`), newId);
-    await obsidianRename(rel, `${folder}/${newBase}`);
+    await rename(filePath, join(vaultRoot, folder, newBase));
   }
 
   return { labels, collisions, map };
@@ -344,20 +354,6 @@ function fixClosedSliceTodos(content: string, file: string): CategoryResult {
   };
 }
 
-/**
- * Frontmatter shape (SLICE-0059): aliases backfilled to [<ID>] where missing,
- * fields in schema declaration order (id first), unknown fields preserved
- * after the schema fields. Skips files outside artifact folders and files
- * without an id (pre-schema artifacts are flag-only territory).
- */
-const TYPE_BY_FOLDER: Record<string, TemplateType> = {
-  prds: "prd",
-  slices: "slice",
-  adrs: "decision",
-  handovers: "handover",
-  docs: "doc",
-};
-
 const schemaCache = new Map<TemplateType, Promise<Schema>>();
 
 function schemaFor(type: TemplateType): Promise<Schema> {
@@ -369,10 +365,16 @@ function schemaFor(type: TemplateType): Promise<Schema> {
   return cached;
 }
 
+/**
+ * Frontmatter shape (SLICE-0059): aliases backfilled to [<ID>] where missing,
+ * fields in schema declaration order (id first), unknown fields preserved
+ * after the schema fields. Skips files outside artifact folders and files
+ * without an id (pre-schema artifacts are flag-only territory).
+ */
 async function fixFrontmatterShape(content: string, file: string): Promise<CategoryResult> {
   const noop = { labels: [], fixed: content };
   const folder = file.split("/")[2];
-  const type = folder === undefined ? undefined : TYPE_BY_FOLDER[folder];
+  const type = folder === undefined ? undefined : FOLDER_TO_TYPE[folder];
   if (type === undefined || !content.startsWith("---")) return noop;
 
   let parsed: matter.GrayMatterFile<string>;
@@ -420,10 +422,6 @@ async function markdownFiles(dir: string): Promise<string[]> {
   return files.sort();
 }
 
-/** All vault mutations go through the Obsidian layer (ADR-0017). */
-async function writeBack(vaultRoot: string, filePath: string, content: string): Promise<void> {
-  const rel = relative(vaultRoot, filePath);
-  const folder = rel.slice(0, rel.lastIndexOf("/"));
-  const name = rel.slice(rel.lastIndexOf("/") + 1).replace(/\.md$/, "");
-  await obsidianCreate(name, content, folder, { silent: true, overwrite: true });
+async function writeBack(filePath: string, content: string): Promise<void> {
+  await Bun.write(filePath, content);
 }

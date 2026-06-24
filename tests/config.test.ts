@@ -98,13 +98,11 @@ describe("vault config", () => {
     await mkdir(configDir, { recursive: true });
     await writeFile(
       join(configDir, "config.toml"),
-      '[vault]\nroot = "/vault"\n\n[research]\nsources = ["~/Research", "~/.pi/artifacts/research"]\n',
+      '[vault]\nroot = "/vault"\n',
     );
 
     expect(await getConfig()).toEqual({
       vault: { root: "/vault" },
-      research: { sources: ["~/Research", "~/.pi/artifacts/research"] },
-
     });
   });
 
@@ -116,15 +114,6 @@ describe("vault config", () => {
 
     expect(await getConfig()).toEqual({
       vault: { root: "/custom-vault" },
-      research: {
-        sources: [
-          "~/.pi/artifacts/research",
-          "~/.codex/artifacts/research",
-          "~/.claude/artifacts/research",
-          "~/Research",
-        ],
-      },
-
     });
   });
 
@@ -135,7 +124,7 @@ describe("vault config", () => {
     await expect(assertProjectStructure(projectPath)).rejects.toThrow("Project structure missing _project.md");
 
     await writeFile(join(projectPath, "_project.md"), "# Project\n");
-    for (const folder of ["prds", "slices", "adrs", "handovers", "docs"]) {
+    for (const folder of ["prds", "slices", "adrs", "handoffs", "docs"]) {
       await mkdir(join(projectPath, folder));
     }
 

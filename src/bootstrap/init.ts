@@ -1,31 +1,19 @@
 import { access, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { ensureObsidian, obsidianEval } from "../integrations/obsidian";
-
 export type VaultInitResult = {
   path: string;
   created: string[];
   skipped: string[];
 };
 
-const DIRS = [
-  "projects",
-  "_templates",
-  ".obsidian",
-  ".obsidian/plugins",
-  ".wiki",
-  ".wiki/blessed-config",
-];
+const DIRS = ["projects", ".wiki"];
 
 const GITIGNORE_CONTENT = [
   ".obsidian/workspace.json",
   ".obsidian/workspace-mobile.json",
   ".smart-env/",
-  ".obsidian/plugins/*/data.json.bak",
 ].join("\n") + "\n";
-
-const EMPTY_LOCKFILE = JSON.stringify({ version: 1, plugins: {} }, null, 2) + "\n";
 
 async function exists(path: string): Promise<boolean> {
   try {
@@ -36,7 +24,7 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
-export async function initVault(vaultPath: string, options?: { pluginSource?: string }): Promise<VaultInitResult> {
+export async function initVault(vaultPath: string): Promise<VaultInitResult> {
   const created: string[] = [];
   const skipped: string[] = [];
 
@@ -81,19 +69,6 @@ export async function initVault(vaultPath: string, options?: { pluginSource?: st
     ]);
     created.push(".git");
   }
-
-  // Write plugin lockfile
-  const lockfilePath = join(vaultPath, ".wiki", "plugin-lock.json");
-  if (await exists(lockfilePath)) {
-    skipped.push(".wiki/plugin-lock.json");
-  } else {
-    await writeFile(lockfilePath, EMPTY_LOCKFILE);
-    created.push(".wiki/plugin-lock.json");
-  }
-
-  // Ensure Obsidian is running and configure template folder
-  await ensureObsidian();
-  await obsidianEval(`app.vault.setConfig('templateFolder', '_templates')`);
 
   return { path: vaultPath, created, skipped };
 }

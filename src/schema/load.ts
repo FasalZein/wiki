@@ -12,7 +12,12 @@ export function resolveTemplatePath(filename: string): string {
   return fromDist;
 }
 
-export type TemplateType = "prd" | "slice" | "decision" | "handover" | "doc";
+/**
+ * A kind id (e.g. "prd", "handoff"). Kinds are defined in wiki.json and validated
+ * at runtime against the loaded registry + a matching templates/<kind>.md — not a
+ * compile-time union, so a skill can add a kind by config without touching the type.
+ */
+export type TemplateType = string;
 
 const fieldTypes: ReadonlySet<string> = new Set<FieldType>([
   "string",

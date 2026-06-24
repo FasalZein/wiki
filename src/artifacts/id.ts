@@ -3,10 +3,10 @@ import { join } from "node:path";
 
 import type { TemplateType } from "../schema/load";
 import { artifactDirectory } from "./paths";
-import { ARTIFACTS } from "./registry";
+import { specFor } from "./registry";
 
 export async function nextId(type: TemplateType, vaultRoot: string, project: string): Promise<string> {
-  const prefix = ARTIFACTS[type].prefix;
+  const prefix = specFor(type).prefix;
   const directory = artifactDirectory(type, vaultRoot, project);
   // Docs may be organized into category subfolders; ids stay globally unique
   // per project, so scan recursively for that type. Other types stay flat.

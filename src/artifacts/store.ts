@@ -1,8 +1,6 @@
 import matter from "gray-matter";
-import { readdir, readFile, rm } from "node:fs/promises";
-import { basename, dirname, join, relative } from "node:path";
-
-import { obsidianCreate } from "../integrations/obsidian";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { dirname, join, relative } from "node:path";
 
 import { loadTemplate, normalizeInlineMaps, resolveTemplatePath, type TemplateType } from "../schema/load";
 import { BodyParseError, parseBodySections } from "./body";
@@ -10,7 +8,7 @@ import { validate } from "../schema/validate";
 import type { NormalizedRecord, Schema, ValidationError } from "../schema/types";
 import { type DocCategory, isDocCategory } from "./registry";
 import { nextId } from "./id";
-import { artifactDirectory } from "./paths";
+import { artifactDirectory, assertSafeSegment } from "./paths";
 import { applyDefaults, orderBySchema, renderArtifact } from "./render";
 
 export type CreateArtifactInput = {
@@ -46,8 +44,6 @@ export type RelocateArtifactInput = ReadArtifactInput & {
   /** New doc category subfolder, e.g. "architecture". Docs only. Must be a locked category. */
   category?: DocCategory;
 };
-
-export type AppendFieldInput = SetFieldInput;
 
 export type Artifact = {
   id: string;
@@ -115,39 +111,35 @@ export async function setFields(input: SetFieldsInput): Promise<Artifact> {
   });
 }
 
-export async function appendField(input: AppendFieldInput): Promise<Artifact> {
+/**
+ * Mark an existing artifact as superseded by another (P0.1). Always records
+ * `superseded_by`; only flips `status` to "superseded" when the type's schema
+ * actually has that enum value (slices gained it in P0.1; docs have neither and
+ * fail cleanly). Shared by `create --supersedes` and the `wiki supersede` verb
+ * so the conditional lives in exactly one place. Routes through setFields, so
+ * the write is validated.
+ */
+export async function supersedeArtifact(input: ReadArtifactInput & { by: string }): Promise<Artifact> {
   const schema = await loadTemplate(input.type);
-  const field = schema.fields.find((candidate) => candidate.name === input.field);
-  if (field === undefined || (field.type !== "list" && field.type !== "link_list")) {
-    throw new ArtifactValidationError([{ field: input.field, reason: "not a list field", expected: "list" }]);
-  }
-  const existing = await readArtifact(input);
-  const current = existing.fields[input.field];
-  const list = Array.isArray(current) ? current : [];
-  return writeFields(input, existing, {
-    ...existing.fields,
-    [input.field]: [...list, input.value],
-  });
+  const statusField = schema.fields.find((field) => field.name === "status");
+  const hasSupersededStatus = statusField?.constraints.values?.includes("superseded") ?? false;
+  const fields: Record<string, unknown> = { superseded_by: input.by };
+  if (hasSupersededStatus) fields.status = "superseded";
+  return setFields({ type: input.type, vaultRoot: input.vaultRoot, project: input.project, id: input.id, fields });
+}
+
+/** Delete an artifact file by absolute path (rollback for a half-applied create). */
+export async function removeArtifactFile(path: string): Promise<void> {
+  await rm(path, { force: true });
 }
 
 export async function createArtifact(input: CreateArtifactInput): Promise<Artifact> {
   const schema = await loadTemplate(input.type);
   const templateFile = Bun.file(resolveTemplatePath(`${input.type}.md`));
   const template = await templateFile.text();
-  const id = await nextId(input.type, input.vaultRoot, input.project);
   const suppliedAliases = Array.isArray(input.fields.aliases) ? input.fields.aliases.map(String) : [];
-  const aliases = suppliedAliases.includes(id) ? suppliedAliases : [id, ...suppliedAliases];
-  const fields = applyDefaults(schema, template, {
-    ...input.fields,
-    id,
-    aliases,
-    project: input.project,
-  });
-  const result = validate(schema, fields);
-  if (!result.ok) {
-    throw new ArtifactValidationError(result.errors);
-  }
 
+  // bodySections parsing is the same every attempt — compute once.
   let bodySections: Record<string, string> | undefined;
   if (input.body !== undefined) {
     const fieldNames = new Set(schema.fields.map((field) => field.name));
@@ -161,16 +153,40 @@ export async function createArtifact(input: CreateArtifactInput): Promise<Artifa
     }
   }
 
-  const content = renderArtifact(template, orderBySchema(schema, result.value), bodySections);
-  const path = artifactPath(input.type, input.vaultRoot, input.project, id, String(result.value.title ?? id), input.category);
-  await writeArtifact(input.vaultRoot, path, content);
+  // ponytail: read-then-write on nextId is a TOCTOU race under parallel creates.
+  // Exclusive create (flag 'wx') + bounded retry is the cheap fix — no lockfile.
+  const MAX_ATTEMPTS = 8;
+  for (let attempt = 0; ; attempt++) {
+    const id = await nextId(input.type, input.vaultRoot, input.project);
+    const aliases = suppliedAliases.includes(id) ? suppliedAliases : [id, ...suppliedAliases];
+    const fields = applyDefaults(schema, template, {
+      ...input.fields,
+      id,
+      aliases,
+      project: input.project,
+    });
+    const result = validate(schema, fields);
+    if (!result.ok) {
+      throw new ArtifactValidationError(result.errors);
+    }
 
-  return {
-    id,
-    path,
-    fields: result.value,
-    body: content,
-  };
+    const content = renderArtifact(template, orderBySchema(schema, result.value), bodySections);
+    const path = artifactPath(input.type, input.vaultRoot, input.project, id, String(result.value.title ?? id), input.category);
+    try {
+      await mkdir(dirname(path), { recursive: true }); // Bun.write auto-mkdirs; node writeFile does not
+      await writeFile(path, content, { flag: "wx" }); // fails if path already exists
+    } catch (error) {
+      if (isFileExists(error) && attempt < MAX_ATTEMPTS) continue; // collision — recompute nextId
+      throw error;
+    }
+
+    return {
+      id,
+      path,
+      fields: result.value,
+      body: content,
+    };
+  }
 }
 
 /**
@@ -180,6 +196,7 @@ export async function createArtifact(input: CreateArtifactInput): Promise<Artifa
  * [[ID]] links and id-based reads keep resolving. The old file is removed.
  */
 export async function relocateArtifact(input: RelocateArtifactInput): Promise<Artifact> {
+  assertSafeSegment(input.id, "artifact id");
   const existing = await readArtifact(input);
   const nextTitle = input.title ?? (typeof existing.fields.title === "string" ? existing.fields.title : input.id);
 
@@ -210,8 +227,14 @@ export async function relocateArtifact(input: RelocateArtifactInput): Promise<Ar
     ? join(directory, category, fileName)
     : join(directory, fileName);
 
+  if (destination !== existing.path && (await Bun.file(destination).exists())) {
+    throw new ArtifactValidationError([
+      { field: "id", reason: `destination already exists: ${destination}` },
+    ]);
+  }
+
   const content = matter.stringify(existing.body, { ...fields, updated: new Date().toISOString().slice(0, 10) });
-  await writeArtifact(input.vaultRoot, destination, content);
+  await writeArtifact(destination, content);
   if (destination !== existing.path) {
     await rm(existing.path, { force: true });
   }
@@ -248,15 +271,12 @@ async function writeFields(input: ReadArtifactInput, existing: Artifact, fields:
   }
 
   const content = matter.stringify(existing.body, result.value);
-  await writeArtifact(input.vaultRoot, existing.path, content);
+  await writeArtifact(existing.path, content);
   return { ...existing, fields: result.value };
 }
 
-async function writeArtifact(vaultRoot: string, path: string, content: string): Promise<void> {
-  const rel = relative(vaultRoot, path);
-  const name = basename(rel, ".md");
-  const folder = dirname(rel);
-  await obsidianCreate(name, content, folder, { silent: true, overwrite: true });
+async function writeArtifact(path: string, content: string): Promise<void> {
+  await Bun.write(path, content);
 }
 
 function artifactPath(type: TemplateType, vaultRoot: string, project: string, id: string, title: string, category?: string): string {
@@ -269,6 +289,7 @@ function artifactPath(type: TemplateType, vaultRoot: string, project: string, id
 }
 
 async function resolveArtifactPath(type: TemplateType, vaultRoot: string, project: string, id: string): Promise<string> {
+  assertSafeSegment(id, "artifact id");
   const directory = artifactDirectory(type, vaultRoot, project);
   const exact = join(directory, `${id}.md`);
   try {
@@ -330,4 +351,8 @@ function slugifyTitle(title: string): string {
 
 function isFileNotFound(error: unknown): boolean {
   return error instanceof Error && "code" in error && error.code === "ENOENT";
+}
+
+function isFileExists(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "EEXIST";
 }

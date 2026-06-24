@@ -28,7 +28,7 @@ describe("one-shot create with --body", () => {
     ].join("\n");
 
     const result = await runWiki(
-      ["create", "prd", "--title", "One-shot authoring", "--project", "wiki-v2", "--body", "-"],
+      ["create", "prd", "--title", "One-shot authoring", "--summary", "One-shot authoring of artifacts.", "--project", "wiki-v2", "--body", "-"],
       vaultRoot,
       body,
     );
@@ -54,6 +54,7 @@ describe("one-shot create with --body", () => {
       [
         "create", "slice",
         "--title", "Build the parser",
+        "--summary", "Build the body section parser.",
         "--project", "wiki-v2",
         "--parent-prd", "PRD-0001",
         "--acceptance", "parser maps headings to placeholders",
@@ -81,7 +82,7 @@ describe("one-shot create with --body", () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
 
     const result = await runWiki(
-      ["create", "doc", "--title", "Research findings", "--project", "wiki-v2", "--type", "research", "--body", "-"],
+      ["create", "doc", "--title", "Research findings", "--summary", "The research findings summary.", "--project", "wiki-v2", "--type", "research", "--body", "-"],
       vaultRoot,
       "## Content\n\nThe findings are extensive.\n",
     );
@@ -130,7 +131,7 @@ async function runWiki(args: string[], vaultRoot: string, stdin?: string): Promi
   const repoRoot = import.meta.dir.replace(/\/tests$/, "");
   const proc = Bun.spawn(["bun", join(repoRoot, "src", "cli.ts"), ...args], {
     cwd: repoRoot,
-    env: { ...process.env, KNOWLEDGE_VAULT_ROOT: vaultRoot, OBSIDIAN_BIN: join(import.meta.dir, "fixtures", "mock-obsidian.sh") },
+    env: { ...process.env, KNOWLEDGE_VAULT_ROOT: vaultRoot },
     stdin: stdin === undefined ? undefined : "pipe",
     stdout: "pipe",
     stderr: "pipe",
@@ -148,7 +149,7 @@ async function runWiki(args: string[], vaultRoot: string, stdin?: string): Promi
 }
 
 async function seedPrd(vaultRoot: string): Promise<void> {
-  const result = await runWiki(["create", "prd", "--title", "Core wiki CLI", "--project", "wiki-v2"], vaultRoot);
+  const result = await runWiki(["create", "prd", "--title", "Core wiki CLI", "--summary", "The core wiki CLI surface.", "--project", "wiki-v2"], vaultRoot);
   expect(result.exitCode).toBe(0);
 }
 
@@ -156,7 +157,7 @@ async function createFixtureVault(project: string): Promise<string> {
   const vaultRoot = await mkdtemp(join(tmpdir(), "wiki-vault-"));
   tempPaths.push(vaultRoot);
   const projectPath = join(vaultRoot, "projects", project);
-  for (const dir of ["prds", "slices", "adrs", "handovers", "docs"]) {
+  for (const dir of ["prds", "slices", "adrs", "handoffs", "docs"]) {
     await mkdir(join(projectPath, dir), { recursive: true });
   }
   const qmdCommand = join(vaultRoot, "fake-qmd");

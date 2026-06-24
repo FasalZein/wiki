@@ -73,11 +73,11 @@ describe("sync CLI", () => {
     );
   });
 
-  test("sync exits 1 when project is missing and no session is active", async () => {
+  test("sync exits 1 when project is missing and the repo isn't linked", async () => {
     const fixture = await createSyncFixture("wiki-v2");
 
-    await withSession(null, async () => {
-      const result = await runWiki(["sync"], fixture);
+    await withLinkedRepo(null, async (cwd) => {
+      const result = await runWiki(["sync"], fixture, cwd);
 
       expect(result.exitCode).toBe(1);
       expect(result.stdout).toBe("");
@@ -85,28 +85,81 @@ describe("sync CLI", () => {
     });
   });
 
-  // --- session fallback (SLICE-0052): sync resolves the project like create does ---
+  // --- linked-repo fallback (SLICE-0052): sync resolves the project like create does ---
 
-  test("sync with an active session and no --project syncs the session project", async () => {
+  test("sync with a linked repo and no --project syncs the linked project", async () => {
     const fixture = await createSyncFixture("wiki-v2");
 
-    await withSession("wiki-v2", async () => {
-      const result = await runWiki(["sync"], fixture);
+    await withLinkedRepo("wiki-v2", async (cwd) => {
+      const result = await runWiki(["sync"], fixture, cwd);
 
       expect(result.exitCode).toBe(0);
       expect(result.stderr).toContain("synced collection wiki-v2");
     });
   });
 
-  test("sync --project overrides the active session", async () => {
+  test("sync --project overrides the linked repo", async () => {
     const fixture = await createSyncFixture("other-proj");
 
-    await withSession("wiki-v2", async () => {
-      const result = await runWiki(["sync", "--project", "other-proj"], fixture);
+    await withLinkedRepo("wiki-v2", async (cwd) => {
+      const result = await runWiki(["sync", "--project", "other-proj"], fixture, cwd);
 
       expect(result.exitCode).toBe(0);
       expect(result.stderr).toContain("synced collection other-proj");
     });
+  });
+
+  test("sync writes a per-project index.md listing artifacts; re-run is byte-identical (SLICE-0072)", async () => {
+    const fixture = await createSyncFixture("wiki-v2");
+    await writeFile(
+      join(fixture.projectPath, "slices", "SLICE-0002-b.md"),
+      "---\nid: SLICE-0002\ntitle: Second slice\nsummary: The second slice.\nstatus: planned\n---\nbody\n",
+    );
+    await writeFile(
+      join(fixture.projectPath, "slices", "SLICE-0001-a.md"),
+      "---\nid: SLICE-0001\ntitle: First slice\nsummary: The first slice.\nstatus: green\n---\nbody\n",
+    );
+    // grandfathered: no summary field — must render without crashing
+    await writeFile(
+      join(fixture.projectPath, "prds", "PRD-0001.md"),
+      "---\nid: PRD-0001\ntitle: A PRD\nstatus: draft\n---\nbody\n",
+    );
+
+    expect((await runWiki(["sync", "--project", "wiki-v2"], fixture)).exitCode).toBe(0);
+
+    const indexPath = join(fixture.projectPath, "index.md");
+    const first = await readFile(indexPath, "utf8");
+    expect(first).toContain("# wiki-v2 index");
+    expect(first).toContain("[[PRD-0001]] A PRD (draft)");
+    expect(first).toContain("[[SLICE-0001]] First slice (green) — The first slice.");
+    // sorted by kind then id: PRD before SLICE, SLICE-0001 before SLICE-0002
+    expect(first.indexOf("PRD-0001")).toBeLessThan(first.indexOf("SLICE-0001"));
+    expect(first.indexOf("SLICE-0001")).toBeLessThan(first.indexOf("SLICE-0002"));
+
+    expect((await runWiki(["sync", "--project", "wiki-v2"], fixture)).exitCode).toBe(0);
+    expect(await readFile(indexPath, "utf8")).toBe(first);
+  });
+
+  test("sync sections index.md by group: frontmatter; ungrouped fall under General (SLICE-0073)", async () => {
+    const fixture = await createSyncFixture("wiki-v2");
+    await writeFile(
+      join(fixture.projectPath, "slices", "SLICE-0001.md"),
+      "---\nid: SLICE-0001\ntitle: Grouped slice\nsummary: A grouped slice.\nstatus: green\ngroup: Backend\n---\nbody\n",
+    );
+    await writeFile(
+      join(fixture.projectPath, "prds", "PRD-0001.md"),
+      "---\nid: PRD-0001\ntitle: Ungrouped PRD\nsummary: No group here.\nstatus: draft\n---\nbody\n",
+    );
+
+    expect((await runWiki(["sync", "--project", "wiki-v2"], fixture)).exitCode).toBe(0);
+
+    const index = await readFile(join(fixture.projectPath, "index.md"), "utf8");
+    expect(index).toContain("## Backend");
+    expect(index).toContain("## General");
+    // grouped artifact under its heading; ungrouped under General (which sorts last)
+    expect(index.indexOf("## Backend")).toBeLessThan(index.indexOf("[[SLICE-0001]]"));
+    expect(index.indexOf("## General")).toBeLessThan(index.indexOf("[[PRD-0001]]"));
+    expect(index.indexOf("## Backend")).toBeLessThan(index.indexOf("## General"));
   });
 
   test("sync exits 10 and surfaces qmd stderr when qmd fails", async () => {
@@ -139,35 +192,21 @@ type CommandResult = {
 };
 
 const repoRoot = import.meta.dir.replace(/\/tests$/, "");
-const sessionPath = join(repoRoot, ".wiki", "state", "session.json");
 
-/** Run `fn` with the repo session forced to `project` (or absent when null), then restore. */
-async function withSession(project: string | null, fn: () => Promise<void>): Promise<void> {
-  const existing = await readFile(sessionPath, "utf8").catch(() => null);
-  try {
-    if (project === null) {
-      await rm(sessionPath, { force: true });
-    } else {
-      await mkdir(join(repoRoot, ".wiki", "state"), { recursive: true });
-      await writeFile(
-        sessionPath,
-        JSON.stringify({ project, phase: "slice", active_slices: [], updated: "2026-06-10T00:00:00.000Z" }, null, 2),
-      );
-    }
-    await fn();
-  } finally {
-    if (existing === null) {
-      await rm(sessionPath, { force: true });
-    } else {
-      await writeFile(sessionPath, existing);
-    }
+/** Create a temp repo dir linked to `project` via a pointer block (or unlinked when null). */
+async function withLinkedRepo(project: string | null, fn: (cwd: string) => Promise<void>): Promise<void> {
+  const repo = await mkdtemp(join(tmpdir(), "wiki-sync-repo-"));
+  tempPaths.push(repo);
+  if (project !== null) {
+    await writeFile(join(repo, "AGENTS.md"), `<!-- wiki:begin v2 project=${project} -->\n<!-- wiki:end -->\n`);
   }
+  await fn(repo);
 }
 
-async function runWiki(args: string[], fixture: SyncFixture): Promise<CommandResult> {
-  const proc = Bun.spawn(["bun", "src/cli.ts", ...args], {
-    cwd: import.meta.dir.replace(/\/tests$/, ""),
-    env: { ...process.env, KNOWLEDGE_VAULT_ROOT: fixture.vaultRoot, OBSIDIAN_BIN: join(import.meta.dir, "fixtures", "mock-obsidian.sh"), ...fixture.env },
+async function runWiki(args: string[], fixture: SyncFixture, cwd: string = repoRoot): Promise<CommandResult> {
+  const proc = Bun.spawn(["bun", join(repoRoot, "src", "cli.ts"), ...args], {
+    cwd,
+    env: { ...process.env, KNOWLEDGE_VAULT_ROOT: fixture.vaultRoot, ...fixture.env },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -187,7 +226,7 @@ async function createSyncFixture(project: string, options: SyncFixtureOptions = 
   await mkdir(join(projectPath, "prds"), { recursive: true });
   await mkdir(join(projectPath, "slices"));
   await mkdir(join(projectPath, "adrs"));
-  await mkdir(join(projectPath, "handovers"));
+  await mkdir(join(projectPath, "handoffs"));
   await mkdir(join(projectPath, "docs"));
   const researchPath = join(root, "research");
   await mkdir(researchPath);

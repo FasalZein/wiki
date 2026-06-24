@@ -1,19 +1,9 @@
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { appendField, ArtifactValidationError, createArtifact, readArtifact, setField } from "../src/artifacts/store";
-
-const MOCK_BIN = join(import.meta.dir, "fixtures", "mock-obsidian.sh");
-
-beforeAll(() => {
-  process.env.OBSIDIAN_BIN = MOCK_BIN;
-});
-
-afterAll(() => {
-  delete process.env.OBSIDIAN_BIN;
-});
+import { ArtifactValidationError, createArtifact, readArtifact, setField } from "../src/artifacts/store";
 
 const tempPaths: string[] = [];
 
@@ -65,7 +55,7 @@ describe("artifact store", () => {
       type: "prd",
       vaultRoot,
       project: "wiki-v2",
-      fields: { title: "Core wiki CLI" },
+      fields: { title: "Core wiki CLI", summary: "The core wiki CLI surface." },
     });
 
     expect(artifact.id).toBe("PRD-0001");
@@ -84,7 +74,7 @@ describe("artifact store", () => {
       type: "prd",
       vaultRoot,
       project: "wiki-v2",
-      fields: { title: "Core wiki CLI" },
+      fields: { title: "Core wiki CLI", summary: "The core wiki CLI surface." },
     });
 
     expect(artifact.fields.aliases).toEqual(["PRD-0001"]);
@@ -99,7 +89,7 @@ describe("artifact store", () => {
       type: "prd",
       vaultRoot,
       project: "wiki-v2",
-      fields: { title: "Core wiki CLI" },
+      fields: { title: "Core wiki CLI", summary: "The core wiki CLI surface." },
     });
 
     const artifact = await readArtifact({ type: "prd", vaultRoot, project: "wiki-v2", id: "PRD-0001" });
@@ -115,7 +105,7 @@ describe("artifact store", () => {
       vaultRoot,
       project: "wiki-v2",
       category: "research",
-      fields: { title: "Native search benchmark", type: "research" },
+      fields: { title: "Native search benchmark", type: "research", summary: "Benchmark of native search options." },
     });
 
     expect(artifact.id).toBe("DOC-0001");
@@ -129,7 +119,7 @@ describe("artifact store", () => {
       vaultRoot,
       project: "wiki-v2",
       category: "runbooks",
-      fields: { title: "Deploy runbook", type: "runbook" },
+      fields: { title: "Deploy runbook", type: "runbook", summary: "How to deploy to prod." },
     });
 
     const artifact = await readArtifact({ type: "doc", vaultRoot, project: "wiki-v2", id: "DOC-0001" });
@@ -143,7 +133,7 @@ describe("artifact store", () => {
       type: "slice",
       vaultRoot,
       project: "wiki-v2",
-      fields: { title: "Build slice authoring", parent_prd: "PRD-0001", acceptance: [] },
+      fields: { title: "Build slice authoring", summary: "Build the slice authoring flow.", parent_prd: "PRD-0001", acceptance: [] },
     });
 
     expect(artifact.id).toBe("SLICE-0001");
@@ -188,22 +178,36 @@ describe("artifact store", () => {
     expect(await readFile(after.path, "utf8")).toContain("status: proposed");
   });
 
-  test("appends to a list frontmatter field in order and preserves the body", async () => {
+  test("sets an unrelated field even when an optional field is blank/null on disk", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
-    await createArtifact({ type: "decision", vaultRoot, project: "wiki-v2", fields: decisionFields() });
-    const before = await readArtifact({ type: "decision", vaultRoot, project: "wiki-v2", id: "ADR-0001" });
+    const created = await createArtifact({ type: "decision", vaultRoot, project: "wiki-v2", fields: decisionFields() });
 
-    const after = await appendField({
+    // Simulate an Obsidian-authored blank key: gray-matter round-trips `related_prd:` as null.
+    const raw = await readFile(created.path, "utf8");
+    await writeFile(created.path, raw.replace("status:", "related_prd:\nstatus:"));
+
+    const after = await setField({
       type: "decision",
       vaultRoot,
       project: "wiki-v2",
       id: "ADR-0001",
-      field: "context_terms",
-      value: "Vault",
+      field: "status",
+      value: "proposed",
     });
 
-    expect(after.fields.context_terms).toEqual(["Vault"]);
-    expect(after.body).toBe(before.body);
+    expect(after.fields.status).toBe("proposed");
+  });
+
+  test("grandfathers an existing artifact lacking the required summary on read (SLICE-0071)", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    const created = await createArtifact({ type: "decision", vaultRoot, project: "wiki-v2", fields: decisionFields() });
+    // Simulate a pre-summary artifact: strip the summary field from disk.
+    const raw = await readFile(created.path, "utf8");
+    await writeFile(created.path, raw.replace(/^summary:.*$\n/m, ""));
+
+    const read = await readArtifact({ type: "decision", vaultRoot, project: "wiki-v2", id: "ADR-0001" });
+    expect(read.fields.summary).toBeUndefined();
+    expect(read.fields.title).toBe("Use SQLite");
   });
 
   test("rejects setting a field not declared by the template schema", async () => {
@@ -226,6 +230,7 @@ describe("artifact store", () => {
 function decisionFields(): Record<string, unknown> {
   return {
     title: "Use SQLite",
+    summary: "Use SQLite for the local index.",
     context: "Need a durable local index.",
     decision: "Use SQLite for local persistence.",
     consequences: "Keep migrations small and explicit.",
@@ -240,7 +245,7 @@ async function createFixtureVault(project: string): Promise<string> {
   await mkdir(join(projectPath, "prds"), { recursive: true });
   await mkdir(join(projectPath, "slices"));
   await mkdir(join(projectPath, "adrs"));
-  await mkdir(join(projectPath, "handovers"));
+  await mkdir(join(projectPath, "handoffs"));
   await mkdir(join(projectPath, "docs"));
   await writeFile(join(projectPath, "_project.md"), `# ${project}\n`);
   return vaultRoot;

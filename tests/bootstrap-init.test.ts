@@ -1,17 +1,11 @@
-import { afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 
 import { initVault } from "../src/bootstrap/init";
 
-const MOCK_OBSIDIAN = resolve(import.meta.dir, "fixtures/mock-obsidian.sh");
-
 const tempPaths: string[] = [];
-
-beforeAll(() => {
-  process.env.OBSIDIAN_BIN = MOCK_OBSIDIAN;
-});
 
 afterEach(async () => {
   await Promise.all(tempPaths.splice(0).map((path) => rm(path, { recursive: true, force: true })));
@@ -33,14 +27,7 @@ async function exists(path: string): Promise<boolean> {
 }
 
 describe("vault init", () => {
-  const expectedDirs = [
-    "projects",
-    "_templates",
-    ".obsidian",
-    ".obsidian/plugins",
-    ".wiki",
-    ".wiki/blessed-config",
-  ];
+  const expectedDirs = ["projects", ".wiki"];
 
   test("creates all expected directories", async () => {
     const vaultPath = join(await makeTempDir(), "my-vault");
@@ -60,7 +47,6 @@ describe("vault init", () => {
       expect(result.created).toContain(dir);
     }
     expect(result.created).toContain(".gitignore");
-    expect(result.created).toContain(".wiki/plugin-lock.json");
     expect(result.created).toContain(".git");
     expect(result.skipped).toHaveLength(0);
   });
@@ -73,7 +59,6 @@ describe("vault init", () => {
     expect(content).toContain(".obsidian/workspace.json");
     expect(content).toContain(".obsidian/workspace-mobile.json");
     expect(content).toContain(".smart-env/");
-    expect(content).toContain(".obsidian/plugins/*/data.json.bak");
   });
 
   test(".git/ exists after init", async () => {
@@ -81,16 +66,6 @@ describe("vault init", () => {
     await initVault(vaultPath);
 
     expect(await exists(join(vaultPath, ".git"))).toBe(true);
-  });
-
-  test(".wiki/plugin-lock.json exists with version 1 and empty plugins", async () => {
-    const vaultPath = join(await makeTempDir(), "my-vault");
-    await initVault(vaultPath);
-
-    const raw = await readFile(join(vaultPath, ".wiki", "plugin-lock.json"), "utf8");
-    const lock = JSON.parse(raw);
-    expect(lock.version).toBe(1);
-    expect(lock.plugins).toEqual({});
   });
 
   test("running init on an existing vault does NOT overwrite .gitignore", async () => {
@@ -118,7 +93,6 @@ describe("vault init", () => {
       expect(result.skipped).toContain(dir);
     }
     expect(result.skipped).toContain(".gitignore");
-    expect(result.skipped).toContain(".wiki/plugin-lock.json");
     expect(result.skipped).toContain(".git");
   });
 

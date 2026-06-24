@@ -27,6 +27,32 @@ describe("prd CLI", () => {
     expect(file).toContain("# Core wiki CLI");
   });
 
+  test("prd create renders the summary line atop the body (SLICE-0071)", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+
+    await runWiki(createArgs(), vaultRoot);
+
+    const file = await readPrd(vaultRoot, "PRD-0001");
+    expect(file).toContain("summary: The core wiki CLI surface.");
+    // rendered as a body line under the metadata `>` line, above the first heading
+    const body = file.split("\n---\n")[1] ?? file;
+    expect(body).toContain("The core wiki CLI surface.");
+    expect(body.indexOf("The core wiki CLI surface.")).toBeLessThan(body.indexOf("## Problem Statement"));
+  });
+
+  test("prd create exits 1 when --summary is omitted (SLICE-0071)", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+
+    const result = await runWiki(
+      createArgs().filter((arg) => arg !== "--summary" && arg !== "The core wiki CLI surface."),
+      vaultRoot,
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("summary");
+    expect(result.stdout).toBe("");
+  });
+
   test("prd create exits 1 and names a missing required field", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
 
@@ -35,6 +61,17 @@ describe("prd CLI", () => {
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("title");
     expect(result.stdout).toBe("");
+  });
+
+  test("prd create never writes index.md (create stays pure, SLICE-0072)", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+
+    expect((await runWiki(createArgs(), vaultRoot)).exitCode).toBe(0);
+
+    const indexExists = await readFile(join(vaultRoot, "projects", "wiki-v2", "index.md"), "utf8")
+      .then(() => true)
+      .catch(() => false);
+    expect(indexExists).toBe(false);
   });
 
   test("prd create exits 1 and names a schema-invalid field", async () => {
@@ -51,7 +88,7 @@ describe("prd CLI", () => {
 });
 
 function createArgs(): string[] {
-  return ["create", "prd", "--title", "Core wiki CLI", "--project", "wiki-v2"];
+  return ["create", "prd", "--title", "Core wiki CLI", "--summary", "The core wiki CLI surface.", "--project", "wiki-v2"];
 }
 
 type CommandResult = {
@@ -63,7 +100,7 @@ type CommandResult = {
 async function runWiki(args: string[], vaultRoot: string, stdin?: string): Promise<CommandResult> {
   const proc = Bun.spawn(["bun", "src/cli.ts", ...args], {
     cwd: import.meta.dir.replace(/\/tests$/, ""),
-    env: { ...process.env, KNOWLEDGE_VAULT_ROOT: vaultRoot, OBSIDIAN_BIN: join(import.meta.dir, "fixtures", "mock-obsidian.sh") },
+    env: { ...process.env, KNOWLEDGE_VAULT_ROOT: vaultRoot },
     stdin: stdin === undefined ? undefined : "pipe",
     stdout: "pipe",
     stderr: "pipe",
@@ -87,7 +124,7 @@ async function createFixtureVault(project: string): Promise<string> {
   await mkdir(join(projectPath, "prds"), { recursive: true });
   await mkdir(join(projectPath, "slices"));
   await mkdir(join(projectPath, "adrs"));
-  await mkdir(join(projectPath, "handovers"));
+  await mkdir(join(projectPath, "handoffs"));
   await mkdir(join(projectPath, "docs"));
   const qmdCommand = join(vaultRoot, "fake-qmd");
   await writeFile(qmdCommand, "#!/usr/bin/env bash\nset -euo pipefail\ncase \"${1:-}\" in\n  collection) exit 0 ;;\n  query) echo '[]' ;;\nesac\n");

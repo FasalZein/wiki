@@ -8,7 +8,7 @@ import { dispatch } from "../src/cli/dispatch";
 let vaultRoot: string;
 let prevVaultRoot: string | undefined;
 
-const ARTIFACT_FOLDERS = ["prds", "slices", "adrs", "handovers", "docs"];
+const ARTIFACT_FOLDERS = ["prds", "slices", "adrs", "handoffs", "docs"];
 
 async function makeProject(name: string, frontmatter: string): Promise<void> {
   const dir = join(vaultRoot, "projects", name);
@@ -40,15 +40,6 @@ afterEach(async () => {
 });
 
 describe("actionable unknown-subverb errors", () => {
-  test("unknown session subverb lists the valid subverbs", async () => {
-    const cap = capture();
-    const result = await dispatch(["session", "bogus"]);
-    cap.restore();
-    expect(result.code).toBe(1);
-    expect(cap.err()).toContain("start");
-    expect(cap.err()).toContain("show");
-  });
-
   test("unknown vault action lists the valid actions", async () => {
     const cap = capture();
     const result = await dispatch(["vault", "bogus"]);
@@ -87,16 +78,6 @@ describe("actionable project errors", () => {
     expect(msg).toContain("wiki project create");
     expect(msg).toContain("ghost");
     expect(msg).toContain("alpha"); // available projects listed
-  });
-
-  test("status on an incomplete project names the missing field", async () => {
-    await makeProject("beta", "---\nproject: beta\nstatus: planning\n---\n");
-    const cap = capture();
-    const result = await dispatch(["status", "--project", "beta"]);
-    cap.restore();
-    const msg = cap.err() + cap.out();
-    expect(msg.toLowerCase()).toContain("repo");
-    expect(msg.toLowerCase()).toContain("test_command");
   });
 
   test("search on a nonexistent project suggests create instead of a cryptic error", async () => {

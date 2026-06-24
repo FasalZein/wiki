@@ -9,12 +9,12 @@ describe("template schemas", () => {
     const prd = await loadTemplate("prd");
     const slice = await loadTemplate("slice");
     const decision = await loadTemplate("decision");
-    const handover = await loadTemplate("handover");
+    const handoff = await loadTemplate("handoff");
 
     expect(prd.template).toBe("prd");
     expect(slice.template).toBe("slice");
     expect(decision.template).toBe("decision");
-    expect(handover.template).toBe("handover");
+    expect(handoff.template).toBe("handoff");
 
     const prdId = prd.fields.find((field) => field.name === "id");
     expect(prdId).toEqual({
@@ -33,26 +33,23 @@ describe("template schemas", () => {
       type: "enum",
       required: true,
       constraints: {
-        values: ["planned", "red", "green", "closed", "blocked"],
+        values: ["planned", "red", "green", "closed", "blocked", "superseded"],
       },
     });
 
     expect(decision.fields.length).toBeGreaterThan(0);
-    expect(handover.fields.length).toBeGreaterThan(0);
+    expect(handoff.fields.length).toBeGreaterThan(0);
   });
 
   test("validates fully populated input and returns the normalized record", async () => {
-    const schema = await loadTemplate("handover");
+    const schema = await loadTemplate("handoff");
     const input = {
-      id: "HANDOVER-0001",
+      id: "HANDOFF-0001",
       project: "wiki-v2",
+      summary: "Handoff summary for the session.",
       session_date: "2026-05-25",
-      phase: "red",
-      next_phase: "green",
-      active_prd: "PRD-001",
-      active_slices: ["SLICE-001"],
+      phase: "slice",
       decisions_made: ["ADR-0001"],
-      suggested_skills: ["/wiki", "/tdd"],
       status: "open",
       created: "2026-05-25",
     };
@@ -63,7 +60,7 @@ describe("template schemas", () => {
   test("rejects input missing a required field with the field name", async () => {
     const schema = await loadTemplate("prd");
 
-    expect(validate(schema, { id: "PRD-001", project: "wiki-v2", status: "draft" })).toEqual({
+    expect(validate(schema, { id: "PRD-001", summary: "A populated summary here.", project: "wiki-v2", status: "draft" })).toEqual({
       ok: false,
       errors: [{ field: "title", reason: "required", expected: "string" }],
     });
@@ -76,6 +73,7 @@ describe("template schemas", () => {
       validate(schema, {
         id: "SLICE-001",
         title: "Template schema loader",
+        summary: "A populated summary here.",
         project: "wiki-v2",
         parent_prd: "PRD-001",
         status: "planned",
@@ -95,6 +93,7 @@ describe("template schemas", () => {
       validate(schema, {
         id: "ADR-0001",
         title: "Template schemas carry validation rules",
+        summary: "A populated summary here.",
         project: "wiki-v2",
         status: "maybe",
       }),
@@ -126,7 +125,7 @@ describe("template schemas", () => {
   test("rejects a string below its minimum length with the field name and minimum", async () => {
     const schema = await loadTemplate("prd");
 
-    expect(validate(schema, { id: "PRD-001", title: "Tiny", project: "wiki-v2", status: "draft" })).toEqual({
+    expect(validate(schema, { id: "PRD-001", title: "Tiny", summary: "A populated summary here.", project: "wiki-v2", status: "draft" })).toEqual({
       ok: false,
       errors: [{ field: "title", reason: "below minimum length", expected: "at least 5 characters" }],
     });
@@ -139,6 +138,7 @@ describe("template schemas", () => {
       validate(schema, {
         id: "TASK-001",
         title: "Template schema loader",
+        summary: "A populated summary here.",
         project: "wiki-v2",
         parent_prd: "PRD-001",
         status: "planned",
@@ -148,6 +148,29 @@ describe("template schemas", () => {
     ).toEqual({
       ok: false,
       errors: [{ field: "id", reason: "pattern mismatch", expected: "SLICE-\\d{3,}" }],
+    });
+  });
+
+  test("treats a null optional field as absent, not a type mismatch", () => {
+    const schema: Schema = {
+      template: "synthetic",
+      version: 1,
+      fields: [{ name: "note", type: "string", required: false, constraints: {} }],
+    };
+
+    expect(validate(schema, { note: null })).toEqual({ ok: true, value: { note: null } });
+  });
+
+  test("reports a null required field as required, not a type mismatch", () => {
+    const schema: Schema = {
+      template: "synthetic",
+      version: 1,
+      fields: [{ name: "note", type: "string", required: true, constraints: {} }],
+    };
+
+    expect(validate(schema, { note: null })).toEqual({
+      ok: false,
+      errors: [{ field: "note", reason: "required", expected: "string" }],
     });
   });
 });

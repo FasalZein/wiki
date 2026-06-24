@@ -7,9 +7,9 @@ import { dispatch } from "../src/cli/dispatch";
 
 let vaultRoot: string;
 let prevVaultRoot: string | undefined;
-let prevObsidian: string | undefined;
+let prevQmd: string | undefined;
 
-const ARTIFACT_FOLDERS = ["prds", "slices", "adrs", "handovers", "docs", "sessions"];
+const ARTIFACT_FOLDERS = ["prds", "slices", "adrs", "handoffs", "docs", "sessions"];
 
 function capture(): { restore: () => void; out: () => string; err: () => string } {
   const ol = console.log;
@@ -27,23 +27,27 @@ beforeEach(async () => {
   for (const f of ARTIFACT_FOLDERS) await mkdir(join(proj, f), { recursive: true });
   await writeFile(join(proj, "_project.md"), "---\nproject: p\nrepo: /tmp/p\ntest_command: bun test\n---\n", "utf8");
   prevVaultRoot = process.env.KNOWLEDGE_VAULT_ROOT;
-  prevObsidian = process.env.OBSIDIAN_BIN;
   process.env.KNOWLEDGE_VAULT_ROOT = vaultRoot;
-  process.env.OBSIDIAN_BIN = join(process.cwd(), "tests", "fixtures", "mock-obsidian.sh");
+  // Hermetic dedup gate: a no-op qmd so these output-shape tests don't ride the
+  // real binary's ~5s embedding-model cold start (flaky against bun's 5s timeout).
+  const qmd = join(vaultRoot, "fake-qmd");
+  await writeFile(qmd, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  prevQmd = process.env.QMD_COMMAND;
+  process.env.QMD_COMMAND = qmd;
 });
 
 afterEach(async () => {
   if (prevVaultRoot === undefined) delete process.env.KNOWLEDGE_VAULT_ROOT;
   else process.env.KNOWLEDGE_VAULT_ROOT = prevVaultRoot;
-  if (prevObsidian === undefined) delete process.env.OBSIDIAN_BIN;
-  else process.env.OBSIDIAN_BIN = prevObsidian;
+  if (prevQmd === undefined) delete process.env.QMD_COMMAND;
+  else process.env.QMD_COMMAND = prevQmd;
   await rm(vaultRoot, { recursive: true, force: true });
 });
 
 describe("create echoes destination path", () => {
   test("create prd prints the vault-relative path it wrote", async () => {
     const cap = capture();
-    const result = await dispatch(["create", "prd", "--project", "p", "--title", "Some new requirement doc"]);
+    const result = await dispatch(["create", "prd", "--project", "p", "--title", "Some new requirement doc", "--summary", "Some new requirement doc summary."]);
     cap.restore();
     expect(result.code).toBe(0);
     const all = cap.out() + cap.err();
@@ -53,10 +57,21 @@ describe("create echoes destination path", () => {
 
   test("create doc prints the docs/<category>/ path", async () => {
     const cap = capture();
-    const result = await dispatch(["create", "doc", "--project", "p", "--title", "Deploy runbook for prod", "--type", "runbook"]);
+    const result = await dispatch(["create", "doc", "--project", "p", "--title", "Deploy runbook for prod", "--type", "runbook", "--summary", "Deploy runbook for prod summary."]);
     cap.restore();
     expect(result.code).toBe(0);
     const all = cap.out() + cap.err();
     expect(all).toContain("projects/p/docs/runbooks/DOC-0001");
+  });
+
+  test("create handoff works through the generic config-driven path (ADR-0035)", async () => {
+    // handoff never had a bespoke create fn; it is creatable purely from its
+    // wiki.json entry + template, proving the full collapse needs no per-kind code.
+    const cap = capture();
+    const result = await dispatch(["create", "handoff", "--project", "p", "--phase", "plan", "--summary", "Plan-phase handoff summary."]);
+    cap.restore();
+    expect(result.code).toBe(0);
+    const all = cap.out() + cap.err();
+    expect(all).toContain("projects/p/handoffs/HANDOFF-0001");
   });
 });

@@ -197,7 +197,6 @@ async function runWiki(args: string[], vaultRoot: string): Promise<CommandResult
     env: {
       ...process.env,
       KNOWLEDGE_VAULT_ROOT: vaultRoot,
-      OBSIDIAN_BIN: join(import.meta.dir, "fixtures", "mock-obsidian.sh"),
     },
     stdout: "pipe",
     stderr: "pipe",
@@ -266,13 +265,6 @@ describe("wiki project link (CLI)", () => {
     const linked = parsed.data.linked_repos as string[];
     const count = linked.filter((r) => r === repoDir).length;
     expect(count).toBe(1);
-  });
-
-  test("exits 1 when --repo is missing", async () => {
-    const vaultRoot = await createProjectVault("acme");
-    const result = await runWiki(["project", "link", "--project", "acme"], vaultRoot);
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("--repo");
   });
 
   test("exits 1 when --project is missing", async () => {

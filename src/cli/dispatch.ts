@@ -1,19 +1,20 @@
-import { handleClose } from "./verbs/close";
 import { handleCreate } from "./verbs/create";
 import { handleDoc } from "./verbs/doc";
 import { handleFmt } from "./verbs/fmt";
+import { handleHooks } from "./verbs/hooks";
+import { handleBlock, handlePath, handleSet, handleSupersede } from "./verbs/mutate";
 import { handleNextId } from "./verbs/next-id";
 import { handleProject } from "./verbs/project";
-import { handleRed, handleGreen } from "./verbs/tdd";
+import { handleSchema } from "./verbs/schema";
 import { handleSearch } from "./verbs/search";
-import { handleSession } from "./verbs/session";
 import { handleStatus } from "./verbs/status";
 import { handleSync } from "./verbs/sync";
 import { handleValidate } from "./verbs/validate";
 import { handleVault } from "./verbs/vault";
 import { USAGE_REGISTRY, renderHelp, renderVerbList, unknownMessage, wantsHelp } from "./usage";
+import { setJsonMode } from "./output";
 import { resolveVaultRootForDisplay } from "../config/vault";
-import { readSession } from "../state/session";
+import { readLinkedProject } from "./repo-link";
 
 export type CliResult = {
   code: number;
@@ -22,8 +23,8 @@ export type CliResult = {
 /**
  * Print a deterministic one-line context banner to stderr before any command runs:
  * where the vault is (so artifacts are never written into the project's own folder)
- * and, when this repo has a session, which project it is linked to (so an agent
- * knows the repo is already on the wiki without running discovery tools). stderr
+ * and, when this repo is linked, which project it points at (so an agent knows
+ * the repo is already on the wiki without running discovery tools). stderr
  * keeps the scriptable stdout (ids, log paths, search hits) clean.
  */
 async function printContextBanner(): Promise<void> {
@@ -32,13 +33,17 @@ async function printContextBanner(): Promise<void> {
     console.error("wiki vault: (unconfigured — set KNOWLEDGE_VAULT_ROOT or ~/.config/wiki/config.toml vault.root)");
     return;
   }
-  const session = await readSession(process.cwd()).catch(() => null);
-  const linked = session === null ? "this repo has no session — run wiki session start --project <name>" : `project ${session.project} (phase ${session.phase})`;
+  const project = await readLinkedProject(process.cwd()).catch(() => null);
+  const linked = project === null ? "this repo isn't linked — run wiki project link --project <name>" : `project ${project}`;
   console.error(`wiki vault: ${vault}  |  ${linked}`);
 }
 
 export async function dispatch(args: string[]): Promise<CliResult> {
-  const [verb, ...rest] = args;
+  // Strip the global --json flag centrally (P1.1): the per-verb parsers are
+  // strict and would reject an unknown flag, so it must never reach them.
+  const jsonFlag = args.includes("--json");
+  setJsonMode(jsonFlag);
+  const [verb, ...rest] = args.filter((arg) => arg !== "--json");
 
   // Top-level help: bare `wiki` or `wiki --help` lists all verbs.
   if (verb === undefined || verb === "--help" || verb === "-h") {
@@ -67,13 +72,16 @@ export async function dispatch(args: string[]): Promise<CliResult> {
   }
 
   // Deterministic context banner (vault + linked project) for every real command.
-  await printContextBanner();
+  // Suppressed under --json so stderr carries only structured diagnostics.
+  if (!jsonFlag) await printContextBanner();
 
   if (verb === "create") return handleCreate(rest);
+  if (verb === "set") return handleSet(rest);
+  if (verb === "block") return handleBlock(rest);
+  if (verb === "supersede") return handleSupersede(rest);
+  if (verb === "path") return handlePath(rest);
+  if (verb === "schema") return handleSchema(rest);
   if (verb === "doc") return handleDoc(rest);
-  if (verb === "red") return handleRed(rest);
-  if (verb === "green") return handleGreen(rest);
-  if (verb === "close") return handleClose(rest);
   if (verb === "status") return handleStatus(rest);
   if (verb === "search") return handleSearch(rest);
   if (verb === "validate") return handleValidate(rest);
@@ -81,10 +89,9 @@ export async function dispatch(args: string[]): Promise<CliResult> {
   if (verb === "doctor") return handleVault(["doctor", ...rest]);
   if (verb === "fmt") return handleFmt(rest);
   if (verb === "sync") return handleSync(rest);
-  if (verb === "session") return handleSession(rest);
   if (verb === "vault") return handleVault(rest);
   if (verb === "project") return handleProject(rest);
-  if (verb === "handover") return handleCreate(["handover", ...rest]);
+  if (verb === "hooks") return handleHooks(rest);
   console.error(unknownMessage("verb", verb ?? ""));
   return { code: 1 };
 }

@@ -15,8 +15,8 @@ function captureStdout(): { restore: () => void; output: () => string } {
 describe("usage registry", () => {
   test("every top-level verb has a usage entry with summary and example", () => {
     const verbs = [
-      "create", "doc", "red", "green", "close", "status", "search",
-      "validate", "next-id", "doctor", "sync", "session", "vault", "project", "handover",
+      "create", "doc", "status", "search",
+      "validate", "next-id", "doctor", "sync", "vault", "project",
     ];
     for (const verb of verbs) {
       const entry = USAGE_REGISTRY[verb];
@@ -28,25 +28,11 @@ describe("usage registry", () => {
   });
 
   test("subverb-bearing verbs declare their subverbs", () => {
-    for (const verb of ["session", "vault", "project", "doc"]) {
+    for (const verb of ["vault", "project", "doc"]) {
       const entry = USAGE_REGISTRY[verb];
       expect(entry?.subverbs, `${verb} should declare subverbs`).toBeDefined();
       expect(Object.keys(entry?.subverbs ?? {}).length).toBeGreaterThan(0);
     }
-  });
-
-  test("close help documents the body Todo checkbox gate; red help states test-command provenance (SLICE-0053)", () => {
-    const closeEntry = USAGE_REGISTRY.close;
-    expect(closeEntry).toBeDefined();
-    const closeText = renderHelp("close", closeEntry!);
-    expect(closeText.toLowerCase()).toContain("checkbox");
-    expect(closeText).toContain("Todo");
-
-    const redEntry = USAGE_REGISTRY.red;
-    expect(redEntry).toBeDefined();
-    const redText = renderHelp("red", redEntry!);
-    expect(redText).toContain("test_command");
-    expect(redText).toContain("_project.md");
   });
 
   test("renderHelp produces usage, the summary, and an example", () => {
@@ -84,7 +70,7 @@ describe("--help dispatch", () => {
   });
 
   test("wiki <verb> --help prints that verb's usage and exits 0", async () => {
-    for (const verb of ["create", "status", "search", "doc", "session", "vault", "project"]) {
+    for (const verb of ["create", "status", "search", "doc", "vault", "project"]) {
       const cap = captureStdout();
       const result = await dispatch([verb, "--help"]);
       cap.restore();
@@ -103,7 +89,7 @@ describe("--help dispatch", () => {
 
   test("wiki <verb> <subverb> --help prints subverb usage and exits 0", async () => {
     const cases: [string, string][] = [
-      ["session", "start"], ["vault", "init"], ["project", "create"], ["doc", "retitle"],
+      ["vault", "init"], ["project", "create"], ["doc", "retitle"],
     ];
     for (const [verb, subverb] of cases) {
       const cap = captureStdout();

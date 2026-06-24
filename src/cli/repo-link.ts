@@ -13,14 +13,35 @@ import { join } from "node:path";
 export const BLOCK_VERSION = 2;
 
 const BEGIN_RE = /<!-- wiki:begin v\d+ project=[^\s]+ -->/;
+const BEGIN_CAPTURE_RE = /<!-- wiki:begin v\d+ project=(\S+) -->/;
 const END_MARKER = "<!-- wiki:end -->";
+
+/**
+ * The project this repo is linked to, read from its pointer block (AGENTS.md,
+ * then CLAUDE.md). This block is the single repo→project binding: written by
+ * `wiki project link`, it is both agent-discoverable and what resolveProject
+ * reads to default --project. Returns null when no block is present.
+ */
+export async function readLinkedProject(repoDir: string): Promise<string | null> {
+  for (const file of LINK_FILES) {
+    let content: string;
+    try {
+      content = await readFile(join(repoDir, file), "utf8");
+    } catch {
+      continue;
+    }
+    const match = BEGIN_CAPTURE_RE.exec(content);
+    if (match?.[1] !== undefined) return match[1];
+  }
+  return null;
+}
 
 export function buildPointerBlock(project: string): string {
   const lines = [
     `<!-- wiki:begin v${BLOCK_VERSION} project=${project} -->`,
     `## Wiki vault`,
     ``,
-    `All PRDs, slices, ADRs, decisions, docs, glossary terms, and handovers for this project live in the wiki vault (project: ${project}), **never in this repo and never in GitHub Issues** — no repo \`CONTEXT.md\`, no \`docs/adr/\`, no OS temp dirs, even when a skill says to write them.`,
+    `All PRDs, slices, ADRs, decisions, docs, glossary terms, and handoffs for this project live in the wiki vault (project: ${project}), **never in this repo and never in GitHub Issues** — no repo \`CONTEXT.md\`, no \`docs/adr/\`, no OS temp dirs, even when a skill says to write them.`,
     ``,
     `- For any delivery work, load the \`wiki\` skill first.`,
     `- Recall context with: \`wiki search "<query>" --project ${project}\``,

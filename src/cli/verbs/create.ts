@@ -1,3 +1,4 @@
+import matter from "gray-matter";
 import { join, relative } from "node:path";
 
 import {
@@ -10,124 +11,133 @@ import {
   type DedupOverride,
 } from "../../artifacts/dedup";
 import {
-  appendField,
   ArtifactNotFoundError,
   ArtifactValidationError,
   createArtifact,
   readArtifact,
-  setFields,
+  removeArtifactFile,
+  setField,
+  supersedeArtifact,
 } from "../../artifacts/store";
-import { ARTIFACTS } from "../../artifacts/registry";
-import { defaultCategoryForDocType, DOC_CATEGORIES, isDocCategory, type DocCategory } from "../../artifacts/registry";
+import { authoredSections } from "../../artifacts/body";
+import { projectPath } from "../../artifacts/paths";
+import { ARTIFACTS, defaultCategoryForDocType, DOC_CATEGORIES, isDocCategory, specFor, type DocCategory } from "../../artifacts/registry";
 import { assertProjectStructure, loadProjectConfig, ProjectConfigError } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
-import type { TemplateType } from "../../schema/load";
-import { readSession, updateSession } from "../../state/session";
+import { loadTemplate, normalizeInlineMaps, resolveTemplatePath, type TemplateType } from "../../schema/load";
 import type { CliResult } from "../dispatch";
+import { emitJson, emitJsonError, jsonEnabled } from "../output";
 import { parseCommand, stringValue } from "../parse";
-import { readSessionFromCwd, resolveProject } from "../resolve-project";
-import { phaseDocOptions, writePhaseDocToStderr } from "../phase-docs";
-import { unknownMessage, USAGE_REGISTRY } from "../usage";
+import { resolveProject } from "../resolve-project";
+import { unknownMessage } from "../usage";
 
 export async function handleCreate(args: string[]): Promise<CliResult> {
-  const [type, ...rest] = args;
-  if (type === "prd") return createPrd(rest);
-  if (type === "slice") return createSlice(rest);
-  if (type === "decision") return createDecision(rest);
-  if (type === "handover") return createHandover(rest);
-  if (type === "doc") return createDoc(rest);
-  console.error(unknownMessage("artifact type", type ?? "", Object.keys(USAGE_REGISTRY.create?.subverbs ?? {})));
-  return { code: 1 };
+  const [kind, ...rest] = args;
+  if (kind === undefined || ARTIFACTS[kind] === undefined) {
+    console.error(unknownMessage("artifact type", kind ?? "", Object.keys(ARTIFACTS)));
+    return { code: 1 };
+  }
+  return createGeneric(kind, rest);
 }
 
-async function createPrd(args: string[]): Promise<CliResult> {
-  const parsed = parseCommand(args, ["title", "project", "body", "force-new", "related-to", "supersedes"]);
-  const project = await resolveProject(parsed);
-  const title = stringValue(parsed.values, "title");
-  const missing = missingFields({ project, title });
-  if (missing) return missing;
-  if (project === undefined || title === undefined) return { code: 1 };
-
-  const body = await stdinOrValue(stringValue(parsed.values, "body"));
-  return createWithSupersede({ type: "prd", project, dedupQuery: title, fields: { title }, rawValues: parsed.values, body });
+/** Snake-case schema/placeholder name -> kebab CLI flag (e.g. parent_prd -> parent-prd). */
+function flagName(field: string): string {
+  return field.replace(/_/g, "-");
 }
 
-async function createSlice(args: string[]): Promise<CliResult> {
-  const parsed = parseCommand(
-    args,
-    ["title", "project", "parent-prd", "body", "acceptance", "force-new", "related-to", "supersedes"],
-    ["acceptance"],
-  );
-  const project = await resolveProject(parsed);
-  const title = stringValue(parsed.values, "title");
-  const parentPrd = stringValue(parsed.values, "parent-prd");
-  const missing = missingFields({ project, title, "parent-prd": parentPrd });
-  if (missing) return missing;
-  if (project === undefined || title === undefined || parentPrd === undefined) return { code: 1 };
+/**
+ * Fields the CLI sets itself, the dedup override owns, or other verbs manage —
+ * never create-time flags. Every other schema field becomes a flag.
+ */
+const NON_FLAG_FIELDS: ReadonlySet<string> = new Set([
+  "id", "aliases", "project", "created", "updated", "session_date",
+  "supersedes", "superseded_by", "related", "slices", "blocked_by", "force_new_reason",
+]);
 
-  const vaultRoot = await getVaultRoot();
-  const projectPath = join(vaultRoot, "projects", project);
-  await assertProjectStructure(projectPath);
-  try {
-    await readArtifact({ type: "prd", vaultRoot, project, id: parentPrd });
-  } catch (error) {
-    if (error instanceof ArtifactNotFoundError) {
-      console.error(`parent PRD not found: ${parentPrd}`);
-      return { code: 1 };
+/**
+ * Schema-driven create for any kind in wiki.json (ADR-0035). Flags are derived
+ * from templates/<kind>.md — every schema field (minus the CLI/override-owned set
+ * above) plus every authored body placeholder — so a new kind needs only a config
+ * entry and a template, no code. There is no per-kind branch and no fallback: an
+ * unknown kind never reaches here (handleCreate hard-errors first). Provided values
+ * pass through as `fields`; schema fields are validated, placeholders fall through
+ * untouched and fill their `{{...}}` section.
+ */
+async function createGeneric(kind: TemplateType, args: string[]): Promise<CliResult> {
+  const schema = await loadTemplate(kind);
+  const template = await Bun.file(resolveTemplatePath(`${kind}.md`)).text();
+  const schemaNames = new Set(schema.fields.map((field) => field.name));
+  const placeholders = authoredSections(matter(normalizeInlineMaps(template)).content, schemaNames).map((s) => s.placeholder);
+
+  const stringFlags = ["project", "body", "category", "force-new", "related-to", "supersedes"];
+  const multipleFlags: string[] = [];
+  const booleanFlags: string[] = [];
+  for (const field of schema.fields) {
+    if (NON_FLAG_FIELDS.has(field.name)) continue;
+    const flag = flagName(field.name);
+    if (field.type === "list" || field.type === "link_list") {
+      stringFlags.push(flag);
+      multipleFlags.push(flag);
+    } else if (field.type === "boolean") {
+      booleanFlags.push(flag);
+    } else {
+      stringFlags.push(flag);
     }
-    throw error;
+  }
+  for (const placeholder of placeholders) stringFlags.push(flagName(placeholder));
+
+  const parsed = parseCommand(args, stringFlags, multipleFlags, booleanFlags);
+
+  const project = await resolveProject(parsed);
+  const missing = missingFields({ project });
+  if (missing) return missing;
+  if (project === undefined) return { code: 1 };
+
+  const fields: Record<string, unknown> = {};
+  for (const field of schema.fields) {
+    if (NON_FLAG_FIELDS.has(field.name)) continue;
+    const flag = flagName(field.name);
+    if (field.type === "list" || field.type === "link_list") {
+      const value = parsed.values[flag];
+      if (Array.isArray(value) && value.length > 0) fields[field.name] = value;
+    } else if (field.type === "boolean") {
+      if (parsed.values[flag] === true) fields[field.name] = true;
+    } else {
+      const value = stringValue(parsed.values, flag);
+      if (value !== undefined) fields[field.name] = value;
+    }
+  }
+  for (const placeholder of placeholders) {
+    const value = stringValue(parsed.values, flagName(placeholder));
+    if (value !== undefined) fields[placeholder] = value;
   }
 
-  const body = await stdinOrValue(stringValue(parsed.values, "body"));
-  return createWithSupersede({
-    type: "slice",
-    project,
-    dedupQuery: `${title} ${parentPrd}`,
-    fields: { title, parent_prd: parentPrd, acceptance: stringListValue(parsed.values.acceptance) },
-    rawValues: parsed.values,
-    body,
-  });
-}
-
-async function createDecision(args: string[]): Promise<CliResult> {
-  const parsed = parseCommand(args, ["title", "context", "decision", "consequences", "project", "force-new", "related-to", "supersedes"]);
-  const project = await resolveProject(parsed);
-  const title = stringValue(parsed.values, "title");
-  const context = stringValue(parsed.values, "context");
-  const decision = stringValue(parsed.values, "decision");
-  const consequences = stringValue(parsed.values, "consequences");
-  const missing = missingFields({ project, title, context, decision, consequences });
-  if (missing) return missing;
-  if (project === undefined || title === undefined || context === undefined || decision === undefined || consequences === undefined) return { code: 1 };
-
-  return createWithSupersede({ type: "decision", project, dedupQuery: `${title} ${context} ${decision}`, fields: { title, context, decision, consequences }, rawValues: parsed.values });
-}
-
-async function createDoc(args: string[]): Promise<CliResult> {
-  const parsed = parseCommand(args, ["title", "project", "type", "category", "tags", "source-url", "body", "force-new", "related-to", "supersedes"]);
-  const project = await resolveProject(parsed);
-  const title = stringValue(parsed.values, "title");
-  const docType = stringValue(parsed.values, "type");
-  const missing = missingFields({ project, title, type: docType });
-  if (missing) return missing;
-  if (project === undefined || title === undefined || docType === undefined) return { code: 1 };
-
+  // Category is a doc subfolder, not a schema field: validate it, and for doc
+  // default it from --type. Ignored by kinds that don't nest (only doc does).
   const explicitCategory = stringValue(parsed.values, "category");
   if (explicitCategory !== undefined && !isDocCategory(explicitCategory)) {
     console.error(`unknown category: ${explicitCategory}`);
     console.error(`category must be one of: ${DOC_CATEGORIES.join(", ")}`);
     return { code: 1 };
   }
-  const category = explicitCategory ?? defaultCategoryForDocType(docType);
+  const category = explicitCategory ?? (kind === "doc" ? defaultCategoryForDocType(stringValue(parsed.values, "type")) : undefined);
 
-  const fields: Record<string, unknown> = { title, type: docType };
-  const tags = stringValue(parsed.values, "tags");
-  if (tags !== undefined) fields.tags = tags.split(",").map((t) => t.trim());
-  const sourceUrl = stringValue(parsed.values, "source-url");
-  if (sourceUrl !== undefined) fields.source_url = sourceUrl;
-
+  // Dedup query: title plus every authored body section the user supplied, in
+  // template order — a uniform signal across kinds (no per-kind composition).
+  const title = stringValue(parsed.values, "title");
+  const dedupQuery = [title, ...placeholders.map((p) => fields[p])]
+    .filter((v): v is string => typeof v === "string" && v.length > 0)
+    .join(" ");
   const body = await stdinOrValue(stringValue(parsed.values, "body"));
-  return createWithSupersede({ type: "doc", project, dedupQuery: `${title} ${docType}`, fields, rawValues: parsed.values, category, body });
+  return createWithSupersede({
+    type: kind,
+    project,
+    dedupQuery,
+    fields,
+    rawValues: parsed.values,
+    category,
+    body,
+  });
 }
 
 type CreateRequest = {
@@ -146,13 +156,24 @@ async function createWithSupersede(req: CreateRequest): Promise<CliResult> {
   if (typeof override === "string") { console.error(override); return { code: 1 }; }
 
   const vaultRoot = await getVaultRoot();
-  const projectPath = join(vaultRoot, "projects", project);
-  await assertProjectStructure(projectPath);
+  const projPath = projectPath(vaultRoot, project);
+  await assertProjectStructure(projPath);
   try {
-    if (override.kind === "supersedes") {
-      await readArtifact({ type, vaultRoot, project, id: override.id });
+    // Snapshot the to-be-superseded artifact (single read) so a post-write
+    // failure can byte-restore it. setFields can't undo the supersede: it merges
+    // onto the *current* (already-mutated) frontmatter, so the added
+    // `superseded_by` would survive a field-level revert.
+    const supersededBefore = override.kind === "supersedes"
+      ? await readArtifact({ type, vaultRoot, project, id: override.id })
+      : null;
+    const supersededSnapshot = supersededBefore ? await Bun.file(supersededBefore.path).text() : null;
+    // Pre-flight the parent PRD before any write, mirroring backlinkParentPrd's
+    // guard, so a missing/garbage --parent-prd fails before supersede runs.
+    if (type === "slice" && typeof fields.parent_prd === "string" && fields.parent_prd.length > 0) {
+      await readArtifact({ type: "prd", vaultRoot, project, id: fields.parent_prd });
     }
-    await advisoryDedup(type, project, projectPath, dedupQuery, override);
+    const dedupBlock = await advisoryDedup(type, project, projPath, dedupQuery, override);
+    if (dedupBlock !== null) return dedupBlock;
     const artifact = await createArtifact({
       type,
       vaultRoot,
@@ -161,104 +182,112 @@ async function createWithSupersede(req: CreateRequest): Promise<CliResult> {
       body,
       fields: { ...fields, ...fieldsForDedupOverride(override) },
     });
-    if (override.kind === "supersedes") {
-      await setFields({ type, vaultRoot, project, id: override.id, fields: { status: "superseded", superseded_by: artifact.id } });
+    // Post-write steps mutate *other* artifacts and can fail (e.g. supersede a
+    // type without a `superseded` status). If any throws, roll back the new
+    // artifact AND restore the superseded one so a half-applied create never
+    // leaves an orphan (P0.2/P0.3).
+    try {
+      if (override.kind === "supersedes") {
+        await supersedeArtifact({ type, vaultRoot, project, id: override.id, by: artifact.id });
+      }
+      await backlinkParentPrd(type, vaultRoot, project, artifact.id, fields);
+    } catch (postWriteError) {
+      await removeArtifactFile(artifact.path);
+      if (supersededBefore && supersededSnapshot !== null) {
+        await Bun.write(supersededBefore.path, supersededSnapshot);
+      }
+      throw postWriteError;
     }
-    if (type === "slice" && typeof fields.parent_prd === "string") {
-      await backlinkSliceToPrd(vaultRoot, project, fields.parent_prd, artifact.id);
+    if (jsonEnabled()) {
+      emitJson({
+        id: artifact.id,
+        type,
+        project,
+        path: relative(vaultRoot, artifact.path),
+        status: artifact.fields.status ?? null,
+        supersedes: override.kind === "supersedes" ? override.id : null,
+      });
+    } else {
+      console.log(artifact.id);
+      console.error(`created ${artifact.id} at ${relative(vaultRoot, artifact.path)}`);
+      // SLICE-0064: no "run wiki sync" nag here. Coupling create to qmd makes
+      // every write pay a slow, fragile index call — the opposite of the lean
+      // delivery loop (PRD-0012). Indexing is owned by `wiki sync`; the wiki
+      // skill guides syncing at the right altitude.
     }
-    console.log(artifact.id);
-    console.error(`created ${artifact.id} at ${relative(vaultRoot, artifact.path)}`);
     return { code: 0 };
   } catch (error) {
     return handleCreateError(error);
   }
 }
 
-async function createHandover(args: string[]): Promise<CliResult> {
-  const parsed = parseCommand(
-    args,
-    ["project", "phase", "next-phase", "active-prd", "produced", "open", "active-slice", "decision", "suggested-skill", "doc-phase"],
-    ["active-slice", "decision", "suggested-skill"],
-    ["no-doc"],
-  );
-  const vaultRoot = await getVaultRoot();
-  const explicitProject = stringValue(parsed.values, "project");
-  const session = explicitProject === undefined ? await readSessionFromCwd() : await readSessionForProject(vaultRoot, explicitProject);
-  const project = explicitProject ?? session?.project;
-  const phase = stringValue(parsed.values, "phase") ?? session?.phase;  const missing = missingFields({ project, phase });
-  if (missing) return missing;
-  if (project === undefined || phase === undefined) return { code: 1 };
-
-  const produced = stringValue(parsed.values, "produced");
-  const open = stringValue(parsed.values, "open");
-  if (produced === "-" && open === "-") {
-    console.error("only one of --produced or --open may read from stdin per invocation");
-    return { code: 1 };
-  }
-
-  await assertProjectStructure(join(vaultRoot, "projects", project));
+/**
+ * Run the dedup gate. Returns a CliResult to abort the create, or null to
+ * proceed. Dedup is advisory by default (warn + link); a *strong* match blocks
+ * only in opt-in strict mode (config.dedup_strong_blocks). *Weak* matches always
+ * stay advisory and proceed.
+ */
+async function advisoryDedup(type: TemplateType, project: string, projectPath: string, query: string, override: DedupOverride): Promise<CliResult | null> {
+  if (override.kind !== "none" || !specFor(type).dedup) return null;
+  let config;
   try {
-    const explicitSlices = stringListValue(parsed.values["active-slice"]);
-    const nextPhase = stringValue(parsed.values, "next-phase");
-    const activeSlices = explicitSlices.length > 0 ? explicitSlices : session?.active_slices ?? [];
-    const suggestedSkills = stringListValue(parsed.values["suggested-skill"]);
-    const openText = await stdinOrValue(open);
-    const fields: Record<string, unknown> = {
-      phase,
-      active_slices: activeSlices,
-      decisions_made: stringListValue(parsed.values.decision),
-      suggested_skills: suggestedSkills,
-    };
-    addStringField(fields, "next_phase", nextPhase);
-    addStringField(fields, "active_prd", stringValue(parsed.values, "active-prd") ?? session?.active_prd);
-    addStringField(fields, "produced", await stdinOrValue(produced));
-    addStringField(fields, "open", openText);
-
-    const artifact = await createArtifact({ type: "handover", vaultRoot, project, fields });
-    console.log(artifact.id);
-    console.error(`created ${artifact.id}`);
-
-    // Finish the loop (SLICE-0055): the next agent resumes in the handover's
-    // next phase, not a stale `handover`. Only after a successful write, and
-    // only when a session already exists — handover never invents one.
-    if (nextPhase !== undefined && session !== null) {
-      const sessionRepo = explicitProject === undefined ? process.cwd() : await repoForProject(vaultRoot, explicitProject);
-      if (sessionRepo !== null) {
-        await updateSession(sessionRepo, { phase: nextPhase });
-      }
-    }
-
-    await writePhaseDocToStderr(nextPhase ?? "ad-hoc", phaseDocOptions(parsed));
-    emitResumePrompt({ project, handoverId: artifact.id, nextPhase, activeSlices, suggestedSkills, open: openText });
-    return { code: 0 };
+    config = await loadProjectConfig(projectPath);
   } catch (error) {
-    if (error instanceof ArtifactValidationError) {
-      console.error(error.message);
-      return { code: 1 };
+    if (error instanceof ProjectConfigError) {
+      console.error(`dedup check skipped: ${error.message.split("\n")[0]}`);
+      return null;
+    }
+    throw error;
+  }
+  try {
+    await runDedupGate({ type, project, projectPath, config, query, override });
+    return null;
+  } catch (error) {
+    if (error instanceof DedupBlockedError) {
+      const strong = error.matches.some((match) => match.strength === "strong");
+      if (strong && config.dedup_strong_blocks) {
+        if (jsonEnabled()) {
+          emitJsonError({ error: "strong duplicate match — refusing to create", matches: error.matches.map((m) => ({ path: m.path, score: m.score, strength: m.strength })) });
+        } else {
+          console.error(formatDedupBlocked(error));
+          console.error("strong duplicate match — refusing to create. Pass --supersedes <id>, --related-to <id>, or --force-new \"reason\" to proceed.");
+        }
+        return { code: 1 };
+      }
+      console.error(formatDedupBlocked(error));
+      console.error("(advisory — proceeding with create)");
+      return null;
+    }
+    if (error instanceof QmdError) {
+      console.error(`dedup check skipped: ${error.summary}`);
+      return null;
     }
     throw error;
   }
 }
 
-async function advisoryDedup(type: TemplateType, project: string, projectPath: string, query: string, override: DedupOverride): Promise<void> {
-  if (override.kind !== "none" || !ARTIFACTS[type].dedup) return;
-  try {
-    const config = await loadProjectConfig(projectPath);
-    await runDedupGate({ type, project, projectPath, config, query, override });
-  } catch (error) {
-    if (error instanceof DedupBlockedError) {
-      console.error(formatDedupBlocked(error));
-      console.error("(advisory — proceeding with create)");
-      return;
-    }
-    if (error instanceof QmdError || error instanceof ProjectConfigError) {
-      const errorLine = error instanceof QmdError ? error.summary : error.message.split("\n")[0] ?? error.message;
-      console.error(`dedup check skipped: ${errorLine}`);
-      return;
-    }
-    throw error;
-  }
+/**
+ * SLICE-0054 backlink: when a slice is created with --parent-prd, append its id to
+ * the parent PRD's `slices` list. `slices` is in NON_FLAG_FIELDS, so create never
+ * populates it from the slice side — this is the only place the backlink is written.
+ * Dedup-safe (no double-add), create-if-absent (setField writes the list whether or
+ * not the PRD already had one). Runs in createWithSupersede's rollback try block, so
+ * a missing/invalid parent PRD rolls back the slice rather than orphaning it.
+ */
+async function backlinkParentPrd(
+  type: TemplateType,
+  vaultRoot: string,
+  project: string,
+  sliceId: string,
+  fields: Record<string, unknown>,
+): Promise<void> {
+  if (type !== "slice") return;
+  const parentPrd = fields.parent_prd;
+  if (typeof parentPrd !== "string" || parentPrd.length === 0) return;
+  const prd = await readArtifact({ type: "prd", vaultRoot, project, id: parentPrd });
+  const current = Array.isArray(prd.fields.slices) ? prd.fields.slices.map(String) : [];
+  if (current.includes(sliceId)) return;
+  await setField({ type: "prd", vaultRoot, project, id: parentPrd, field: "slices", value: [...current, sliceId] });
 }
 
 function parseOverride(values: Record<string, string | string[] | boolean | undefined>) {
@@ -271,11 +300,17 @@ function parseOverride(values: Record<string, string | string[] | boolean | unde
 
 function handleCreateError(error: unknown): CliResult {
   if (error instanceof ArtifactValidationError || error instanceof ArtifactNotFoundError) {
-    console.error(error.message);
+    if (jsonEnabled()) {
+      const first = error instanceof ArtifactValidationError ? error.errors[0] : undefined;
+      emitJsonError({ error: error.message, ...(first === undefined ? {} : { field: first.field, expected: first.expected }) });
+    } else {
+      console.error(error.message);
+    }
     return { code: 1 };
   }
   if (error instanceof ProjectConfigError) {
-    console.error(error.message);
+    if (jsonEnabled()) emitJsonError({ error: error.message });
+    else console.error(error.message);
     return { code: 10 };
   }
   throw error;
@@ -290,67 +325,7 @@ function missingFields(fields: Record<string, unknown>): CliResult | null {
   return null;
 }
 
-function addStringField(fields: Record<string, unknown>, name: string, value: string | undefined): void {
-  if (value !== undefined) fields[name] = value;
-}
-
-function stringListValue(value: string | string[] | boolean | undefined): string[] {
-  if (Array.isArray(value)) return value;
-  if (typeof value === "string") return [value];
-  return [];
-}
-
 async function stdinOrValue(value: string | undefined): Promise<string | undefined> {
   if (value === "-") return Bun.stdin.text();
   return value;
-}
-
-/**
- * Backlink a new slice into its parent PRD's `slices` list (the field the PRD
- * schema marks "Auto-populated from slices that reference this PRD"). Goes
- * through appendField → writeArtifact, so the list write is comma-safe
- * (gray-matter serialization) and lands via the Obsidian layer (ADR-0017).
- */
-async function backlinkSliceToPrd(vaultRoot: string, project: string, prdId: string, sliceId: string): Promise<void> {
-  const prd = await readArtifact({ type: "prd", vaultRoot, project, id: prdId });
-  const current = Array.isArray(prd.fields.slices) ? prd.fields.slices.map(String) : [];
-  if (current.includes(sliceId)) return;
-  await appendField({ type: "prd", vaultRoot, project, id: prdId, field: "slices", value: sliceId });
-}
-
-// SLICE-0056: the human carries the baton between sessions — print the exact
-// prompt to paste into the next one. stderr only; stdout stays the bare ID.
-function emitResumePrompt(input: {
-  project: string;
-  handoverId: string;
-  nextPhase?: string;
-  activeSlices: string[];
-  suggestedSkills: string[];
-  open?: string;
-}): void {
-  const lines = [
-    "--- next session prompt (copy everything between the markers) ---",
-    `Continue delivery on wiki project "${input.project}".`,
-    `Load the \`wiki\` skill, then run: wiki status --project ${input.project} --with-doc`,
-    `Read ${input.handoverId} first — it records what was produced and what is open (resolve it by frontmatter ID, not filename).`,
-  ];
-  if (input.nextPhase !== undefined) lines.push(`Resume in phase: ${input.nextPhase}.`);
-  if (input.activeSlices.length > 0) lines.push(`Active slices: ${input.activeSlices.join(", ")}.`);
-  if (input.suggestedSkills.length > 0) lines.push(`Suggested skills: ${input.suggestedSkills.join(", ")}.`);
-  if (input.open !== undefined) lines.push(`Open work: ${input.open}`);
-  lines.push("--- end next session prompt ---");
-  console.error(lines.join("\n"));
-}
-
-async function repoForProject(vaultRoot: string, project: string): Promise<string | null> {
-  try {
-    return (await loadProjectConfig(join(vaultRoot, "projects", project))).repo;
-  } catch {
-    return null;
-  }
-}
-
-async function readSessionForProject(vaultRoot: string, project: string) {
-  const repo = await repoForProject(vaultRoot, project);
-  return repo === null ? null : readSession(repo);
 }

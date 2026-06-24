@@ -32,6 +32,53 @@ describe("slice CLI", () => {
     expect(file).toContain("# Build slice authoring");
   });
 
+  test("slice create succeeds without a parent PRD (parent_prd is optional)", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+
+    const result = await runWiki(
+      createArgs().filter((arg) => arg !== "--parent-prd" && arg !== "PRD-0001"),
+      vaultRoot,
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("SLICE-0001\n");
+
+    const file = await readSlice(vaultRoot, "SLICE-0001");
+    expect(file).toContain("id: SLICE-0001");
+    expect(file).not.toContain("parent_prd:");
+  });
+
+  test("slice create backlinks its id into the parent PRD slices list, without clobbering", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    await seedPrd(vaultRoot);
+
+    const first = await runWiki(createArgs(), vaultRoot);
+    expect(first.exitCode).toBe(0);
+    const second = await runWiki(
+      ["create", "slice", "--title", "Second slice authoring", "--summary", "The second slice authoring flow.", "--project", "wiki-v2", "--parent-prd", "PRD-0001"],
+      vaultRoot,
+    );
+    expect(second.exitCode).toBe(0);
+
+    const prd = matter(await readPrd(vaultRoot));
+    expect(prd.data.slices).toEqual(["SLICE-0001", "SLICE-0002"]);
+  });
+
+  test("backlink creates the slices field when the parent PRD lacks one", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    await seedPrd(vaultRoot);
+    // Strip the default `slices: []` to exercise the create-if-absent path.
+    const prdPath = join(vaultRoot, "projects", "wiki-v2", "prds", "PRD-0001-core-wiki-cli.md");
+    const stripped = (await readFile(prdPath, "utf8")).replace(/^slices:.*$\n/m, "");
+    await writeFile(prdPath, stripped);
+
+    const result = await runWiki(createArgs(), vaultRoot);
+    expect(result.exitCode).toBe(0);
+
+    const prd = matter(await readPrd(vaultRoot));
+    expect(prd.data.slices).toEqual(["SLICE-0001"]);
+  });
+
   test("slice create exits 1 and names a missing title", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
     await seedPrd(vaultRoot);
@@ -66,31 +113,6 @@ describe("slice CLI", () => {
     expect(result.stdout).toBe("");
   });
 
-  test("slice create exits 1 and names a missing parent-prd", async () => {
-    const vaultRoot = await createFixtureVault("wiki-v2");
-    await seedPrd(vaultRoot);
-
-    const result = await runWiki(
-      createArgs().filter((arg) => arg !== "--parent-prd" && arg !== "PRD-0001"),
-      vaultRoot,
-    );
-
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("parent-prd");
-    expect(result.stdout).toBe("");
-  });
-
-  test("slice create exits 1 and names a non-existent parent PRD", async () => {
-    const vaultRoot = await createFixtureVault("wiki-v2");
-
-    const result = await runWiki(createArgs(), vaultRoot);
-
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("parent PRD not found");
-    expect(result.stderr).toContain("PRD-0001");
-    expect(result.stdout).toBe("");
-  });
-
   test("slice create leaves no literal template syntax in the body", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
     await seedPrd(vaultRoot);
@@ -116,62 +138,14 @@ describe("slice CLI", () => {
   });
 });
 
-// --- SLICE-0054: PRD backlinks its slices ---
-
-describe("slice create backlinks the parent PRD", () => {
-  test("creating a slice appends its ID to the PRD slices list (SLICE-0054)", async () => {
-    const vaultRoot = await createFixtureVault("wiki-v2");
-    await seedPrd(vaultRoot);
-
-    expect((await runWiki(createArgs(), vaultRoot)).exitCode).toBe(0);
-
-    expect(await readPrdSlices(vaultRoot)).toEqual(["SLICE-0001"]);
-  });
-
-  test("a second slice appends without clobbering or duplicating (SLICE-0054)", async () => {
-    const vaultRoot = await createFixtureVault("wiki-v2");
-    await seedPrd(vaultRoot);
-
-    expect((await runWiki(createArgs(), vaultRoot)).exitCode).toBe(0);
-    const second = createArgs().map((arg) => (arg === "Build slice authoring" ? "Second slice" : arg));
-    expect((await runWiki(second, vaultRoot)).exitCode).toBe(0);
-
-    expect(await readPrdSlices(vaultRoot)).toEqual(["SLICE-0001", "SLICE-0002"]);
-  });
-
-  test("a PRD lacking the slices field gains one (SLICE-0054)", async () => {
-    const vaultRoot = await createFixtureVault("wiki-v2");
-    await seedPrd(vaultRoot);
-    const prdPath = await prdFilePath(vaultRoot);
-    const parsed = matter(await readFile(prdPath, "utf8"));
-    delete parsed.data.slices;
-    await writeFile(prdPath, matter.stringify(parsed.content, parsed.data));
-
-    expect((await runWiki(createArgs(), vaultRoot)).exitCode).toBe(0);
-
-    expect(await readPrdSlices(vaultRoot)).toEqual(["SLICE-0001"]);
-  });
-});
-
-async function prdFilePath(vaultRoot: string): Promise<string> {
-  const dir = join(vaultRoot, "projects", "wiki-v2", "prds");
-  const { readdir } = await import("node:fs/promises");
-  const entries = (await readdir(dir)).filter((name) => name.startsWith("PRD-0001"));
-  expect(entries.length).toBe(1);
-  return join(dir, entries[0]!);
-}
-
-async function readPrdSlices(vaultRoot: string): Promise<unknown> {
-  const parsed = matter(await readFile(await prdFilePath(vaultRoot), "utf8"));
-  return parsed.data.slices;
-}
-
 function createArgs(): string[] {
   return [
     "create",
     "slice",
     "--title",
     "Build slice authoring",
+    "--summary",
+    "Build the slice authoring flow.",
     "--project",
     "wiki-v2",
     "--parent-prd",
@@ -180,7 +154,7 @@ function createArgs(): string[] {
 }
 
 async function seedPrd(vaultRoot: string): Promise<void> {
-  const result = await runWiki(["create", "prd", "--title", "Core wiki CLI", "--project", "wiki-v2"], vaultRoot);
+  const result = await runWiki(["create", "prd", "--title", "Core wiki CLI", "--summary", "The core wiki CLI surface.", "--project", "wiki-v2"], vaultRoot);
   expect(result.exitCode).toBe(0);
 }
 
@@ -194,7 +168,7 @@ async function runWiki(args: string[], vaultRoot: string, stdin?: string, cwd?: 
   const repoRoot = import.meta.dir.replace(/\/tests$/, "");
   const proc = Bun.spawn(["bun", join(repoRoot, "src", "cli.ts"), ...args], {
     cwd: cwd ?? repoRoot,
-    env: { ...process.env, KNOWLEDGE_VAULT_ROOT: vaultRoot, OBSIDIAN_BIN: join(import.meta.dir, "fixtures", "mock-obsidian.sh") },
+    env: { ...process.env, KNOWLEDGE_VAULT_ROOT: vaultRoot },
     stdin: stdin === undefined ? undefined : "pipe",
     stdout: "pipe",
     stderr: "pipe",
@@ -218,7 +192,7 @@ async function createFixtureVault(project: string): Promise<string> {
   await mkdir(join(projectPath, "prds"), { recursive: true });
   await mkdir(join(projectPath, "slices"));
   await mkdir(join(projectPath, "adrs"));
-  await mkdir(join(projectPath, "handovers"));
+  await mkdir(join(projectPath, "handoffs"));
   await mkdir(join(projectPath, "docs"));
   const qmdCommand = join(vaultRoot, "fake-qmd");
   await writeFile(qmdCommand, "#!/usr/bin/env bash\nset -euo pipefail\ncase \"${1:-}\" in\n  collection) exit 0 ;;\n  query) echo '[]' ;;\nesac\n");
@@ -229,4 +203,8 @@ async function createFixtureVault(project: string): Promise<string> {
 
 async function readSlice(vaultRoot: string, id: string): Promise<string> {
   return readFile(join(vaultRoot, "projects", "wiki-v2", "slices", `${id}-build-slice-authoring.md`), "utf8");
+}
+
+async function readPrd(vaultRoot: string): Promise<string> {
+  return readFile(join(vaultRoot, "projects", "wiki-v2", "prds", "PRD-0001-core-wiki-cli.md"), "utf8");
 }

@@ -18,10 +18,6 @@ export type QmdResult = {
 };
 
 export class QmdError extends Error {
-  constructor(message: string) {
-    super(message);
-  }
-
   /**
    * One-line summary for CLI output: the first `Error:` line if present, else the
    * first non-empty line. qmd surfaces native-module/dlopen failures as a multi-line
@@ -108,8 +104,13 @@ async function runQmd(command: string, args: string[]): Promise<string> {
   return stdout;
 }
 
-function parseQmdResults(stdout: string): QmdResult[] {
-  const parsed: unknown = JSON.parse(stdout);
+export function parseQmdResults(stdout: string): QmdResult[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    throw new QmdError(`qmd returned non-JSON output: ${stdout.slice(0, 200)}`);
+  }
   if (!Array.isArray(parsed)) {
     return [];
   }

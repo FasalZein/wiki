@@ -1,7 +1,7 @@
-import { join } from "node:path";
-
+import { projectPath } from "../../artifacts/paths";
+import { writeProjectIndex } from "../../artifacts/index-md";
 import { embedCollection, ensureCollection, QmdError, updateCollection } from "../../integrations/qmd";
-import { assertProjectStructure, loadProjectConfig } from "../../config/project";
+import { assertProjectStructure, loadProjectConfig, ProjectConfigError, projectErrorMessage } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import { checkProjectDocsStructure } from "../../bootstrap/doctor";
 import { booleanValue, parseCommand } from "../parse";
@@ -12,12 +12,21 @@ export async function handleSync(args: string[]): Promise<CliResult> {
   const parsed = parseCommand(args, ["project"], [], ["include-research", "pull", "force-embed"]);
   const project = await resolveProject(parsed);
   if (project === undefined) {
-    console.error("missing required field: project (pass --project or start a session with wiki session start)");
+    console.error("missing required field: project (pass --project or link the repo with wiki project link)");
     return { code: 1 };
   }
 
   const vaultRoot = await getVaultRoot();
-  const projectPath = join(vaultRoot, "projects", project);
+  const projPath = projectPath(vaultRoot, project);
+  try {
+    await loadProjectConfig(projPath);
+  } catch (error) {
+    if (error instanceof ProjectConfigError) {
+      console.error(await projectErrorMessage(vaultRoot, project));
+      return { code: 10 };
+    }
+    throw error;
+  }
 
   // Gate: don't embed a project whose docs/ violates the locked-category invariant
   // (ADR-0028). sync is the natural chokepoint — catch rogue folders / loose docs here
@@ -30,10 +39,10 @@ export async function handleSync(args: string[]): Promise<CliResult> {
   }
 
   try {
-    await assertProjectStructure(projectPath);
-    const config = await loadProjectConfig(projectPath);
+    await assertProjectStructure(projPath);
+    const config = await loadProjectConfig(projPath);
     const qmdCommand = process.env.QMD_COMMAND ?? config.qmd_command;
-    const targets = [{ name: project, path: projectPath }];
+    const targets = [{ name: project, path: projPath }];
     if (booleanValue(parsed.values, "include-research")) {
       targets.push({ name: "research", path: config.research_path });
     }
@@ -44,6 +53,7 @@ export async function handleSync(args: string[]): Promise<CliResult> {
       await embedCollection(qmdCommand, target.name, booleanValue(parsed.values, "force-embed"));
       console.error(`synced collection ${target.name}`);
     }
+    await writeProjectIndex(vaultRoot, project);
     return { code: 0 };
   } catch (error) {
     if (error instanceof QmdError) {

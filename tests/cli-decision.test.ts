@@ -54,6 +54,8 @@ function createArgs(): string[] {
     "decision",
     "--title",
     "Use SQLite",
+    "--summary",
+    "Use SQLite for the local index.",
     "--context",
     "Need a durable local index.",
     "--decision",
@@ -74,7 +76,7 @@ type CommandResult = {
 async function runWiki(args: string[], vaultRoot: string, stdin?: string): Promise<CommandResult> {
   const proc = Bun.spawn(["bun", "src/cli.ts", ...args], {
     cwd: import.meta.dir.replace(/\/tests$/, ""),
-    env: { ...process.env, KNOWLEDGE_VAULT_ROOT: vaultRoot, OBSIDIAN_BIN: join(import.meta.dir, "fixtures", "mock-obsidian.sh") },
+    env: { ...process.env, KNOWLEDGE_VAULT_ROOT: vaultRoot },
     stdin: stdin === undefined ? undefined : "pipe",
     stdout: "pipe",
     stderr: "pipe",
@@ -98,7 +100,7 @@ async function createFixtureVault(project: string): Promise<string> {
   await mkdir(join(projectPath, "prds"), { recursive: true });
   await mkdir(join(projectPath, "slices"));
   await mkdir(join(projectPath, "adrs"));
-  await mkdir(join(projectPath, "handovers"));
+  await mkdir(join(projectPath, "handoffs"));
   await mkdir(join(projectPath, "docs"));
   const qmdCommand = join(vaultRoot, "fake-qmd");
   await writeFile(qmdCommand, "#!/usr/bin/env bash\nset -euo pipefail\ncase \"${1:-}\" in\n  collection) exit 0 ;;\n  query) echo '[]' ;;\nesac\n");

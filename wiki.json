@@ -1,0 +1,10 @@
+{
+  "_comment": "Artifact kinds, defined as data — not hardcoded in the CLI. Each kind: prefix (id), folder (per-project location), dedup (run the advisory gate), and optional skill (the skill that authors this kind; read by per-runtime hooks). A kind names a logical destination; the CLI owns the actual path. Add a kind here + a matching templates/<kind>.md to extend the vault — no code change.",
+  "kinds": {
+    "prd":      { "prefix": "PRD",      "folder": "prds",      "dedup": true },
+    "slice":    { "prefix": "SLICE",    "folder": "slices",    "dedup": true,  "skill": "to-slices" },
+    "decision": { "prefix": "ADR",      "folder": "adrs",      "dedup": true,  "skill": "grill-with-docs" },
+    "doc":      { "prefix": "DOC",      "folder": "docs",      "dedup": true },
+    "handoff":  { "prefix": "HANDOFF",  "folder": "handoffs",  "dedup": false, "skill": "handoff" }
+  }
+}

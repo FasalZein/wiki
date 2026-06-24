@@ -21,7 +21,7 @@ describe("project CLI", () => {
     expect(entries).toContain("prds");
     expect(entries).toContain("slices");
     expect(entries).toContain("adrs");
-    expect(entries).toContain("handovers");
+    expect(entries).toContain("handoffs");
     expect(entries).toContain("docs");
     expect(entries).not.toContain("architecture");
   });
@@ -43,19 +43,6 @@ describe("project CLI", () => {
     await runWiki(["project", "create", "acme"], vaultRoot);
 
     await expect(readFile(join(vaultRoot, "projects", "acme", "architecture", "domain-language.md"), "utf8")).rejects.toThrow();
-  });
-
-  test("project create generates .base files", async () => {
-    const vaultRoot = await createBareVault();
-
-    await runWiki(["project", "create", "acme"], vaultRoot);
-
-    const projectDir = join(vaultRoot, "projects", "acme");
-    const entries = await readdir(projectDir);
-    expect(entries).toContain("Slices.base");
-    expect(entries).toContain("PRDs.base");
-    expect(entries).toContain("Decisions.base");
-    expect(entries).toContain("Docs.base");
   });
 
   test("project create with existing project exits 1", async () => {
@@ -100,7 +87,6 @@ async function runWiki(args: string[], vaultRoot: string): Promise<CommandResult
     env: {
       ...process.env,
       KNOWLEDGE_VAULT_ROOT: vaultRoot,
-      OBSIDIAN_BIN: join(import.meta.dir, "fixtures", "mock-obsidian.sh"),
     },
     stdout: "pipe",
     stderr: "pipe",

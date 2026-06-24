@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { ARTIFACTS } from "../src/artifacts/registry";
 import { dispatch } from "../src/cli/dispatch";
 import { USAGE_REGISTRY } from "../src/cli/usage";
 
@@ -40,12 +41,15 @@ async function run(args: string[]): Promise<{ code: number; out: string }> {
 }
 
 describe("registry ↔ handler contract (ADR-0023)", () => {
-  test("create models every dispatched artifact form as a subverb", () => {
-    // Mirrors the branches in handleCreate; if a form is added there it must be
-    // advertised here so `wiki create <form> --help` and the unknown-type error stay truthful.
-    const dispatched = ["prd", "slice", "decision", "doc", "handover"].sort();
-    const advertised = Object.keys(USAGE_REGISTRY.create?.subverbs ?? {}).sort();
-    expect(advertised).toEqual(dispatched);
+  test("every advertised create subverb is a real kind in wiki.json (config-driven dispatch)", () => {
+    // ADR-0035: handleCreate dispatches every kind in ARTIFACTS (wiki.json), not a
+    // hardcoded union. USAGE_REGISTRY curates per-form help for a *subset* of those
+    // kinds (handoff has none, relying on generic help + `wiki schema`), so the
+    // contract is a subset check: every curated subverb must name a real kind.
+    const kinds = Object.keys(ARTIFACTS);
+    for (const sub of Object.keys(USAGE_REGISTRY.create?.subverbs ?? {})) {
+      expect(kinds, `advertised subverb ${sub} must be a kind in wiki.json`).toContain(sub);
+    }
   });
 
   test("every create subverb has per-form --help with its required flags", async () => {
@@ -59,12 +63,12 @@ describe("registry ↔ handler contract (ADR-0023)", () => {
     expect(slice.out).toContain("--parent-prd");
   });
 
-  test("unknown artifact type lists exactly the advertised forms (no hardcoded drift)", async () => {
+  test("unknown artifact type lists exactly the kinds defined in wiki.json (no hardcoded drift)", async () => {
     const { code, out } = await run(["create", "bogus"]);
     expect(code).toBe(1);
     expect(out).toContain("unknown artifact type: bogus");
-    for (const sub of Object.keys(USAGE_REGISTRY.create?.subverbs ?? {})) {
-      expect(out, `valid set should include ${sub}`).toContain(sub);
+    for (const kind of Object.keys(ARTIFACTS)) {
+      expect(out, `valid set should include ${kind}`).toContain(kind);
     }
   });
 
@@ -74,32 +78,21 @@ describe("registry ↔ handler contract (ADR-0023)", () => {
     expect(out).toContain("unknown project subverb");
   });
 
-  test("handover help does not advertise --title (the handler never parses it)", () => {
-    const flags = USAGE_REGISTRY.handover?.flags ?? {};
-    expect(Object.keys(flags)).not.toContain("--title");
-    const createHandover = USAGE_REGISTRY.create?.subverbs?.handover?.flags ?? {};
-    expect(Object.keys(createHandover)).not.toContain("--title");
-  });
-
   test("sync help advertises --project, matching the handler's required field", () => {
     expect(USAGE_REGISTRY.sync?.usage).toContain("--project");
     expect(Object.keys(USAGE_REGISTRY.sync?.flags ?? {})).toContain("--project");
-  });
-
-  test("vault sync help advertises the required <path> argument", () => {
-    expect(USAGE_REGISTRY.vault?.subverbs?.sync?.usage).toContain("<path>");
   });
 
   test("next-id advertises doc, matching the handler's accepted types", () => {
     expect(USAGE_REGISTRY["next-id"]?.usage).toContain("doc");
   });
 
-  test("create help marks --project as session-defaulted, not unconditionally required", () => {
-    // create prd/slice/decision/doc now default --project from the repo session
-    // (resolveProject); help must not keep telling agents it is always required.
+  test("create help marks --project as link-defaulted, not unconditionally required", () => {
+    // create prd/slice/decision/doc now default --project from the repo's linked
+    // project (resolveProject); help must not keep telling agents it is always required.
     for (const form of ["prd", "slice", "decision", "doc"] as const) {
       const project = USAGE_REGISTRY.create?.subverbs?.[form]?.flags?.["--project"] ?? "";
-      expect(project, `${form} --project help`).toContain("if no active session");
+      expect(project, `${form} --project help`).toContain("if the repo isn't linked");
     }
   });
 });

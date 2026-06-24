@@ -11,3 +11,6 @@ dist/
 .vscode/
 .idea/
 qmd/
+
+# Reference repos for design study (not part of this product)
+reference/
