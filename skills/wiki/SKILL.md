@@ -11,10 +11,12 @@ owns all command syntax; never restate flags here — run `wiki <verb> --help`.
 
 ## Start here
 
-1. Recall before you act: `wiki search "<query>" --project <name>` (vault-wide
-   without `--project`) and `wiki status` (the project's recent artifacts; lists
-   projects when none is bound). A month-old decision or gotcha is one search
-   away — retrieve it instead of re-deriving it.
+1. Recall before you act, in two tiers: skim `projects/<name>/index.md` — the
+   sync-generated **roster** of every artifact with its one-line summary — then
+   `wiki search "<query>" --project <name>` (vault-wide without `--project`) for
+   semantic recall. `wiki status` lists a project's recent artifacts, or the
+   projects themselves when none is bound. A month-old decision is one scan away —
+   retrieve it instead of re-deriving it.
 2. `wiki <verb> --help` for exact usage before any call. `wiki --help` lists verbs.
 
 Cold start — no `<!-- wiki:begin … -->` pointer block in AGENTS.md/CLAUDE.md:
@@ -31,6 +33,8 @@ artifact is complete in a single schema-validated command.
 - `wiki create <kind> …` — kinds come from the vault's `wiki.json`; `wiki create --help`
   lists them and `wiki create <kind> --help` gives the fields (`decision` = ADR). Docs
   land in a locked category subfolder.
+- Every kind requires a one-line `--summary` — the headline the **roster** and search
+  lead with. Write it last, once the body is settled; omitting it fails validation.
 
 Anything worth remembering — a bug's root cause, a decision, a gotcha — goes in as an
 artifact, not just this chat, so it outlives the session. Repos stay clean.
@@ -54,8 +58,9 @@ One validated `wiki` call per intent — never hand-edit frontmatter:
   Read it, then `--supersedes` (replace it), `--related-to` (adjacent), or
   `--force-new "<reason ≥30 chars>"`. A project may opt into blocking strong
   matches (`dedup_strong_blocks: true`); create then exits non-zero until you choose.
-- After creating, run `wiki sync` — search updates the keyword index but does NOT
-  re-embed, so new artifacts stay invisible to ranked search and dedup until a sync.
+- After creating, run `wiki sync` — it regenerates each project's `index.md` **roster**
+  and re-embeds for ranked search. Plain `search` updates only the keyword index, so
+  new artifacts stay invisible to ranked search and dedup until a sync.
 - Docs live only in the locked `docs/<category>/` folders (architecture, research,
   runbooks, specs, notes, legacy) — never invent a folder; an unfit doc goes in the
   closest locked one. `wiki doctor` flags rogue folders or loose files under `docs/`.
