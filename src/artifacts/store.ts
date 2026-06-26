@@ -6,7 +6,7 @@ import { loadTemplate, normalizeInlineMaps, resolveTemplatePath, type TemplateTy
 import { BodyParseError, parseBodySections } from "./body";
 import { validate } from "../schema/validate";
 import type { NormalizedRecord, Schema, ValidationError } from "../schema/types";
-import { type DocCategory, isDocCategory } from "./registry";
+import { DEFAULT_STRUCTURE, type DocCategory, isDocCategory, type Structure } from "./registry";
 import { nextId } from "./id";
 import { buildIdIndex } from "./id-index";
 import { artifactDirectory, assertSafeSegment } from "./paths";
@@ -22,6 +22,8 @@ export type CreateArtifactInput = {
   category?: DocCategory;
   /** Authored body markdown; parsed by H2 headings into template sections (ADR-0031). */
   body?: string;
+  /** Per-vault structure (folders/prefixes); defaults to the bundled kinds. */
+  structure?: Structure;
 };
 
 export type ReadArtifactInput = {
@@ -69,8 +71,8 @@ export class ArtifactNotFoundError extends Error {
   }
 }
 
-export async function readArtifact(input: ReadArtifactInput): Promise<Artifact> {
-  const path = await resolveArtifactPath(input.type, input.vaultRoot, input.project, input.id);
+export async function readArtifact(input: ReadArtifactInput, structure: Structure = DEFAULT_STRUCTURE): Promise<Artifact> {
+  const path = await resolveArtifactPath(input.type, input.vaultRoot, input.project, input.id, structure);
   let content: string;
   try {
     content = await readFile(path, "utf8");
@@ -89,18 +91,18 @@ export async function readArtifact(input: ReadArtifactInput): Promise<Artifact> 
   };
 }
 
-export async function setField(input: SetFieldInput): Promise<Artifact> {
+export async function setField(input: SetFieldInput, structure: Structure = DEFAULT_STRUCTURE): Promise<Artifact> {
   return setFields({
     type: input.type,
     vaultRoot: input.vaultRoot,
     project: input.project,
     id: input.id,
     fields: { [input.field]: input.value },
-  });
+  }, structure);
 }
 
-export async function setFields(input: SetFieldsInput): Promise<Artifact> {
-  const existing = await readArtifact(input);
+export async function setFields(input: SetFieldsInput, structure: Structure = DEFAULT_STRUCTURE): Promise<Artifact> {
+  const existing = await readArtifact(input, structure);
   const schema = await loadTemplate(input.type);
   const template = await Bun.file(resolveTemplatePath(`${input.type}.md`)).text();
   const placeholders = templatePlaceholders(template);
@@ -121,13 +123,13 @@ export async function setFields(input: SetFieldsInput): Promise<Artifact> {
  * so the conditional lives in exactly one place. Routes through setFields, so
  * the write is validated.
  */
-export async function supersedeArtifact(input: ReadArtifactInput & { by: string }): Promise<Artifact> {
+export async function supersedeArtifact(input: ReadArtifactInput & { by: string }, structure: Structure = DEFAULT_STRUCTURE): Promise<Artifact> {
   const schema = await loadTemplate(input.type);
   const statusField = schema.fields.find((field) => field.name === "status");
   const hasSupersededStatus = statusField?.constraints.values?.includes("superseded") ?? false;
   const fields: Record<string, unknown> = { superseded_by: input.by };
   if (hasSupersededStatus) fields.status = "superseded";
-  return setFields({ type: input.type, vaultRoot: input.vaultRoot, project: input.project, id: input.id, fields });
+  return setFields({ type: input.type, vaultRoot: input.vaultRoot, project: input.project, id: input.id, fields }, structure);
 }
 
 /** Delete an artifact file by absolute path (rollback for a half-applied create). */
@@ -136,6 +138,7 @@ export async function removeArtifactFile(path: string): Promise<void> {
 }
 
 export async function createArtifact(input: CreateArtifactInput): Promise<Artifact> {
+  const structure = input.structure ?? DEFAULT_STRUCTURE;
   const schema = await loadTemplate(input.type);
   const templateFile = Bun.file(resolveTemplatePath(`${input.type}.md`));
   const template = await templateFile.text();
@@ -159,7 +162,7 @@ export async function createArtifact(input: CreateArtifactInput): Promise<Artifa
   // Exclusive create (flag 'wx') + bounded retry is the cheap fix — no lockfile.
   const MAX_ATTEMPTS = 8;
   for (let attempt = 0; ; attempt++) {
-    const id = await nextId(input.type, input.vaultRoot, input.project);
+    const id = await nextId(input.type, input.vaultRoot, input.project, structure);
     const aliases = suppliedAliases.includes(id) ? suppliedAliases : [id, ...suppliedAliases];
     const fields = applyDefaults(schema, template, {
       ...input.fields,
@@ -173,7 +176,7 @@ export async function createArtifact(input: CreateArtifactInput): Promise<Artifa
     }
 
     const content = renderArtifact(template, orderBySchema(schema, result.value), bodySections);
-    const path = artifactPath(input.type, input.vaultRoot, input.project, id, String(result.value.title ?? id), input.category);
+    const path = artifactPath(input.type, input.vaultRoot, input.project, id, String(result.value.title ?? id), structure, input.category);
     try {
       await mkdir(dirname(path), { recursive: true }); // Bun.write auto-mkdirs; node writeFile does not
       await writeFile(path, content, { flag: "wx" }); // fails if path already exists
@@ -197,9 +200,9 @@ export async function createArtifact(input: CreateArtifactInput): Promise<Artifa
  * new doc category subfolder when `category` is given. The id is preserved, so
  * [[ID]] links and id-based reads keep resolving. The old file is removed.
  */
-export async function relocateArtifact(input: RelocateArtifactInput): Promise<Artifact> {
+export async function relocateArtifact(input: RelocateArtifactInput, structure: Structure = DEFAULT_STRUCTURE): Promise<Artifact> {
   assertSafeSegment(input.id, "artifact id");
-  const existing = await readArtifact(input);
+  const existing = await readArtifact(input, structure);
   const nextTitle = input.title ?? (typeof existing.fields.title === "string" ? existing.fields.title : input.id);
 
   const fields: NormalizedRecord = { ...existing.fields };
@@ -207,7 +210,7 @@ export async function relocateArtifact(input: RelocateArtifactInput): Promise<Ar
     fields.title = input.title;
   }
 
-  const directory = artifactDirectory(input.type, input.vaultRoot, input.project);
+  const directory = artifactDirectory(input.type, input.vaultRoot, input.project, structure);
   const fileName = `${input.id}-${slugifyTitle(nextTitle)}.md`;
   // Preserve the doc's current category subfolder unless an explicit move is requested.
   // If the doc currently sits in a NON-locked (rogue) folder and no explicit target is
@@ -281,8 +284,8 @@ async function writeArtifact(path: string, content: string): Promise<void> {
   await Bun.write(path, content);
 }
 
-function artifactPath(type: TemplateType, vaultRoot: string, project: string, id: string, title: string, category?: string): string {
-  const directory = artifactDirectory(type, vaultRoot, project);
+function artifactPath(type: TemplateType, vaultRoot: string, project: string, id: string, title: string, structure: Structure, category?: string): string {
+  const directory = artifactDirectory(type, vaultRoot, project, structure);
   const fileName = `${id}-${slugifyTitle(title)}.md`;
   if (type === "doc" && category !== undefined && category.length > 0) {
     return join(directory, category, fileName);
@@ -290,14 +293,14 @@ function artifactPath(type: TemplateType, vaultRoot: string, project: string, id
   return join(directory, fileName);
 }
 
-async function resolveArtifactPath(type: TemplateType, vaultRoot: string, project: string, id: string): Promise<string> {
+async function resolveArtifactPath(type: TemplateType, vaultRoot: string, project: string, id: string, structure: Structure): Promise<string> {
   assertSafeSegment(id, "artifact id");
-  const directory = artifactDirectory(type, vaultRoot, project);
+  const directory = artifactDirectory(type, vaultRoot, project, structure);
 
   // Frontmatter id is the spine: resolve through the id index first so date-named
   // and id-only files still reach repair verbs. Only accept a hit inside this
   // type's directory so a shared id can't pull in another kind's file.
-  const indexed = (await buildIdIndex(vaultRoot, project)).get(id);
+  const indexed = (await buildIdIndex(vaultRoot, project, structure)).get(id);
   const inDir = indexed?.find((path) => path.startsWith(directory + sep) || dirname(path) === directory);
   if (inDir !== undefined) return inDir;
 
