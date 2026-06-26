@@ -8,7 +8,7 @@
  * exposes richer frontmatter, this can move into runQuery.
  */
 
-import { ensureCollection, QmdError, runQuery, updateCollection, type QmdResult } from "../../integrations/qmd";
+import { ensureCollection, QmdError, refreshCollections, runQuery, type QmdResult } from "../../integrations/qmd";
 import { artifactFolder, projectPath } from "../../artifacts/paths";
 import { ARTIFACTS } from "../../artifacts/registry";
 import { assertProjectStructure, listProjects, loadProjectConfig, type ProjectConfig, ProjectConfigError, projectErrorMessage } from "../../config/project";
@@ -109,11 +109,10 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
       collections.push("research");
     }
 
-    // Auto-refresh collections before querying (unless --no-refresh)
+    // Auto-refresh collections before querying (unless --no-refresh), via the
+    // same shared helper the dedup gate uses so freshness cannot drift.
     if (!noRefresh) {
-      for (const collection of collections) {
-        await updateCollection(qmdCommand, collection, false);
-      }
+      await refreshCollections(qmdCommand, collections);
     }
 
     // Build structured query document instead of passing raw text

@@ -1,6 +1,6 @@
 import { relative } from "node:path";
 
-import { ensureCollection, QmdError, runQuery, type QmdResult } from "../integrations/qmd";
+import { ensureCollection, QmdError, refreshCollections, runQuery, type QmdResult } from "../integrations/qmd";
 import type { ProjectConfig } from "../config/project";
 import type { TemplateType } from "../schema/load";
 
@@ -53,6 +53,7 @@ export async function runDedupGate(input: DedupGateInput): Promise<void> {
 
   const qmdCommand = process.env.QMD_COMMAND ?? input.config.qmd_command;
   await ensureCollection(qmdCommand, input.project, input.projectPath);
+  await refreshCollections(qmdCommand, [input.project]);
   const results = thresholdResults(
     await runQuery(qmdCommand, input.query, [input.project]),
     { weak: input.config.dedup_threshold_weak, strong: input.config.dedup_threshold_strong },

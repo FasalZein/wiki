@@ -55,6 +55,18 @@ export async function updateCollection(qmdCommand: string, name: string, pull: b
   await runQmd(qmdCommand, pull ? ["update", "--pull", "-c", name] : ["update", "-c", name]);
 }
 
+/**
+ * Shared refresh-before-query step: run an incremental (non-pull) update for
+ * each already-ensured collection so a freshly written artifact is visible to
+ * the next query. Used by both `search` and the dedup gate so freshness cannot
+ * drift between the two query paths.
+ */
+export async function refreshCollections(qmdCommand: string, names: string[]): Promise<void> {
+  for (const name of names) {
+    await updateCollection(qmdCommand, name, false);
+  }
+}
+
 export async function embedCollection(qmdCommand: string, name: string, force: boolean): Promise<void> {
   await runQmd(qmdCommand, force ? ["embed", "-f", "-c", name] : ["embed", "-c", name]);
 }

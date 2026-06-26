@@ -10,6 +10,21 @@ afterEach(async () => {
 });
 
 describe("advisory dedup", () => {
+  test("dedup refreshes the collection before querying so a freshly created artifact is visible (SLICE-0089)", async () => {
+    const fixture = await createDedupFixture("wiki-v2");
+
+    const result = await runWiki(decisionArgs(), fixture);
+
+    expect(result.exitCode).toBe(0);
+    const state = await readFile(fixture.stateFile, "utf8");
+    const lines = state.split("\n").filter((l) => l.length > 0);
+    const updateIdx = lines.findIndex((l) => l.startsWith("update ") && l.includes("-c wiki-v2"));
+    const queryIdx = lines.findIndex((l) => l.startsWith("query "));
+    expect(updateIdx).toBeGreaterThanOrEqual(0);
+    expect(queryIdx).toBeGreaterThanOrEqual(0);
+    expect(updateIdx).toBeLessThan(queryIdx);
+  });
+
   test("decision create proceeds when QMD returns no high-score match", async () => {
     const fixture = await createDedupFixture("wiki-v2");
 
@@ -295,6 +310,9 @@ case "\${1:-}" in
         echo "$3" >> "$REGISTERED_FILE"
         ;;
     esac
+    ;;
+  update)
+    : # refresh is a no-op in the fixture; the call is logged above
     ;;
   query)
     cat "$RESULTS_FILE"
