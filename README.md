@@ -159,7 +159,7 @@ Good to know:
 wiki doctor                          # vault health report
 wiki fmt --project myproj            # check mode: report format drift, exit 1 if any
 wiki fmt --project myproj --write    # apply mechanical fixes (idempotent)
-wiki validate <file>                 # check one artifact against its template schema
+wiki validate <file>                 # check one artifact against its template schema + required body sections
 ```
 
 `wiki fmt` normalizes dates, frontmatter order, and 4-digit IDs (renumbering

@@ -109,7 +109,7 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
     example: 'wiki search "rate limiting"',
   },
   validate: {
-    summary: "Validate a single artifact file against its template schema.",
+    summary: "Validate a single artifact file against its template schema and required body sections.",
     usage: "wiki validate <file>",
     example: "wiki validate projects/myproj/adrs/ADR-0001-foo.md",
   },

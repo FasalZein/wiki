@@ -334,6 +334,30 @@ updated: '2026-05-25'
 ## Problem Statement
 
 Old.
+
+## Solution
+
+Old.
+
+## User Stories
+
+Old.
+
+## Implementation Decisions
+
+Old.
+
+## Testing Decisions
+
+Old.
+
+## Out of Scope
+
+Old.
+
+## Further Notes
+
+Old.
 `;
 
   const LEGACY_SLICE = `---

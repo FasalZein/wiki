@@ -4,12 +4,13 @@ import { join, relative } from "node:path";
 import matter from "gray-matter";
 
 import { orderBySchema } from "../../artifacts/render";
+import { bodySectionDrift } from "../../artifacts/body";
 import { FOLDER_TO_TYPE, PREFIX_TO_TYPE } from "../../artifacts/registry";
 import { slugifyTitle } from "../../artifacts/store";
 import { projectPath } from "../../artifacts/paths";
 import { assertProjectStructure, loadProjectConfig, ProjectConfigError, projectErrorMessage } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
-import { loadTemplate, type TemplateType } from "../../schema/load";
+import { loadTemplate, normalizeInlineMaps, resolveTemplatePath, type TemplateType } from "../../schema/load";
 import type { Schema } from "../../schema/types";
 import { booleanValue, parseCommand } from "../parse";
 import { resolveProject } from "../resolve-project";
@@ -131,6 +132,7 @@ type Diagnostic = (content: string, file: string) => string[] | Promise<string[]
 const DIAGNOSTICS: Diagnostic[] = [
   diagnoseIdentity,
   diagnoseCoreFields,
+  diagnoseBodySections,
   diagnoseLinkListProse,
   diagnoseNarrativeFrontmatter,
   diagnoseGuidanceOnlySections,
@@ -154,8 +156,7 @@ function diagnoseIdentity(content: string, file: string): string[] {
   return [];
 }
 
-async function diagnoseCoreFields(content: string, file: string): Promise<string[]> {
-  const type = artifactTypeOf(file);
+async function diagnoseCoreFields(content: string, file: string): Promise<string[]> {  const type = artifactTypeOf(file);
   if (type === undefined) return [];
   const data = frontmatterOf(content);
   if (data === undefined || typeof data.id !== "string") return []; // identity covers
@@ -166,6 +167,30 @@ async function diagnoseCoreFields(content: string, file: string): Promise<string
     .map((field) => field.name);
   if (missing.length === 0) return [];
   return [`${file}: missing required fields: ${missing.join(", ")} — hint: set them with 'wiki set <id> <field> <value>'`];
+}
+
+/**
+ * Body-section drift (SLICE-0087): a required H2 section removed (or an unknown
+ * one added) after an edit. Reuses the same template-derived contract validate
+ * uses, so the two never disagree. Flag-only — authoring is a judgment call.
+ */
+async function diagnoseBodySections(content: string, file: string): Promise<string[]> {
+  const type = artifactTypeOf(file);
+  if (type === undefined) return [];
+  const data = frontmatterOf(content);
+  if (data === undefined || typeof data.id !== "string") return []; // identity covers id-less files
+  const schema = await schemaFor(type);
+  const templateBody = matter(normalizeInlineMaps(await Bun.file(resolveTemplatePath(`${type}.md`)).text())).content;
+  const fieldNames = new Set(schema.fields.map((field) => field.name));
+  const drift = bodySectionDrift(templateBody, fieldNames, matter(content).content);
+  const findings: string[] = [];
+  for (const heading of drift.missing) {
+    findings.push(`${file}: missing required body section "## ${heading}" — hint: add the section back`);
+  }
+  for (const heading of drift.unknown) {
+    findings.push(`${file}: unknown body section "## ${heading}" (not in the ${type} template) — hint: remove or rename it`);
+  }
+  return findings;
 }
 
 const ARTIFACT_ID = /^[A-Z]+-\d+$/;

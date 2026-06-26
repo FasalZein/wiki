@@ -101,3 +101,28 @@ function splitByH2(supplied: string): Array<{ heading: string; content: string }
 function normalize(heading: string): string {
   return heading.trim().toLowerCase();
 }
+
+/**
+ * Compare a rendered artifact body against its template's section contract
+ * (the same one `create` enforces). "missing" = an authored section (one a user
+ * must supply — the heading over a non-field `{{placeholder}}`) absent from the
+ * body. "unknown" = a body section the template doesn't define at all (neither
+ * authored nor machine-owned). Machine-owned sections (rendered by the CLI) are
+ * not required after edits. Heading match is case-insensitive; order isn't enforced.
+ */
+export function bodySectionDrift(
+  templateBody: string,
+  schemaFields: Set<string>,
+  artifactBody: string,
+): { missing: string[]; unknown: string[] } {
+  const authored = authoredSections(templateBody, schemaFields);
+  const authoredSet = new Set(authored.map((section) => normalize(section.heading)));
+  const templateSet = new Set(templateHeadings(templateBody).map(normalize));
+  const present = new Set(splitByH2(artifactBody).map((part) => normalize(part.heading)));
+
+  const missing = authored.map((s) => s.heading).filter((heading) => !present.has(normalize(heading)));
+  const unknown = splitByH2(artifactBody)
+    .map((part) => part.heading)
+    .filter((heading) => !templateSet.has(normalize(heading)) && !authoredSet.has(normalize(heading)));
+  return { missing, unknown };
+}
