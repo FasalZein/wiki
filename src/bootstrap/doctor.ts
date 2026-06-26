@@ -2,7 +2,8 @@ import { access, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import matter from "gray-matter";
 
-import { DOC_CATEGORIES } from "../artifacts/registry";
+import { buildIdIndex } from "../artifacts/id-index";
+import { DOC_CATEGORIES, PREFIX_TO_TYPE } from "../artifacts/registry";
 import { BLOCK_VERSION } from "../cli/repo-link";
 
 export type DriftIssue = {
@@ -10,7 +11,9 @@ export type DriftIssue = {
     | "docs-structure"
     | "repo-binding"
     | "repo-binding-warning"
-    | "contract-drift";
+    | "contract-drift"
+    | "duplicate-id"
+    | "dangling-link";
   project?: string;
   actual?: string;
   message: string;
@@ -42,8 +45,105 @@ export async function runDoctor(vaultPath: string): Promise<DoctorResult> {
   for (const project of await listVaultProjects(vaultPath)) {
     issues.push(...(await checkProjectDocsStructure(vaultPath, project)));
     issues.push(...(await checkProjectRepoBindings(vaultPath, project)));
+    issues.push(...(await checkProjectIdDrift(vaultPath, project)));
   }
   return { issues, clean: issues.length === 0 };
+}
+
+/** A bare `PREFIX-NNNN` id, the only wikilink form the dangling-link check validates.
+ *  Path-qualified links (`[[../other-project/...]]`) are cross-project and skipped. */
+const BARE_ID_RE = /^[A-Z]+-\d+$/;
+/** All `[[target]]` occurrences in a body; the target is captured for normalization. */
+const WIKILINK_RE = /\[\[([^\]]+)\]\]/g;
+
+/** Reduce a link reference (a frontmatter value or a wikilink target) to its bare id
+ *  candidate: strip wrapping `[[ ]]`, drop any `|alias` and `#heading`, and trim. A
+ *  reference containing a path separator is cross-project and returns undefined (skip). */
+function bareIdOf(raw: string): string | undefined {
+  let value = raw.trim();
+  const wl = /^\[\[(.+)\]\]$/.exec(value);
+  if (wl !== null) value = wl[1]!.trim();
+  value = value.split("|")[0]!.split("#")[0]!.trim();
+  if (value.includes("/") || value.includes("\\")) return undefined; // cross-project
+  return value;
+}
+
+/** True when an id should be validated against this project's id set: it is a bare
+ *  `PREFIX-NNNN` whose prefix is a registered kind. Unknown prefixes are cross-prefix
+ *  (external) references and are skipped, as PRD-0013 documents. */
+function isLocalIdRef(id: string): boolean {
+  if (!BARE_ID_RE.test(id)) return false;
+  const prefix = id.split("-")[0]!;
+  return PREFIX_TO_TYPE[prefix] !== undefined;
+}
+
+/**
+ * Identity drift for one project, both backed by the frontmatter-`id` index (the
+ * single spine from PRD-0013):
+ *  - duplicate-id: any id mapping to more than one file (silent shadowing).
+ *  - dangling-link: any frontmatter link value or `[[id]]` body wikilink whose bare,
+ *    registered-prefix id is absent from the project id set. Cross-project
+ *    (path-qualified) and cross-prefix (unknown-prefix) references are skipped by
+ *    design — shared-ADR references are not false dangles.
+ */
+export async function checkProjectIdDrift(vaultPath: string, project: string): Promise<DriftIssue[]> {
+  const issues: DriftIssue[] = [];
+  const index = await buildIdIndex(vaultPath, project);
+
+  for (const [id, paths] of index) {
+    if (paths.length > 1) {
+      issues.push({
+        type: "duplicate-id",
+        project,
+        actual: id,
+        message: `${project}: id ${id} maps to ${paths.length} files (${paths.map((p) => p.split("/").pop()).join(", ")}) — ids must be unique. Renumber or merge the duplicates.`,
+      });
+    }
+  }
+
+  const known = new Set(index.keys());
+  for (const paths of index.values()) {
+    for (const path of paths) {
+      for (const ref of await collectReferences(path)) {
+        const id = bareIdOf(ref);
+        if (id === undefined || !isLocalIdRef(id)) continue; // cross-project / cross-prefix
+        if (!known.has(id)) {
+          issues.push({
+            type: "dangling-link",
+            project,
+            actual: id,
+            message: `${project}: ${path.split("/").pop()} references ${id}, which has no artifact in this project — fix the link or restore the target.`,
+          });
+        }
+      }
+    }
+  }
+
+  return issues;
+}
+
+/** Every link reference in one file: frontmatter string/array values plus body
+ *  `[[..]]` wikilinks. Validation/skip decisions are the caller's; this just gathers. */
+async function collectReferences(path: string): Promise<string[]> {
+  let content: string;
+  try {
+    content = await readFile(path, "utf8");
+  } catch {
+    return [];
+  }
+  const refs: string[] = [];
+  const parsed = matter(content);
+  for (const [name, value] of Object.entries(parsed.data as Record<string, unknown>)) {
+    if (name === "id") continue;
+    if (typeof value === "string") refs.push(value);
+    else if (Array.isArray(value)) {
+      for (const item of value) if (typeof item === "string") refs.push(item);
+    }
+  }
+  let match: RegExpExecArray | null;
+  WIKILINK_RE.lastIndex = 0;
+  while ((match = WIKILINK_RE.exec(parsed.content)) !== null) refs.push(match[1]!);
+  return refs;
 }
 
 /** Project directories under the vault (excludes _-prefixed structural dirs). */
