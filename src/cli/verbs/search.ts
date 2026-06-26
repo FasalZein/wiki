@@ -14,7 +14,7 @@ import { join } from "node:path";
 
 import { ensureCollection, QmdError, refreshCollections, runQuery, type QmdResult } from "../../integrations/qmd";
 import { artifactFolder, projectPath } from "../../artifacts/paths";
-import { ARTIFACTS, FOLDER_TO_TYPE } from "../../artifacts/registry";
+import { loadStructure, type Structure } from "../../artifacts/registry";
 import { recentArtifacts, RECENT_LIMIT, type RecentArtifact } from "../../artifacts/recent";
 import { assertProjectStructure, listProjects, loadProjectConfig, type ProjectConfig, ProjectConfigError, projectErrorMessage } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
@@ -24,8 +24,6 @@ import { buildStructuredQuery } from "../../search/query-builder";
 import { booleanValue, parseCommand, stringValue } from "../parse";
 import { emitJsonArray, jsonEnabled } from "../output";
 import type { CliResult } from "../dispatch";
-
-const allowedTypes: readonly TemplateType[] = Object.keys(ARTIFACTS) as TemplateType[];
 
 // qmd ranks and truncates to a default window (20 for --json) before we can
 // filter by artifact folder. When a --type filter is active we over-fetch so
@@ -40,7 +38,10 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
     return { code: 1 };
   }
   const project = stringValue(parsed.values, "project");
-  const type = parseSearchType(stringValue(parsed.values, "type"));
+  const vaultRoot = await getVaultRoot();
+  const structure = await loadStructure(vaultRoot);
+  const allowedTypes = Object.keys(structure.kinds) as TemplateType[];
+  const type = parseSearchType(stringValue(parsed.values, "type"), allowedTypes);
   if (type === null) {
     console.error(`invalid type: expected ${allowedTypes.join(", ")}`);
     return { code: 1 };
@@ -62,8 +63,6 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
     since = parsedDate;
   }
   const recency = booleanValue(parsed.values, "recent") || since !== undefined || classifyIntent(query) === "temporal";
-
-  const vaultRoot = await getVaultRoot();
 
   // Resolve the target projects: one when --project is given, else the whole vault.
   let targetProjects: string[];
@@ -88,7 +87,7 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
   }
 
   if (recency) {
-    return handleRecency(vaultRoot, targetProjects, { type, since });
+    return handleRecency(vaultRoot, targetProjects, { type, since }, structure);
   }
 
   try {
@@ -101,7 +100,7 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
     const configs: Array<readonly [string, ProjectConfig]> = [];
     for (const proj of targetProjects) {
       const projPath = projectPath(vaultRoot, proj);
-      await assertProjectStructure(projPath);
+      await assertProjectStructure(projPath, structure);
       configs.push([proj, await loadProjectConfig(projPath)]);
     }
 
@@ -154,8 +153,9 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
         limit: type === undefined ? undefined : TYPE_FILTER_FETCH,
       }),
       type,
+      structure,
     );
-    await writeResults(results, collectionBases);
+    await writeResults(results, collectionBases, structure);
     return { code: 0 };
   } catch (error) {
     if (error instanceof QmdError) {
@@ -166,7 +166,7 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
   }
 }
 
-function parseSearchType(value: string | undefined): TemplateType | undefined | null {
+function parseSearchType(value: string | undefined, allowedTypes: readonly TemplateType[]): TemplateType | undefined | null {
   if (value === undefined) {
     return undefined;
   }
@@ -196,13 +196,13 @@ function divergenceMessage(field: string, pairs: ReadonlyArray<readonly [string,
   return `vault-wide search needs a single ${field}, but projects disagree:\n${lines.join("\n")}\nFix: ${fix}, or narrow with --project <name>.`;
 }
 
-function filterByType(results: QmdResult[], type: TemplateType | undefined): QmdResult[] {
+function filterByType(results: QmdResult[], type: TemplateType | undefined, structure: Structure): QmdResult[] {
   if (type === undefined) {
     return results;
   }
   // qmd returns paths as "qmd://<collection>/<path>" URIs; the artifact folder is
   // the first path segment within the collection (e.g. qmd://rift/docs/DOC-0017.md).
-  const prefix = `/${artifactFolder(type)}/`;
+  const prefix = `/${artifactFolder(type, structure)}/`;
   return results.filter((result) => uriPath(result.path).startsWith(prefix));
 }
 
@@ -223,12 +223,12 @@ type EnrichedHit = {
   snippet: string;
 };
 
-async function writeResults(results: QmdResult[], collectionBases: Map<string, string>): Promise<void> {
+async function writeResults(results: QmdResult[], collectionBases: Map<string, string>, structure: Structure): Promise<void> {
   // SLICE-0092: group hits one line per artifact (qmd returns multiple chunks of
   // the same file) and enrich each with id/kind/title from frontmatter. --json
   // emits the same shape as an array; empty prints a no-results line in human
   // mode and a valid [] in json mode.
-  emitHits(await enrichHits(results, collectionBases));
+  emitHits(await enrichHits(results, collectionBases, structure));
 }
 
 /** Shared terminal: same shape for the qmd path and the recency path. */
@@ -254,10 +254,11 @@ async function handleRecency(
   vaultRoot: string,
   targetProjects: string[],
   opts: { type: TemplateType | undefined; since: number | undefined },
+  structure: Structure,
 ): Promise<CliResult> {
   let artifacts: RecentArtifact[] = [];
   for (const proj of targetProjects) {
-    artifacts.push(...(await recentArtifacts(vaultRoot, projectPath(vaultRoot, proj))));
+    artifacts.push(...(await recentArtifacts(vaultRoot, projectPath(vaultRoot, proj), structure)));
   }
   artifacts.sort((a, b) => b.mtime - a.mtime);
   if (opts.since !== undefined) {
@@ -267,12 +268,12 @@ async function handleRecency(
   if (opts.type !== undefined) {
     // rel is projects/<proj>/<folder>/...; match the folder segment exactly so a
     // kind name appearing elsewhere in the path can't pull in the wrong artifacts.
-    const folder = artifactFolder(opts.type);
+    const folder = artifactFolder(opts.type, structure);
     artifacts = artifacts.filter((a) => a.rel.split(/[\\/]/).includes(folder));
   }
   const hits: EnrichedHit[] = [];
   for (const artifact of artifacts.slice(0, RECENT_LIMIT)) {
-    hits.push(await recencyHit(artifact.full, artifact.rel));
+    hits.push(await recencyHit(artifact.full, artifact.rel, structure));
   }
   emitHits(hits);
   return { code: 0 };
@@ -280,14 +281,14 @@ async function handleRecency(
 
 /** Build an EnrichedHit for a recency result: id/kind/title from frontmatter (or
  *  filename/folder fallback), blank score and snippet (recency carries neither). */
-async function recencyHit(filePath: string, rel: string): Promise<EnrichedHit> {
-  const { id, kind, title } = await readMeta(rel, filePath);
+async function recencyHit(filePath: string, rel: string, structure: Structure): Promise<EnrichedHit> {
+  const { id, kind, title } = await readMeta(rel, filePath, structure);
   return { id, kind, title, path: filePath, score: "", snippet: "" };
 }
 
 /** Collapse per-file chunks to one hit each (highest-ranked wins; qmd ranks desc)
  *  and enrich with id/kind/title read from the resolved file's frontmatter. */
-async function enrichHits(results: QmdResult[], collectionBases: Map<string, string>): Promise<EnrichedHit[]> {
+async function enrichHits(results: QmdResult[], collectionBases: Map<string, string>, structure: Structure): Promise<EnrichedHit[]> {
   const seen = new Set<string>();
   const hits: EnrichedHit[] = [];
   for (const result of results) {
@@ -295,7 +296,7 @@ async function enrichHits(results: QmdResult[], collectionBases: Map<string, str
     const dedupKey = filePath ?? result.path;
     if (seen.has(dedupKey)) continue;
     seen.add(dedupKey);
-    const { id, kind, title } = await readMeta(result.path, filePath);
+    const { id, kind, title } = await readMeta(result.path, filePath, structure);
     hits.push({
       id,
       kind,
@@ -325,11 +326,11 @@ function resolveFilePath(path: string, collectionBases: Map<string, string>): st
 
 /** id/kind/title from frontmatter when the file is readable, else a filename/
  *  folder fallback (id from the basename stem, kind from the parent folder). */
-async function readMeta(uri: string, filePath: string | null): Promise<{ id: string; kind: string; title: string }> {
+async function readMeta(uri: string, filePath: string | null, structure: Structure): Promise<{ id: string; kind: string; title: string }> {
   const segments = uriPath(uri).split(/[\\/]/).filter((s) => s.length > 0);
   const fileName = segments[segments.length - 1] ?? "";
   const folder = segments[segments.length - 2] ?? "";
-  const kind = FOLDER_TO_TYPE[folder] ?? folder;
+  const kind = structure.artifactTypeForVaultPath(`projects/x/${folder}/${fileName}`) ?? folder;
   // Filename is ID-slug.md where ID is PREFIX-NNNN; fall back to that id shape,
   // else the whole basename stem.
   const stem = fileName.replace(/\.md$/, "");

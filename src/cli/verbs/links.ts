@@ -7,7 +7,7 @@
 
 import { buildIdIndex } from "../../artifacts/id-index";
 import { bareIdOf, collectReferences, inboundReferences, isLocalIdRef } from "../../artifacts/references";
-import { typeForId } from "../../artifacts/registry";
+import { loadStructure } from "../../artifacts/registry";
 import { getVaultRoot } from "../../config/vault";
 import type { CliResult } from "../dispatch";
 import { emitJson, emitJsonError, jsonEnabled } from "../output";
@@ -18,13 +18,14 @@ export async function handleLinks(args: string[]): Promise<CliResult> {
   const parsed = parseCommand(args, ["project"]);
   const id = parsed.positionals[0];
   if (id === undefined) return fail("usage: wiki links <id> [--project <name>]");
-  if (typeForId(id) === undefined) return fail(`cannot infer artifact type from id: ${id}`);
 
   const project = await resolveProject(parsed);
   if (project === undefined) return fail("no project: pass --project <name> or run from a linked repo");
   const vaultRoot = await getVaultRoot();
+  const structure = await loadStructure(vaultRoot);
+  if (structure.typeForId(id) === undefined) return fail(`cannot infer artifact type from id: ${id}`);
 
-  const index = await buildIdIndex(vaultRoot, project);
+  const index = await buildIdIndex(vaultRoot, project, structure);
   const ownPaths = index.get(id);
   if (ownPaths === undefined) return fail(`artifact not found: ${id}`);
 
@@ -33,7 +34,7 @@ export async function handleLinks(args: string[]): Promise<CliResult> {
   for (const path of ownPaths) {
     for (const ref of await collectReferences(path)) {
       const refId = bareIdOf(ref);
-      if (refId !== undefined && refId !== id && isLocalIdRef(refId)) outbound.add(refId);
+      if (refId !== undefined && refId !== id && isLocalIdRef(refId, structure)) outbound.add(refId);
     }
   }
 

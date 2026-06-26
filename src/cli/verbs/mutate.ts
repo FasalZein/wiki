@@ -16,7 +16,7 @@ import {
 } from "../../artifacts/store";
 import { rm } from "node:fs/promises";
 import { inboundReferences } from "../../artifacts/references";
-import { typeForId } from "../../artifacts/registry";
+import { loadStructure, type Structure } from "../../artifacts/registry";
 import { getVaultRoot } from "../../config/vault";
 import { loadTemplate, type TemplateType } from "../../schema/load";
 import type { CliResult } from "../dispatch";
@@ -24,7 +24,7 @@ import { emitJson, emitJsonError, jsonEnabled } from "../output";
 import { booleanValue, parseCommand, type ParsedCommand } from "../parse";
 import { resolveProject } from "../resolve-project";
 
-type Target = { type: TemplateType; vaultRoot: string; project: string; id: string };
+type Target = { type: TemplateType; vaultRoot: string; project: string; id: string; structure: Structure };
 
 /**
  * wiki set <id> <field> <value...> — full-replace; never comma-splits; coerces by schema type.
@@ -54,7 +54,7 @@ export async function handleSet(args: string[]): Promise<CliResult> {
   const coerced = await coerceValue(target.type, field, values);
   if (!coerced.ok) return fail(coerced.error);
 
-  return run(target, () => setField({ ...target, field, value: coerced.value }), (artifact) => ({
+  return run(target, () => setField({ ...target, field, value: coerced.value }, target.structure), (artifact) => ({
     id: target.id,
     field,
     value: artifact.fields[field] ?? null,
@@ -79,7 +79,7 @@ async function setListField(
 
   let current: string[];
   try {
-    const existing = await readArtifact(target);
+    const existing = await readArtifact(target, target.structure);
     const value = existing.fields[field];
     current = Array.isArray(value) ? value.map(String) : [];
   } catch (error) {
@@ -96,7 +96,7 @@ async function setListField(
     next = next.filter((item) => !drop.has(bare(item)));
   }
 
-  return run(target, () => setField({ ...target, field, value: next }), () => ({
+  return run(target, () => setField({ ...target, field, value: next }, target.structure), () => ({
     id: target.id,
     field,
     value: next,
@@ -115,7 +115,7 @@ export async function handleBlock(args: string[]): Promise<CliResult> {
   if (typeof target === "string") return fail(target);
 
   const wrapped = on.map((value) => (/^\[\[.*\]\]$/.test(value) ? value : `[[${value}]]`));
-  return run(target, () => setField({ ...target, field: "blocked_by", value: wrapped }), () => ({
+  return run(target, () => setField({ ...target, field: "blocked_by", value: wrapped }, target.structure), () => ({
     id: target.id,
     blocked_by: wrapped,
   }), `${target.id} blocked_by ${wrapped.join(", ")}`);
@@ -133,12 +133,12 @@ export async function handleSupersede(args: string[]): Promise<CliResult> {
   if (typeof target === "string") return fail(target);
 
   try {
-    await readArtifact({ type: target.type, vaultRoot: target.vaultRoot, project: target.project, id: by });
+    await readArtifact({ type: target.type, vaultRoot: target.vaultRoot, project: target.project, id: by }, target.structure);
   } catch (error) {
     if (error instanceof ArtifactNotFoundError) return fail(`superseding artifact not found: ${by}`);
     throw error;
   }
-  return run(target, () => supersedeArtifact({ ...target, by }), (artifact) => ({
+  return run(target, () => supersedeArtifact({ ...target, by }, target.structure), (artifact) => ({
     id: target.id,
     status: artifact.fields.status ?? null,
     superseded_by: by,
@@ -153,7 +153,7 @@ export async function handlePath(args: string[]): Promise<CliResult> {
   const target = await resolveTarget(id, parsed);
   if (typeof target === "string") return fail(target);
   try {
-    const artifact = await readArtifact(target);
+    const artifact = await readArtifact(target, target.structure);
     if (jsonEnabled()) emitJson({ id: target.id, path: artifact.path });
     else console.log(artifact.path);
     return { code: 0 };
@@ -172,7 +172,7 @@ export async function handleRetitle(args: string[]): Promise<CliResult> {
   }
   const target = await resolveTarget(id, parsed);
   if (typeof target === "string") return fail(target);
-  return run(target, () => relocateArtifact({ ...target, title }), (artifact) => ({
+  return run(target, () => relocateArtifact({ ...target, title }, target.structure), (artifact) => ({
     id: target.id,
     title: artifact.fields.title ?? null,
     path: (artifact as { path?: string }).path ?? null,
@@ -189,13 +189,13 @@ export async function handleDelete(args: string[]): Promise<CliResult> {
 
   let artifactPath: string;
   try {
-    artifactPath = (await readArtifact(target)).path;
+    artifactPath = (await readArtifact(target, target.structure)).path;
   } catch (error) {
     return handleError(error);
   }
 
   // Scan inbound references via the id index; refuse unless --force.
-  const index = await buildIdIndex(target.vaultRoot, target.project);
+  const index = await buildIdIndex(target.vaultRoot, target.project, target.structure);
   const inbound = await inboundReferences(index, target.id);
   if (inbound.length > 0 && !booleanValue(parsed.values, "force")) {
     return fail(
@@ -212,12 +212,13 @@ export async function handleDelete(args: string[]): Promise<CliResult> {
 }
 
 async function resolveTarget(id: string, parsed: ParsedCommand): Promise<Target | string> {
-  const type = typeForId(id);
+  const vaultRoot = await getVaultRoot();
+  const structure = await loadStructure(vaultRoot);
+  const type = structure.typeForId(id);
   if (type === undefined) return `cannot infer artifact type from id: ${id}`;
   const project = await resolveProject(parsed);
   if (project === undefined) return "no project: pass --project <name> or run from a linked repo";
-  const vaultRoot = await getVaultRoot();
-  return { type, vaultRoot, project, id };
+  return { type, vaultRoot, project, id, structure };
 }
 
 /** Coerce raw CLI string args to the field's schema type (booleans, integers, lists). */

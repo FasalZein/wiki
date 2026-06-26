@@ -2,6 +2,7 @@ import { projectPath } from "../../artifacts/paths";
 import { recentArtifacts, RECENT_LIMIT } from "../../artifacts/recent";
 import { listProjects, loadProjectConfig, ProjectConfigError, projectErrorMessage } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
+import { loadStructure } from "../../artifacts/registry";
 import { readLinkedProject } from "../repo-link";
 import { emitJson, jsonEnabled } from "../output";
 import type { CliResult } from "../dispatch";
@@ -11,7 +12,7 @@ export async function handleStatus(args: string[]): Promise<CliResult> {
   const parsed = parseCommand(args, ["project"]);
   const explicit = stringValue(parsed.values, "project");
   const vaultRoot = await getVaultRoot();
-
+  const structure = await loadStructure(vaultRoot);
   let project = explicit;
   if (project === undefined) {
     // No --project: prefer the repo's linked project; otherwise summarize the vault.
@@ -31,7 +32,7 @@ export async function handleStatus(args: string[]): Promise<CliResult> {
     throw error;
   }
 
-  const recent = (await recentArtifacts(vaultRoot, projPath)).slice(0, RECENT_LIMIT);
+  const recent = (await recentArtifacts(vaultRoot, projPath, structure)).slice(0, RECENT_LIMIT);
 
   if (jsonEnabled()) {
     emitJson({ project, recent: recent.map((r) => r.rel) });
