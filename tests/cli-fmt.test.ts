@@ -544,6 +544,96 @@ X.
     expect(rewrite.stdout).toContain("needs manual attention:");
   });
 
+  // --- SLICE-0079: rename-to-id + registry-derived renumber prefixes ---
+
+  const MISNAMED_SLICE = `---
+id: SLICE-0008
+aliases:
+  - SLICE-0008
+title: Renamed me
+project: wiki-v2
+status: open
+created: '2026-05-25'
+updated: '2026-05-25'
+---
+## What to build
+
+Filename no longer matches the title.
+`;
+
+  test("--write renames a mismatched file to id-slug.md preserving the id, and the [[id]] link still resolves (SLICE-0079)", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    await writeSlice(vaultRoot, "SLICE-0008-old-wrong-name.md", MISNAMED_SLICE);
+
+    const check = await runWiki(["fmt", "--project", "wiki-v2"], vaultRoot);
+    expect(check.exitCode).toBe(1);
+    expect(check.stdout).toContain("SLICE-0008-old-wrong-name.md");
+
+    const write = await runWiki(["fmt", "--project", "wiki-v2", "--write"], vaultRoot);
+    expect(write.exitCode).toBe(0);
+
+    const sliceFiles = await readdir(join(vaultRoot, "projects", "wiki-v2", "slices"));
+    expect(sliceFiles).toContain("SLICE-0008-renamed-me.md");
+    expect(sliceFiles).not.toContain("SLICE-0008-old-wrong-name.md");
+    // id preserved inside the file
+    const renamed = await readFile(slicePath(vaultRoot, "SLICE-0008-renamed-me.md"), "utf8");
+    expect(renamed).toContain("id: SLICE-0008");
+
+    // the [[id]] link still resolves to the renamed file
+    const resolved = await runWiki(["path", "SLICE-0008", "--project", "wiki-v2"], vaultRoot);
+    expect(resolved.exitCode).toBe(0);
+    expect(resolved.stdout).toContain("SLICE-0008-renamed-me.md");
+
+    const recheck = await runWiki(["fmt", "--project", "wiki-v2"], vaultRoot);
+    expect(recheck.exitCode).toBe(0);
+  });
+
+  test("an id-less file is flagged, never auto-renamed (SLICE-0079)", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    await writeFile(
+      join(vaultRoot, "projects", "wiki-v2", "handoffs", "0001-grilling-session-1.md"),
+      PRE_SCHEMA_HANDOFF,
+    );
+
+    const check = await runWiki(["fmt", "--project", "wiki-v2"], vaultRoot);
+    expect(check.exitCode).toBe(1);
+    expect(check.stdout).toContain("no id in frontmatter");
+
+    const write = await runWiki(["fmt", "--project", "wiki-v2", "--write"], vaultRoot);
+    expect(write.exitCode).toBe(0);
+    // file untouched — never auto-renamed when there is no id
+    const handoffFiles = await readdir(join(vaultRoot, "projects", "wiki-v2", "handoffs"));
+    expect(handoffFiles).toContain("0001-grilling-session-1.md");
+  });
+
+  const LEGACY_DOC = `---
+id: DOC-001
+aliases:
+  - DOC-001
+title: Legacy padded doc
+project: wiki-v2
+status: published
+created: '2026-05-25'
+updated: '2026-05-25'
+---
+## Overview
+
+Old doc.
+`;
+
+  test("--write renumbers a legacy id for any registry kind, not just PRD/SLICE (SLICE-0079)", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    await writeFile(join(vaultRoot, "projects", "wiki-v2", "docs", "DOC-001-legacy-padded-doc.md"), LEGACY_DOC);
+
+    const write = await runWiki(["fmt", "--project", "wiki-v2", "--write"], vaultRoot);
+    expect(write.exitCode).toBe(0);
+    expect(write.stdout).toContain("DOC-001 -> DOC-0001");
+
+    const docFiles = await readdir(join(vaultRoot, "projects", "wiki-v2", "docs"));
+    expect(docFiles).toContain("DOC-0001-legacy-padded-doc.md");
+    expect(docFiles).not.toContain("DOC-001-legacy-padded-doc.md");
+  });
+
   test("fmt --help documents check-default and --write semantics", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
 

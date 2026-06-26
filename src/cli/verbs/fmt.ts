@@ -4,7 +4,8 @@ import { join, relative } from "node:path";
 import matter from "gray-matter";
 
 import { orderBySchema } from "../../artifacts/render";
-import { FOLDER_TO_TYPE } from "../../artifacts/registry";
+import { FOLDER_TO_TYPE, PREFIX_TO_TYPE } from "../../artifacts/registry";
+import { slugifyTitle } from "../../artifacts/store";
 import { projectPath } from "../../artifacts/paths";
 import { assertProjectStructure, loadProjectConfig, ProjectConfigError, projectErrorMessage } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
@@ -58,6 +59,15 @@ export async function handleFmt(args: string[]): Promise<CliResult> {
     console.log(write ? `fixed ${label}` : label);
   }
   const manual: string[] = [...renumber.collisions];
+
+  // Rename mismatched files to ${id}-${slug}.md after renumbering, so it sees
+  // the post-renumber names. The id is preserved, so [[id]] links survive.
+  const renamed = await renameToId(vaultRoot, projPath, write);
+  total += renamed.labels.length;
+  for (const label of renamed.labels) {
+    console.log(write ? `fixed ${label}` : label);
+  }
+  manual.push(...renamed.collisions);
 
   for (const filePath of await markdownFiles(projPath)) {
     const raw = await readFile(filePath, "utf8");
@@ -239,7 +249,7 @@ async function renumberLegacyIds(
   }
 
   for (const [id, filePath] of idToPath) {
-    const legacy = /^(PRD|SLICE)-(\d{3})$/.exec(id);
+    const legacy = LEGACY_ID.exec(id);
     if (legacy === null || legacy[1] === undefined || legacy[2] === undefined) continue;
     const newId = `${legacy[1]}-0${legacy[2]}`;
     const file = relative(vaultRoot, filePath);
@@ -277,7 +287,52 @@ async function renumberLegacyIds(
   return { labels, collisions, map };
 }
 
-/** Date fields must be quoted date-only strings: created: '2026-05-25'. */
+/**
+ * Rename a file to ${id}-${slug}.md when its frontmatter id/slug mismatch the
+ * filename. The id is kept, so [[id]] links (resolved through the id index)
+ * survive the rename. id-less files are left to diagnoseIdentity (flag-only) —
+ * never auto-named, since inventing an id is a judgment call. A target name
+ * already taken by another file is skipped and flagged, never clobbered.
+ */
+async function renameToId(
+  vaultRoot: string,
+  projectPath: string,
+  write: boolean,
+): Promise<{ labels: string[]; collisions: string[] }> {
+  const labels: string[] = [];
+  const collisions: string[] = [];
+
+  for (const filePath of await markdownFiles(projectPath)) {
+    const file = relative(vaultRoot, filePath);
+    if (artifactTypeOf(file) === undefined) continue;
+    const data = frontmatterOf(await readFile(filePath, "utf8"));
+    const id = data?.id;
+    const title = data?.title;
+    if (typeof id !== "string" || typeof title !== "string") continue; // id-less / titleless: flag-only
+    const expected = `${id}-${slugifyTitle(title)}.md`;
+    const dir = filePath.slice(0, filePath.lastIndexOf("/"));
+    const base = filePath.slice(filePath.lastIndexOf("/") + 1);
+    if (base === expected) continue;
+    const target = join(dir, expected);
+    if (await fileExists(target)) {
+      collisions.push(`${file}: cannot rename to ${expected} (name already taken); resolve manually`);
+      continue;
+    }
+    labels.push(`${file}: filename does not match id-slug -> ${expected}`);
+    if (write) await rename(filePath, target);
+  }
+
+  return { labels, collisions };
+}
+
+async function fileExists(path: string): Promise<boolean> {
+  return Bun.file(path).exists();
+}
+
+/** Legacy short-id pattern over every registered prefix, derived from the
+ *  registry so any kind is covered, not just PRD/SLICE. */
+const LEGACY_ID = new RegExp(`^(${Object.keys(PREFIX_TO_TYPE).join("|")})-(\\d{3})$`);
+
 function fixDates(content: string, file: string): CategoryResult {
   const labels: string[] = [];
   const lines = content.split("\n");

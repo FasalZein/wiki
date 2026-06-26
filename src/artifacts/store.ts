@@ -347,7 +347,7 @@ function existingCategory(docsDirectory: string, currentPath: string): string | 
   return segments.length > 1 ? segments[0] : undefined;
 }
 
-function slugifyTitle(title: string): string {
+export function slugifyTitle(title: string): string {
   const slug = title
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")

@@ -169,7 +169,7 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
     example: "wiki doctor",
   },
   fmt: {
-    summary: "Format vault artifacts. Default mode is check: report format drift and exit 1 if any; --write applies the mechanical fixes idempotently.",
+    summary: "Format vault artifacts. Default mode is check: report format drift and exit 1 if any; --write applies the mechanical fixes idempotently (dates, frontmatter order, legacy-id renumber, and renaming files to <ID>-<slug>.md when id/slug drift from the filename — id preserved so links survive).",
     usage: "wiki fmt [--project <name>] [--write]",
     flags: {
       "--project": "project name (required if the repo isn't linked)",

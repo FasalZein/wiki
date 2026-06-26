@@ -159,9 +159,11 @@ wiki validate <file>                 # check one artifact against its template s
 ```
 
 `wiki fmt` normalizes dates, frontmatter order, and 4-digit IDs (renumbering
-legacy 3-digit IDs vault-wide, references included), strips leaked Templater
-blocks, and expands unrendered template sections. Findings it won't auto-fix
-(missing required fields, prose in link lists) are reported with hints.
+legacy 3-digit IDs of any kind vault-wide, references included), renames a file
+to `<ID>-<slug>.md` when its id/slug drift from the filename (the id is kept so
+`[[id]]` links survive), strips leaked Templater blocks, and expands unrendered
+template sections. Findings it won't auto-fix (missing required fields, id-less
+files, prose in link lists) are reported with hints.
 
 ## Environment variables
 
