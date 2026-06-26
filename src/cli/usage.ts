@@ -206,9 +206,10 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
     example: "wiki schema slice",
   },
   doctor: {
-    summary: "Check vault health (docs-structure and repo-binding drift).",
-    usage: "wiki doctor",
-    example: "wiki doctor",
+    summary: "Check vault health (docs-structure and repo-binding drift). --setup checks distribution health (binary freshness, skill-bundle presence, hook install state).",
+    usage: "wiki doctor [--setup]",
+    flags: { "--setup": "check distribution health instead of vault drift (binary freshness, skill bundle, hook wiring)" },
+    example: "wiki doctor --setup",
   },
   fmt: {
     summary: "Format vault artifacts. Default mode is check: report format drift and exit 1 if any; --write applies the mechanical fixes idempotently (dates, frontmatter order, legacy-id renumber, and renaming files to <ID>-<slug>.md when id/slug drift from the filename — id preserved so links survive).",
@@ -241,9 +242,10 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
         example: "wiki vault init ~/Knowledge",
       },
       doctor: {
-        summary: "Report docs-structure and repo-binding drift.",
-        usage: "wiki vault doctor",
-        example: "wiki vault doctor",
+        summary: "Report docs-structure and repo-binding drift. --setup reports distribution health (binary freshness, skill-bundle presence, hook install state).",
+        usage: "wiki vault doctor [--setup]",
+        flags: { "--setup": "check distribution health instead of vault drift" },
+        example: "wiki vault doctor --setup",
       },
     },
   },

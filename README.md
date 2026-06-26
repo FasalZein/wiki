@@ -132,6 +132,7 @@ wiki hooks uninstall --runtime claude-code --global # remove only the wiki entri
 
 ```sh
 wiki doctor          # vault health: docs-structure + repo-binding drift
+wiki doctor --setup  # distribution health: binary freshness, skill bundle, hook wiring
 wiki status          # recent artifacts (lists projects when none is bound)
 ```
 
@@ -181,6 +182,7 @@ Good to know:
 
 ```sh
 wiki doctor                          # vault health report
+wiki doctor --setup                  # distribution health: binary freshness, skill-bundle presence, hook install state
 wiki fmt --project myproj            # check mode: report format drift, exit 1 if any
 wiki fmt --project myproj --write    # apply mechanical fixes (idempotent)
 wiki validate <file>                 # check one artifact against its template schema + required body sections (--json: {ok,type,errors})

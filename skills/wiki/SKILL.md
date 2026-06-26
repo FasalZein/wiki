@@ -79,6 +79,7 @@ One validated `wiki` call per intent — never hand-edit frontmatter:
 - Docs live only in the locked `docs/<category>/` folders (architecture, research,
   runbooks, specs, notes, legacy) — never invent a folder; an unfit doc goes in the
   closest locked one. `wiki doctor` flags rogue folders or loose files under `docs/`.
+  `wiki doctor --setup` checks distribution health instead of vault drift: binary freshness (source changed since the last `bun run build`), skill-bundle presence, and whether the persist hook is wired in any runtime.
 - `wiki fmt` reports format drift (exit 1); `wiki fmt --write` applies mechanical fixes (dates, frontmatter order, legacy-id renumber, and renaming files to `<ID>-<slug>.md` when id/slug drift from the filename, keeping the id so links survive). Both `wiki fmt` (flag-only) and `wiki validate <file>` report missing/unknown required H2 body sections, so the create-time structure contract is enforced after edits too.
 
 ## Auto-persist skill output (optional, one-time)

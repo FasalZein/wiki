@@ -287,3 +287,14 @@ async function hooksReport(): Promise<CliResult> {
   }
   return { code: 0 };
 }
+
+/** True when the wiki hook is wired in any runtime/scope — read by `doctor --setup`. */
+export async function anyHookWired(cwd: string = process.cwd()): Promise<boolean> {
+  for (const spec of Object.values(RUNTIMES)) {
+    for (const file of [join(homedir(), spec.global), join(cwd, spec.project)]) {
+      const config = await readConfig(file);
+      if ([spec.event, spec.stop].some((e) => isWired(config.hooks?.[e]))) return true;
+    }
+  }
+  return false;
+}

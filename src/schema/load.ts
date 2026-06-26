@@ -5,11 +5,11 @@ import { resolve } from "node:path";
 import type { Constraints, FieldDef, FieldType, Schema } from "./types";
 
 export function resolveTemplatePath(filename: string): string {
-  // Try relative to source first (dev mode), then relative to dist (bundled)
+  // Dev mode: src/schema/ -> ../../templates. Bundled: dist/ -> ./templates
+  // (the build copies templates/ into dist/templates so a relocated dist works).
   const fromSrc = resolve(import.meta.dir, "..", "..", "templates", filename);
   if (existsSync(fromSrc)) return fromSrc;
-  const fromDist = resolve(import.meta.dir, "..", "templates", filename);
-  return fromDist;
+  return resolve(import.meta.dir, "templates", filename);
 }
 
 /**
