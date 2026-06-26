@@ -6,7 +6,7 @@
  */
 
 import { buildIdIndex } from "../../artifacts/id-index";
-import { bareIdOf, collectReferences, isLocalIdRef } from "../../bootstrap/doctor";
+import { bareIdOf, collectReferences, inboundReferences, isLocalIdRef } from "../../artifacts/references";
 import { typeForId } from "../../artifacts/registry";
 import { getVaultRoot } from "../../config/vault";
 import type { CliResult } from "../dispatch";
@@ -56,18 +56,4 @@ function fail(message: string): CliResult {
   if (jsonEnabled()) emitJsonError({ error: message });
   else console.error(message);
   return { code: 1 };
-}
-
-/** Every artifact id (other than `id`) whose frontmatter/body references `id`. */
-export async function inboundReferences(index: Map<string, string[]>, id: string): Promise<string[]> {
-  const inbound = new Set<string>();
-  for (const [otherId, paths] of index) {
-    if (otherId === id) continue;
-    for (const path of paths) {
-      for (const ref of await collectReferences(path)) {
-        if (bareIdOf(ref) === id) inbound.add(otherId);
-      }
-    }
-  }
-  return [...inbound].sort();
 }

@@ -261,11 +261,14 @@ async function handleRecency(
   }
   artifacts.sort((a, b) => b.mtime - a.mtime);
   if (opts.since !== undefined) {
-    artifacts = artifacts.filter((a) => a.mtime >= (opts.since as number));
+    const since = opts.since;
+    artifacts = artifacts.filter((a) => a.mtime >= since);
   }
   if (opts.type !== undefined) {
-    const prefix = `/${artifactFolder(opts.type)}/`;
-    artifacts = artifacts.filter((a) => `/${a.rel.split(/[\\/]/).join("/")}`.includes(prefix));
+    // rel is projects/<proj>/<folder>/...; match the folder segment exactly so a
+    // kind name appearing elsewhere in the path can't pull in the wrong artifacts.
+    const folder = artifactFolder(opts.type);
+    artifacts = artifacts.filter((a) => a.rel.split(/[\\/]/).includes(folder));
   }
   const hits: EnrichedHit[] = [];
   for (const artifact of artifacts.slice(0, RECENT_LIMIT)) {

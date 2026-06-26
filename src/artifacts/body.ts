@@ -116,13 +116,14 @@ export function bodySectionDrift(
   artifactBody: string,
 ): { missing: string[]; unknown: string[] } {
   const authored = authoredSections(templateBody, schemaFields);
-  const authoredSet = new Set(authored.map((section) => normalize(section.heading)));
   const templateSet = new Set(templateHeadings(templateBody).map(normalize));
   const present = new Set(splitByH2(artifactBody).map((part) => normalize(part.heading)));
 
   const missing = authored.map((s) => s.heading).filter((heading) => !present.has(normalize(heading)));
+  // authoredSet ⊆ templateSet (authored headings come from the template), so the
+  // templateSet check alone covers both — a heading absent from the template.
   const unknown = splitByH2(artifactBody)
     .map((part) => part.heading)
-    .filter((heading) => !templateSet.has(normalize(heading)) && !authoredSet.has(normalize(heading)));
+    .filter((heading) => !templateSet.has(normalize(heading)));
   return { missing, unknown };
 }

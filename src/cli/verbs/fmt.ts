@@ -154,7 +154,8 @@ function diagnoseIdentity(content: string, file: string): string[] {
   return [];
 }
 
-async function diagnoseCoreFields(content: string, file: string): Promise<string[]> {  const type = artifactTypeOf(file);
+async function diagnoseCoreFields(content: string, file: string): Promise<string[]> {
+  const type = artifactTypeOf(file);
   if (type === undefined) return [];
   const data = frontmatterOf(content);
   if (data === undefined || typeof data.id !== "string") return []; // identity covers

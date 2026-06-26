@@ -15,7 +15,7 @@ import {
   supersedeArtifact,
 } from "../../artifacts/store";
 import { rm } from "node:fs/promises";
-import { inboundReferences } from "./links";
+import { inboundReferences } from "../../artifacts/references";
 import { typeForId } from "../../artifacts/registry";
 import { getVaultRoot } from "../../config/vault";
 import { loadTemplate, type TemplateType } from "../../schema/load";
@@ -145,7 +145,8 @@ export async function handleSupersede(args: string[]): Promise<CliResult> {
   }), `${target.id} superseded by ${by}`);
 }
 
-/** wiki path <id> — print the absolute file path (resolve-by-id without globbing, P1.4). */export async function handlePath(args: string[]): Promise<CliResult> {
+/** wiki path <id> — print the absolute file path (resolve-by-id without globbing, P1.4). */
+export async function handlePath(args: string[]): Promise<CliResult> {
   const parsed = parseCommand(args, ["project"]);
   const id = parsed.positionals[0];
   if (id === undefined) return fail("usage: wiki path <id> [--project <name>]");

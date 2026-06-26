@@ -3,7 +3,8 @@ import { join } from "node:path";
 import matter from "gray-matter";
 
 import { buildIdIndex } from "../artifacts/id-index";
-import { DOC_CATEGORIES, PREFIX_TO_TYPE } from "../artifacts/registry";
+import { bareIdOf, collectReferences, isLocalIdRef } from "../artifacts/references";
+import { DOC_CATEGORIES } from "../artifacts/registry";
 import { BLOCK_VERSION } from "../cli/repo-link";
 import { exists } from "../util";
 
@@ -38,33 +39,6 @@ export async function runDoctor(vaultPath: string): Promise<DoctorResult> {
     issues.push(...(await checkProjectIdDrift(vaultPath, project)));
   }
   return { issues, clean: issues.length === 0 };
-}
-
-/** A bare `PREFIX-NNNN` id, the only wikilink form the dangling-link check validates.
- *  Path-qualified links (`[[../other-project/...]]`) are cross-project and skipped. */
-const BARE_ID_RE = /^[A-Z]+-\d+$/;
-/** All `[[target]]` occurrences in a body; the target is captured for normalization. */
-const WIKILINK_RE = /\[\[([^\]]+)\]\]/g;
-
-/** Reduce a link reference (a frontmatter value or a wikilink target) to its bare id
- *  candidate: strip wrapping `[[ ]]`, drop any `|alias` and `#heading`, and trim. A
- *  reference containing a path separator is cross-project and returns undefined (skip). */
-export function bareIdOf(raw: string): string | undefined {
-  let value = raw.trim();
-  const wl = /^\[\[(.+)\]\]$/.exec(value);
-  if (wl !== null) value = wl[1]!.trim();
-  value = value.split("|")[0]!.split("#")[0]!.trim();
-  if (value.includes("/") || value.includes("\\")) return undefined; // cross-project
-  return value;
-}
-
-/** True when an id should be validated against this project's id set: it is a bare
- *  `PREFIX-NNNN` whose prefix is a registered kind. Unknown prefixes are cross-prefix
- *  (external) references and are skipped, as PRD-0013 documents. */
-export function isLocalIdRef(id: string): boolean {
-  if (!BARE_ID_RE.test(id)) return false;
-  const prefix = id.split("-")[0]!;
-  return PREFIX_TO_TYPE[prefix] !== undefined;
 }
 
 /**
@@ -106,30 +80,6 @@ export async function checkProjectIdDrift(vaultPath: string, project: string): P
   }
 
   return issues;
-}
-
-/** Every link reference in one file: frontmatter string/array values plus body
- *  `[[..]]` wikilinks. Validation/skip decisions are the caller's; this just gathers. */
-export async function collectReferences(path: string): Promise<string[]> {
-  let content: string;
-  try {
-    content = await readFile(path, "utf8");
-  } catch {
-    return [];
-  }
-  const refs: string[] = [];
-  const parsed = matter(content);
-  for (const [name, value] of Object.entries(parsed.data as Record<string, unknown>)) {
-    if (name === "id") continue;
-    if (typeof value === "string") refs.push(value);
-    else if (Array.isArray(value)) {
-      for (const item of value) if (typeof item === "string") refs.push(item);
-    }
-  }
-  let match: RegExpExecArray | null;
-  WIKILINK_RE.lastIndex = 0;
-  while ((match = WIKILINK_RE.exec(parsed.content)) !== null) refs.push(match[1]!);
-  return refs;
 }
 
 /** Project directories under the vault (excludes _-prefixed structural dirs). */
