@@ -157,6 +157,15 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
     },
     example: "wiki path SLICE-0032",
   },
+  links: {
+    summary: "Show an artifact's outbound links and inbound backlinks (pure vault read, no qmd).",
+    usage: "wiki links <id> [--project <name>] [--json]",
+    flags: {
+      "--project": "project name (required if the repo isn't linked)",
+      "--json": "emit {id,outbound,inbound} to stdout",
+    },
+    example: "wiki links SLICE-0032",
+  },
   schema: {
     summary: "List an artifact type's fields, types, required flags, and enum values.",
     usage: "wiki schema <prd|slice|decision|doc|handoff> [--json]",

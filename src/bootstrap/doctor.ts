@@ -59,7 +59,7 @@ const WIKILINK_RE = /\[\[([^\]]+)\]\]/g;
 /** Reduce a link reference (a frontmatter value or a wikilink target) to its bare id
  *  candidate: strip wrapping `[[ ]]`, drop any `|alias` and `#heading`, and trim. A
  *  reference containing a path separator is cross-project and returns undefined (skip). */
-function bareIdOf(raw: string): string | undefined {
+export function bareIdOf(raw: string): string | undefined {
   let value = raw.trim();
   const wl = /^\[\[(.+)\]\]$/.exec(value);
   if (wl !== null) value = wl[1]!.trim();
@@ -71,7 +71,7 @@ function bareIdOf(raw: string): string | undefined {
 /** True when an id should be validated against this project's id set: it is a bare
  *  `PREFIX-NNNN` whose prefix is a registered kind. Unknown prefixes are cross-prefix
  *  (external) references and are skipped, as PRD-0013 documents. */
-function isLocalIdRef(id: string): boolean {
+export function isLocalIdRef(id: string): boolean {
   if (!BARE_ID_RE.test(id)) return false;
   const prefix = id.split("-")[0]!;
   return PREFIX_TO_TYPE[prefix] !== undefined;
@@ -124,7 +124,7 @@ export async function checkProjectIdDrift(vaultPath: string, project: string): P
 
 /** Every link reference in one file: frontmatter string/array values plus body
  *  `[[..]]` wikilinks. Validation/skip decisions are the caller's; this just gathers. */
-async function collectReferences(path: string): Promise<string[]> {
+export async function collectReferences(path: string): Promise<string[]> {
   let content: string;
   try {
     content = await readFile(path, "utf8");

@@ -2,6 +2,7 @@ import { handleCreate } from "./verbs/create";
 import { handleDoc } from "./verbs/doc";
 import { handleFmt } from "./verbs/fmt";
 import { handleHooks } from "./verbs/hooks";
+import { handleLinks } from "./verbs/links";
 import { handleBlock, handlePath, handleSet, handleSupersede } from "./verbs/mutate";
 import { handleNextId } from "./verbs/next-id";
 import { handleProject } from "./verbs/project";
@@ -80,6 +81,7 @@ export async function dispatch(args: string[]): Promise<CliResult> {
   if (verb === "block") return handleBlock(rest);
   if (verb === "supersede") return handleSupersede(rest);
   if (verb === "path") return handlePath(rest);
+  if (verb === "links") return handleLinks(rest);
   if (verb === "schema") return handleSchema(rest);
   if (verb === "doc") return handleDoc(rest);
   if (verb === "status") return handleStatus(rest);

@@ -49,6 +49,7 @@ One validated `wiki` call per intent — never hand-edit frontmatter:
 - `wiki supersede <oldId> --by <newId>` — links an existing artifact to its replacement.
 - `wiki schema <type>` — discover fields/enums before guessing a value.
 - `wiki path <id>` — resolve an id to its file path (filenames are `ID-slug.md`).
+- `wiki links <id>` — outbound links + inbound backlinks for an artifact (pure vault read, no qmd).
 - `--json` on these (and `create`/`next-id`) gives `{id,…}` on stdout and
   `{error,field,expected}` on stderr — detect success/failure without scraping prose.
 
