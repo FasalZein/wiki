@@ -5,6 +5,7 @@
  * against the schema before writing.
  */
 
+import { buildIdIndex } from "../../artifacts/id-index";
 import {
   ArtifactNotFoundError,
   ArtifactValidationError,
@@ -13,12 +14,14 @@ import {
   setField,
   supersedeArtifact,
 } from "../../artifacts/store";
+import { rm } from "node:fs/promises";
+import { inboundReferences } from "./links";
 import { typeForId } from "../../artifacts/registry";
 import { getVaultRoot } from "../../config/vault";
 import { loadTemplate, type TemplateType } from "../../schema/load";
 import type { CliResult } from "../dispatch";
 import { emitJson, emitJsonError, jsonEnabled } from "../output";
-import { parseCommand, type ParsedCommand } from "../parse";
+import { booleanValue, parseCommand, type ParsedCommand } from "../parse";
 import { resolveProject } from "../resolve-project";
 
 type Target = { type: TemplateType; vaultRoot: string; project: string; id: string };
@@ -116,6 +119,38 @@ export async function handleRetitle(args: string[]): Promise<CliResult> {
     title: artifact.fields.title ?? null,
     path: (artifact as { path?: string }).path ?? null,
   }), `retitled ${target.id}`);
+}
+
+/** wiki delete <id> [--force] — reference-aware removal; refuses if inbound links exist unless forced. */
+export async function handleDelete(args: string[]): Promise<CliResult> {
+  const parsed = parseCommand(args, ["project"], [], ["force"]);
+  const id = parsed.positionals[0];
+  if (id === undefined) return fail("usage: wiki delete <id> [--force] [--project <name>]");
+  const target = await resolveTarget(id, parsed);
+  if (typeof target === "string") return fail(target);
+
+  let artifactPath: string;
+  try {
+    artifactPath = (await readArtifact(target)).path;
+  } catch (error) {
+    return handleError(error);
+  }
+
+  // Scan inbound references via the id index; refuse unless --force.
+  const index = await buildIdIndex(target.vaultRoot, target.project);
+  const inbound = await inboundReferences(index, target.id);
+  if (inbound.length > 0 && !booleanValue(parsed.values, "force")) {
+    return fail(
+      `refusing to delete ${target.id}: ${inbound.length} inbound reference(s) (${inbound.join(", ")}). Re-run with --force to delete anyway.`,
+      { inbound },
+    );
+  }
+
+  // sync owns search-index cleanup — delete only removes the file; re-run wiki sync to drop it from search.
+  await rm(artifactPath, { force: true });
+  if (jsonEnabled()) emitJson({ id: target.id, deleted: artifactPath, inbound });
+  else console.log(`deleted ${target.id}${inbound.length > 0 ? ` (forced past ${inbound.length} inbound reference(s))` : ""}`);
+  return { code: 0 };
 }
 
 async function resolveTarget(id: string, parsed: ParsedCommand): Promise<Target | string> {

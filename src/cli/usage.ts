@@ -176,6 +176,16 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
     },
     example: 'wiki retitle SLICE-0032 --title "A clearer title"',
   },
+  delete: {
+    summary: "Remove an artifact file; refuses if other artifacts link to it unless --force. Run wiki sync to drop it from search.",
+    usage: "wiki delete <id> [--force] [--project <name>] [--json]",
+    flags: {
+      "--project": "project name (required if the repo isn't linked)",
+      "--force": "delete even when inbound references exist",
+      "--json": "emit {id,deleted,inbound} to stdout",
+    },
+    example: "wiki delete SLICE-0032",
+  },
   schema: {
     summary: "List an artifact type's fields, types, required flags, and enum values.",
     usage: "wiki schema <prd|slice|decision|doc|handoff> [--json]",

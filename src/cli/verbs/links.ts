@@ -38,17 +38,9 @@ export async function handleLinks(args: string[]): Promise<CliResult> {
   }
 
   // Inbound: every other artifact whose references include this id.
-  const inbound = new Set<string>();
-  for (const [otherId, paths] of index) {
-    if (otherId === id) continue;
-    for (const path of paths) {
-      for (const ref of await collectReferences(path)) {
-        if (bareIdOf(ref) === id) inbound.add(otherId);
-      }
-    }
-  }
+  const inbound = await inboundReferences(index, id);
 
-  const result = { id, outbound: [...outbound].sort(), inbound: [...inbound].sort() };
+  const result = { id, outbound: [...outbound].sort(), inbound };
   if (jsonEnabled()) {
     emitJson(result);
   } else {
@@ -64,4 +56,18 @@ function fail(message: string): CliResult {
   if (jsonEnabled()) emitJsonError({ error: message });
   else console.error(message);
   return { code: 1 };
+}
+
+/** Every artifact id (other than `id`) whose frontmatter/body references `id`. */
+export async function inboundReferences(index: Map<string, string[]>, id: string): Promise<string[]> {
+  const inbound = new Set<string>();
+  for (const [otherId, paths] of index) {
+    if (otherId === id) continue;
+    for (const path of paths) {
+      for (const ref of await collectReferences(path)) {
+        if (bareIdOf(ref) === id) inbound.add(otherId);
+      }
+    }
+  }
+  return [...inbound].sort();
 }

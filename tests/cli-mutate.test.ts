@@ -103,6 +103,53 @@ describe("mutation verbs", () => {
     expect(await readSlice(f, slice)).toContain("title: A brand new title");
   });
 
+  test("wiki delete refuses when an inbound reference exists and lists the referrers", async () => {
+    const f = await fixture();
+    const target = await seedSlice(f);
+    const referrer = await seedSlice(f);
+    // make `referrer` point at `target`
+    expect((await runWiki(["block", referrer, "--on", target, "--project", "wiki-v2"], f)).exitCode).toBe(0);
+
+    const result = await runWiki(["delete", target, "--project", "wiki-v2", "--json"], f);
+
+    expect(result.exitCode).not.toBe(0);
+    const err = JSON.parse(result.stderr);
+    expect(err.error).toContain("inbound");
+    expect(err.inbound).toContain(referrer);
+    // file still present
+    const files = await readdir(join(f.projectPath, "slices"));
+    expect(files.some((file) => file.startsWith(`${target}-`))).toBe(true);
+  });
+
+  test("wiki delete --force removes an artifact despite inbound references", async () => {
+    const f = await fixture();
+    const target = await seedSlice(f);
+    const referrer = await seedSlice(f);
+    expect((await runWiki(["block", referrer, "--on", target, "--project", "wiki-v2"], f)).exitCode).toBe(0);
+
+    const result = await runWiki(["delete", target, "--force", "--project", "wiki-v2", "--json"], f);
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout).id).toBe(target);
+    const files = await readdir(join(f.projectPath, "slices"));
+    expect(files.some((file) => file.startsWith(`${target}-`))).toBe(false);
+  });
+
+  test("wiki delete removes an unreferenced artifact without --force", async () => {
+    const f = await fixture();
+    // a standalone slice nothing links to (seedSlice's parent-PRD backlink would count as inbound)
+    await writeFile(
+      join(f.projectPath, "slices", "SLICE-0099.md"),
+      "---\nid: SLICE-0099\ntitle: Lonely slice\nsummary: No links.\nstatus: planned\n---\nbody\n",
+    );
+
+    const result = await runWiki(["delete", "SLICE-0099", "--project", "wiki-v2", "--json"], f);
+
+    expect(result.exitCode).toBe(0);
+    const files = await readdir(join(f.projectPath, "slices"));
+    expect(files.some((file) => file.startsWith("SLICE-0099"))).toBe(false);
+  });
+
   test("wiki schema slice lists the enum including superseded (--json)", async () => {
     const f = await fixture();
 

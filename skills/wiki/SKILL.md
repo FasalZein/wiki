@@ -48,6 +48,7 @@ One validated `wiki` call per intent — never hand-edit frontmatter:
 - `wiki block <id> --on <id> [--on <id>…]` — sets `blocked_by`, auto-wrapping `[[…]]`.
 - `wiki supersede <oldId> --by <newId>` — links an existing artifact to its replacement.
 - `wiki retitle <id> --title <t>` — retitle any kind, re-slugging the filename; the id (and `[[id]]` links) survive. `doc recategorize` stays the doc-only category move.
+- `wiki delete <id> [--force]` — remove an artifact; refuses (listing the referrers) when other artifacts link to it unless `--force`. `wiki sync` owns search-index cleanup, so re-sync after deleting.
 - `wiki schema <type>` — discover fields/enums before guessing a value.
 - `wiki path <id>` — resolve an id to its file path (filenames are `ID-slug.md`).
 - `wiki links <id>` — outbound links + inbound backlinks for an artifact (pure vault read, no qmd).
