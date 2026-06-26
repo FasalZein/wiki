@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
-import { SKILL_TO_KIND } from "../../artifacts/registry";
+import { DEFAULT_STRUCTURE } from "../../artifacts/registry";
 import { readLinkedProject } from "../repo-link";
 import { unknownMessage } from "../usage";
 import { booleanValue, parseCommand, stringValue } from "../parse";
@@ -75,20 +75,29 @@ interface HookInput {
  * or a `/skill:<name>` slash-command in the prompt (Codex, pi). Null when none
  * names a registered authoring skill, so the caller injects nothing.
  */
+/** Authoring skills the bundled kinds register, for prompt scanning. Hooks fire
+ *  in an arbitrary cwd with no resolved vault, so they read the bundled default
+ *  rather than a per-vault wiki.json — the reminder is advisory, not vault state. */
+function registeredSkills(): string[] {
+  return Object.values(DEFAULT_STRUCTURE.kinds)
+    .map((spec) => spec.skill)
+    .filter((skill): skill is string => skill !== undefined);
+}
+
 function extractSkill(input: HookInput): string | null {
   const named = input.tool_input?.skill_name;
-  if (named !== undefined && named in SKILL_TO_KIND) return named;
+  if (named !== undefined && DEFAULT_STRUCTURE.kindForSkill(named) !== undefined) return named;
 
   const path = input.tool_input?.path;
   if (path !== undefined && basename(path) === "SKILL.md") {
     const skill = basename(dirname(path));
-    if (skill in SKILL_TO_KIND) return skill;
+    if (DEFAULT_STRUCTURE.kindForSkill(skill) !== undefined) return skill;
   }
 
   const prompt = input.prompt;
   if (prompt !== undefined) {
     // skill names are kebab-case; match a /skill:name or /name token, not a bare mention
-    for (const skill of Object.keys(SKILL_TO_KIND)) {
+    for (const skill of registeredSkills()) {
       if (new RegExp(`(?:^|\\s)/(?:skill:)?${skill}(?![\\w-])`).test(prompt)) return skill;
     }
   }
@@ -126,7 +135,7 @@ async function hooksRun(): Promise<CliResult> {
  * null when the skill authors no kind (per wiki.json) — the caller injects nothing.
  */
 export async function hookGuidance(skill: string, cwd: string): Promise<string | null> {
-  const kind = SKILL_TO_KIND[skill];
+  const kind = DEFAULT_STRUCTURE.kindForSkill(skill);
   if (kind === undefined) return null;
   const project = await readLinkedProject(cwd);
   const projectFlag = project === null ? "--project <name>" : `--project ${project}`;

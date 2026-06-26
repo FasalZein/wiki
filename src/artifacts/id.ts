@@ -4,9 +4,9 @@ import { join } from "node:path";
 import type { TemplateType } from "../schema/load";
 import { buildIdIndex } from "./id-index";
 import { artifactDirectory } from "./paths";
-import { DEFAULT_STRUCTURE, type Structure } from "./registry";
+import { type Structure } from "./registry";
 
-export async function nextId(type: TemplateType, vaultRoot: string, project: string, structure: Structure = DEFAULT_STRUCTURE): Promise<string> {
+export async function nextId(type: TemplateType, vaultRoot: string, project: string, structure: Structure): Promise<string> {
   const prefix = structure.specFor(type).prefix;
   const directory = artifactDirectory(type, vaultRoot, project, structure);
   // Docs may be organized into category subfolders; ids stay globally unique

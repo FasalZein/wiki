@@ -2,7 +2,7 @@ import matter from "gray-matter";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 
-import { DEFAULT_STRUCTURE, type Structure } from "../artifacts/registry";
+import { type Structure } from "../artifacts/registry";
 import { expandHome, isFileNotFound } from "../util";
 
 export type ProjectConfig = {
@@ -45,7 +45,7 @@ export async function projectErrorMessage(vaultRoot: string, project: string): P
   return `project '${project}' not found — create it with: wiki project create ${project}${list}`;
 }
 
-export async function assertProjectStructure(projectPath: string, structure: Structure = DEFAULT_STRUCTURE): Promise<void> {
+export async function assertProjectStructure(projectPath: string, structure: Structure): Promise<void> {
   await assertFile(join(projectPath, "_project.md"), "_project.md");
   for (const folder of structure.folders) {
     await assertDirectory(join(projectPath, folder), `${folder}/`);

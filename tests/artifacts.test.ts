@@ -3,7 +3,16 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { ArtifactValidationError, createArtifact, readArtifact, setField } from "../src/artifacts/store";
+import { ArtifactValidationError, createArtifact as _createArtifact, readArtifact as _readArtifact, setField as _setField } from "../src/artifacts/store";
+import { DEFAULT_STRUCTURE } from "../src/artifacts/registry";
+
+// SLICE-0104: the store now requires an explicit Structure. These tests exercise
+// the default kinds, so thread DEFAULT_STRUCTURE through thin wrappers — every
+// call site and assertion below is unchanged.
+const createArtifact = (input: Omit<Parameters<typeof _createArtifact>[0], "structure">) =>
+  _createArtifact({ ...input, structure: DEFAULT_STRUCTURE });
+const readArtifact = (input: Parameters<typeof _readArtifact>[0]) => _readArtifact(input, DEFAULT_STRUCTURE);
+const setField = (input: Parameters<typeof _setField>[0]) => _setField(input, DEFAULT_STRUCTURE);
 
 const tempPaths: string[] = [];
 

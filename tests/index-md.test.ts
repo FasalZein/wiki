@@ -3,7 +3,10 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { writeProjectIndex, writeVaultIndex } from "../src/artifacts/index-md";
+import { writeProjectIndex as _writeProjectIndex, writeVaultIndex } from "../src/artifacts/index-md";
+import { DEFAULT_STRUCTURE } from "../src/artifacts/registry";
+
+const writeProjectIndex = (vaultRoot: string, project: string) => _writeProjectIndex(vaultRoot, project, DEFAULT_STRUCTURE);
 
 const tempPaths: string[] = [];
 

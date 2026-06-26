@@ -176,7 +176,7 @@ async function createWithSupersede(req: CreateRequest): Promise<CliResult> {
   const vaultRoot = await getVaultRoot();
   const structure = await loadStructure(vaultRoot);
   const projPath = projectPath(vaultRoot, project);
-  await assertProjectStructure(projPath);
+  await assertProjectStructure(projPath, structure);
   try {
     // Snapshot the to-be-superseded artifact (single read) so a post-write
     // failure can byte-restore it. setFields can't undo the supersede: it merges

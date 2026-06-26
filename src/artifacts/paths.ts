@@ -1,9 +1,9 @@
 import { join } from "node:path";
 
 import type { TemplateType } from "../schema/load";
-import { DEFAULT_STRUCTURE, type Structure } from "./registry";
+import { type Structure } from "./registry";
 
-export function artifactFolder(type: TemplateType, structure: Structure = DEFAULT_STRUCTURE): string {
+export function artifactFolder(type: TemplateType, structure: Structure): string {
   return structure.specFor(type).folder;
 }
 
@@ -29,6 +29,6 @@ export function projectPath(vaultRoot: string, project: string): string {
   return join(vaultRoot, "projects", project);
 }
 
-export function artifactDirectory(type: TemplateType, vaultRoot: string, project: string, structure: Structure = DEFAULT_STRUCTURE): string {
+export function artifactDirectory(type: TemplateType, vaultRoot: string, project: string, structure: Structure): string {
   return join(projectPath(vaultRoot, project), artifactFolder(type, structure));
 }

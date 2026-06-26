@@ -4,7 +4,7 @@ import { join, sep } from "node:path";
 
 import type { TemplateType } from "../schema/load";
 import { listProjects } from "../config/project";
-import { DEFAULT_STRUCTURE, type Structure } from "./registry";
+import { type Structure } from "./registry";
 import { projectPath } from "./paths";
 
 type Entry = {
@@ -58,7 +58,7 @@ function field(data: Record<string, unknown>, name: string): string {
  * unchanged entries and only parse files whose mtime moved (or new files).
  * ponytail: list, not a table — summaries can contain `|` and would break table cells.
  */
-export async function writeProjectIndex(vaultRoot: string, project: string, structure: Structure = DEFAULT_STRUCTURE): Promise<RegenStats> {
+export async function writeProjectIndex(vaultRoot: string, project: string, structure: Structure): Promise<RegenStats> {
   const root = projectPath(vaultRoot, project);
   const files = await readdir(root, { recursive: true });
   const cache = await loadCache(root);

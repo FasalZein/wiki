@@ -4,7 +4,7 @@ import matter from "gray-matter";
 
 import { buildIdIndex } from "../artifacts/id-index";
 import { bareIdOf, collectReferences, isLocalIdRef } from "../artifacts/references";
-import { DOC_CATEGORIES, loadStructure, DEFAULT_STRUCTURE, type Structure } from "../artifacts/registry";
+import { DOC_CATEGORIES, loadStructure, type Structure } from "../artifacts/registry";
 import { BLOCK_VERSION } from "../cli/repo-link";
 import { exists } from "../util";
 
@@ -51,7 +51,7 @@ export async function runDoctor(vaultPath: string): Promise<DoctorResult> {
  *    (path-qualified) and cross-prefix (unknown-prefix) references are skipped by
  *    design — shared-ADR references are not false dangles.
  */
-export async function checkProjectIdDrift(vaultPath: string, project: string, structure: Structure = DEFAULT_STRUCTURE): Promise<DriftIssue[]> {
+export async function checkProjectIdDrift(vaultPath: string, project: string, structure: Structure): Promise<DriftIssue[]> {
   const issues: DriftIssue[] = [];
   const index = await buildIdIndex(vaultPath, project, structure);
 

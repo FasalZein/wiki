@@ -6,7 +6,7 @@ import { loadTemplate, normalizeInlineMaps, resolveTemplatePath, type TemplateTy
 import { BodyParseError, parseBodySections } from "./body";
 import { validate } from "../schema/validate";
 import type { NormalizedRecord, Schema, ValidationError } from "../schema/types";
-import { DEFAULT_STRUCTURE, type DocCategory, isDocCategory, type Structure } from "./registry";
+import { type DocCategory, isDocCategory, type Structure } from "./registry";
 import { nextId } from "./id";
 import { buildIdIndex } from "./id-index";
 import { artifactDirectory, assertSafeSegment } from "./paths";
@@ -22,8 +22,8 @@ export type CreateArtifactInput = {
   category?: DocCategory;
   /** Authored body markdown; parsed by H2 headings into template sections (ADR-0031). */
   body?: string;
-  /** Per-vault structure (folders/prefixes); defaults to the bundled kinds. */
-  structure?: Structure;
+  /** Per-vault structure (folders/prefixes), resolved once per verb and threaded. */
+  structure: Structure;
 };
 
 export type ReadArtifactInput = {
@@ -71,7 +71,7 @@ export class ArtifactNotFoundError extends Error {
   }
 }
 
-export async function readArtifact(input: ReadArtifactInput, structure: Structure = DEFAULT_STRUCTURE): Promise<Artifact> {
+export async function readArtifact(input: ReadArtifactInput, structure: Structure): Promise<Artifact> {
   const path = await resolveArtifactPath(input.type, input.vaultRoot, input.project, input.id, structure);
   let content: string;
   try {
@@ -91,7 +91,7 @@ export async function readArtifact(input: ReadArtifactInput, structure: Structur
   };
 }
 
-export async function setField(input: SetFieldInput, structure: Structure = DEFAULT_STRUCTURE): Promise<Artifact> {
+export async function setField(input: SetFieldInput, structure: Structure): Promise<Artifact> {
   return setFields({
     type: input.type,
     vaultRoot: input.vaultRoot,
@@ -101,7 +101,7 @@ export async function setField(input: SetFieldInput, structure: Structure = DEFA
   }, structure);
 }
 
-export async function setFields(input: SetFieldsInput, structure: Structure = DEFAULT_STRUCTURE): Promise<Artifact> {
+export async function setFields(input: SetFieldsInput, structure: Structure): Promise<Artifact> {
   const existing = await readArtifact(input, structure);
   const schema = await loadTemplate(input.type);
   const template = await Bun.file(resolveTemplatePath(`${input.type}.md`)).text();
@@ -123,7 +123,7 @@ export async function setFields(input: SetFieldsInput, structure: Structure = DE
  * so the conditional lives in exactly one place. Routes through setFields, so
  * the write is validated.
  */
-export async function supersedeArtifact(input: ReadArtifactInput & { by: string }, structure: Structure = DEFAULT_STRUCTURE): Promise<Artifact> {
+export async function supersedeArtifact(input: ReadArtifactInput & { by: string }, structure: Structure): Promise<Artifact> {
   const schema = await loadTemplate(input.type);
   const statusField = schema.fields.find((field) => field.name === "status");
   const hasSupersededStatus = statusField?.constraints.values?.includes("superseded") ?? false;
@@ -138,7 +138,7 @@ export async function removeArtifactFile(path: string): Promise<void> {
 }
 
 export async function createArtifact(input: CreateArtifactInput): Promise<Artifact> {
-  const structure = input.structure ?? DEFAULT_STRUCTURE;
+  const structure = input.structure;
   const schema = await loadTemplate(input.type);
   const templateFile = Bun.file(resolveTemplatePath(`${input.type}.md`));
   const template = await templateFile.text();
@@ -200,7 +200,7 @@ export async function createArtifact(input: CreateArtifactInput): Promise<Artifa
  * new doc category subfolder when `category` is given. The id is preserved, so
  * [[ID]] links and id-based reads keep resolving. The old file is removed.
  */
-export async function relocateArtifact(input: RelocateArtifactInput, structure: Structure = DEFAULT_STRUCTURE): Promise<Artifact> {
+export async function relocateArtifact(input: RelocateArtifactInput, structure: Structure): Promise<Artifact> {
   assertSafeSegment(input.id, "artifact id");
   const existing = await readArtifact(input, structure);
   const nextTitle = input.title ?? (typeof existing.fields.title === "string" ? existing.fields.title : input.id);
