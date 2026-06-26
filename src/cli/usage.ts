@@ -337,6 +337,9 @@ export function renderVerbList(): string {
   for (const verb of VERB_NAMES) {
     lines.push(`  ${verb.padEnd(width)}  ${USAGE_REGISTRY[verb]?.summary ?? ""}`);
   }
+  lines.push("");
+  lines.push("A value that starts with '-' (e.g. a title) is read as a flag. Pass it as");
+  lines.push("--flag=value (e.g. --title=-foo) or after a '--' escape so it parses as a value.");
   return lines.join("\n");
 }
 
