@@ -1,6 +1,6 @@
 import matter from "gray-matter";
 import { readdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 
 import type { TemplateType } from "../schema/load";
 import { ARTIFACTS, typeForId } from "./registry";
@@ -13,6 +13,7 @@ type Entry = {
   summary: string;
   status: string;
   group: string;
+  path: string;
 };
 
 const DEFAULT_GROUP = "General";
@@ -36,13 +37,19 @@ export async function writeProjectIndex(vaultRoot: string, project: string): Pro
   const root = projectPath(vaultRoot, project);
   const files = await readdir(root, { recursive: true });
   const entries: Entry[] = [];
+  const unindexed: string[] = []; // id-less files, skipped from the roster but surfaced in a trailer
 
   for (const rel of files) {
     if (!rel.endsWith(".md") || rel === "index.md" || rel === "_project.md") continue;
+    const relPath = rel.split(sep).join("/"); // stable, forward-slash path for output
     const parsed = matter(await readFile(join(root, rel), "utf8"));
     const data = parsed.data as Record<string, unknown>;
     const id = field(data, "id");
-    const kind = id === "" ? undefined : typeForId(id);
+    if (id === "") {
+      unindexed.push(relPath); // skipped for lacking an id — listed in the Unindexed trailer
+      continue;
+    }
+    const kind = typeForId(id);
     if (kind === undefined) continue; // skip non-artifact / unrecognized files
     entries.push({
       kind,
@@ -51,13 +58,21 @@ export async function writeProjectIndex(vaultRoot: string, project: string): Pro
       summary: field(data, "summary"),
       status: field(data, "status"),
       group: field(data, "group") || DEFAULT_GROUP,
+      path: relPath,
     });
   }
 
   entries.sort((a, b) => {
     const k = KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind);
-    return k !== 0 ? k : a.id.localeCompare(b.id);
+    if (k !== 0) return k;
+    const i = a.id.localeCompare(b.id);
+    return i !== 0 ? i : a.path.localeCompare(b.path); // path tiebreaker keeps dup ids stable
   });
+
+  // Ids that map to more than one file get disambiguated inline so the roster never
+  // silently understates the vault (duplicate-id drift is also flagged by `wiki doctor`).
+  const idCounts = new Map<string, number>();
+  for (const e of entries) idCounts.set(e.id, (idCounts.get(e.id) ?? 0) + 1);
 
   // Group headings ordered alphabetically, but General always last.
   const groups = [...new Set(entries.map((e) => e.group))].sort((a, b) => {
@@ -72,7 +87,18 @@ export async function writeProjectIndex(vaultRoot: string, project: string): Pro
     for (const e of entries.filter((e) => e.group === group)) {
       const status = e.status === "" ? "" : ` (${e.status})`;
       const summary = e.summary === "" ? "" : ` — ${e.summary}`;
-      lines.push(`- [[${e.id}]] ${e.title}${status}${summary}`);
+      // disambiguate only when the id collides — otherwise the line stays clean
+      const disambig = (idCounts.get(e.id) ?? 0) > 1 ? ` [${e.path}]` : "";
+      lines.push(`- [[${e.id}]] ${e.title}${status}${summary}${disambig}`);
+    }
+    lines.push("");
+  }
+
+  // Trailer: files skipped for lacking an id, so the roster doesn't silently hide them.
+  if (unindexed.length > 0) {
+    lines.push("## Unindexed (no id)", "");
+    for (const path of [...unindexed].sort((a, b) => a.localeCompare(b))) {
+      lines.push(`- ${path}`);
     }
     lines.push("");
   }
