@@ -159,10 +159,9 @@ async function diagnoseCoreFields(content: string, file: string): Promise<string
   if (type === undefined) return [];
   const data = frontmatterOf(content);
   if (data === undefined || typeof data.id !== "string") return []; // identity covers
-  const core = new Set(["id", "title", "project", "status", "created", "updated"]);
   const schema = await schemaFor(type);
   const missing = schema.fields
-    .filter((field) => core.has(field.name) && (field.required || field.name === "created" || field.name === "updated"))
+    .filter((field) => field.required && field.name !== "id") // id is identity's job
     .filter((field) => data[field.name] === undefined)
     .map((field) => field.name);
   if (missing.length === 0) return [];
