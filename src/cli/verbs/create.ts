@@ -78,22 +78,35 @@ async function createGeneric(kind: TemplateType, args: string[]): Promise<CliRes
   const schemaNames = new Set(schema.fields.map((field) => field.name));
   const placeholders = authoredSections(matter(normalizeInlineMaps(template)).content, schemaNames).map((s) => s.placeholder);
 
+  // One derived classification drives BOTH the parser config and value
+  // extraction below — schema fields (minus the CLI/override-owned set) tagged
+  // by how they parse, then placeholders, which always parse as plain strings.
+  type FlagSpec = { flag: string; source: string; kind: "list" | "boolean" | "string" };
+  const flagSpecs: FlagSpec[] = [];
+  for (const field of schema.fields) {
+    if (NON_FLAG_FIELDS.has(field.name)) continue;
+    const isList = field.type === "list" || field.type === "link_list";
+    flagSpecs.push({
+      flag: flagName(field.name),
+      source: field.name,
+      kind: isList ? "list" : field.type === "boolean" ? "boolean" : "string",
+    });
+  }
+  for (const placeholder of placeholders) {
+    flagSpecs.push({ flag: flagName(placeholder), source: placeholder, kind: "string" });
+  }
+
   const stringFlags = ["project", "body", "category", "force-new", "related-to", "supersedes"];
   const multipleFlags: string[] = [];
   const booleanFlags: string[] = [];
-  for (const field of schema.fields) {
-    if (NON_FLAG_FIELDS.has(field.name)) continue;
-    const flag = flagName(field.name);
-    if (field.type === "list" || field.type === "link_list") {
-      stringFlags.push(flag);
-      multipleFlags.push(flag);
-    } else if (field.type === "boolean") {
-      booleanFlags.push(flag);
+  for (const spec of flagSpecs) {
+    if (spec.kind === "boolean") {
+      booleanFlags.push(spec.flag);
     } else {
-      stringFlags.push(flag);
+      stringFlags.push(spec.flag);
+      if (spec.kind === "list") multipleFlags.push(spec.flag);
     }
   }
-  for (const placeholder of placeholders) stringFlags.push(flagName(placeholder));
 
   // SLICE-0088: normalize incoming flag tokens to kebab so a snake_case name
   // copied from `wiki schema` (e.g. --parent_prd) matches the kebab CLI flags.
@@ -105,22 +118,16 @@ async function createGeneric(kind: TemplateType, args: string[]): Promise<CliRes
   if (project === undefined) return { code: 1 };
 
   const fields: Record<string, unknown> = {};
-  for (const field of schema.fields) {
-    if (NON_FLAG_FIELDS.has(field.name)) continue;
-    const flag = flagName(field.name);
-    if (field.type === "list" || field.type === "link_list") {
-      const value = parsed.values[flag];
-      if (Array.isArray(value) && value.length > 0) fields[field.name] = value;
-    } else if (field.type === "boolean") {
-      if (parsed.values[flag] === true) fields[field.name] = true;
+  for (const spec of flagSpecs) {
+    if (spec.kind === "list") {
+      const value = parsed.values[spec.flag];
+      if (Array.isArray(value) && value.length > 0) fields[spec.source] = value;
+    } else if (spec.kind === "boolean") {
+      if (parsed.values[spec.flag] === true) fields[spec.source] = true;
     } else {
-      const value = stringValue(parsed.values, flag);
-      if (value !== undefined) fields[field.name] = value;
+      const value = stringValue(parsed.values, spec.flag);
+      if (value !== undefined) fields[spec.source] = value;
     }
-  }
-  for (const placeholder of placeholders) {
-    const value = stringValue(parsed.values, flagName(placeholder));
-    if (value !== undefined) fields[placeholder] = value;
   }
 
   // Category is a doc subfolder, not a schema field: validate it, and for doc

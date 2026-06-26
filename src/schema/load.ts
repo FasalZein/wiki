@@ -32,7 +32,22 @@ const fieldTypes: ReadonlySet<string> = new Set<FieldType>([
   "file_ref",
 ]);
 
-export async function loadTemplate(type: TemplateType): Promise<Schema> {
+// Templates are immutable data shipped beside the binary (resolveTemplatePath
+// never reads the vault), so the parse is identical for a given kind across the
+// whole run — memoize it here so create/fmt/store/mutate/validate share one
+// parse instead of each re-reading the file. Replaces fmt's bespoke schemaCache.
+const templateCache = new Map<TemplateType, Promise<Schema>>();
+
+export function loadTemplate(type: TemplateType): Promise<Schema> {
+  let cached = templateCache.get(type);
+  if (cached === undefined) {
+    cached = parseTemplate(type);
+    templateCache.set(type, cached);
+  }
+  return cached;
+}
+
+async function parseTemplate(type: TemplateType): Promise<Schema> {
   const file = Bun.file(resolveTemplatePath(`${type}.md`));
   const parsed = matter(normalizeInlineMaps(await file.text()));
 

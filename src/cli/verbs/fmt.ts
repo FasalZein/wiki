@@ -11,7 +11,6 @@ import { projectPath } from "../../artifacts/paths";
 import { assertProjectStructure, loadProjectConfig, ProjectConfigError, projectErrorMessage } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import { loadTemplate, normalizeInlineMaps, resolveTemplatePath, type TemplateType } from "../../schema/load";
-import type { Schema } from "../../schema/types";
 import { booleanValue, parseCommand } from "../parse";
 import { resolveProject } from "../resolve-project";
 import type { CliResult } from "../dispatch";
@@ -160,7 +159,7 @@ async function diagnoseCoreFields(content: string, file: string): Promise<string
   if (type === undefined) return [];
   const data = frontmatterOf(content);
   if (data === undefined || typeof data.id !== "string") return []; // identity covers
-  const schema = await schemaFor(type);
+  const schema = await loadTemplate(type);
   const missing = schema.fields
     .filter((field) => field.required && field.name !== "id") // id is identity's job
     .filter((field) => data[field.name] === undefined)
@@ -179,7 +178,7 @@ async function diagnoseBodySections(content: string, file: string): Promise<stri
   if (type === undefined) return [];
   const data = frontmatterOf(content);
   if (data === undefined || typeof data.id !== "string") return []; // identity covers id-less files
-  const schema = await schemaFor(type);
+  const schema = await loadTemplate(type);
   const templateBody = matter(normalizeInlineMaps(await Bun.file(resolveTemplatePath(`${type}.md`)).text())).content;
   const fieldNames = new Set(schema.fields.map((field) => field.name));
   const drift = bodySectionDrift(templateBody, fieldNames, matter(content).content);
@@ -200,7 +199,7 @@ async function diagnoseLinkListProse(content: string, file: string): Promise<str
   if (type === undefined) return [];
   const data = frontmatterOf(content);
   if (data === undefined || typeof data.id !== "string") return [];
-  const schema = await schemaFor(type);
+  const schema = await loadTemplate(type);
   const findings: string[] = [];
   for (const field of schema.fields) {
     if (field.type !== "link_list") continue;
@@ -433,17 +432,6 @@ function fixClosedSliceTodos(content: string, file: string): CategoryResult {
   };
 }
 
-const schemaCache = new Map<TemplateType, Promise<Schema>>();
-
-function schemaFor(type: TemplateType): Promise<Schema> {
-  let cached = schemaCache.get(type);
-  if (cached === undefined) {
-    cached = loadTemplate(type);
-    schemaCache.set(type, cached);
-  }
-  return cached;
-}
-
 /**
  * Frontmatter shape (SLICE-0059): aliases backfilled to [<ID>] where missing,
  * fields in schema declaration order (id first), unknown fields preserved
@@ -472,7 +460,7 @@ async function fixFrontmatterShape(content: string, file: string): Promise<Categ
     labels.push(`${file}: missing aliases (backfilled [${id}])`);
   }
 
-  const schema = await schemaFor(type);
+  const schema = await loadTemplate(type);
   const originalKeys = Object.keys(parsed.data).join(" ");
   const orderedOriginalKeys = Object.keys(orderBySchema(schema, parsed.data as Record<string, unknown>)).join(" ");
   if (originalKeys !== orderedOriginalKeys) {
