@@ -9,6 +9,7 @@ import {
   ArtifactNotFoundError,
   ArtifactValidationError,
   readArtifact,
+  relocateArtifact,
   setField,
   supersedeArtifact,
 } from "../../artifacts/store";
@@ -84,8 +85,7 @@ export async function handleSupersede(args: string[]): Promise<CliResult> {
   }), `${target.id} superseded by ${by}`);
 }
 
-/** wiki path <id> — print the absolute file path (resolve-by-id without globbing, P1.4). */
-export async function handlePath(args: string[]): Promise<CliResult> {
+/** wiki path <id> — print the absolute file path (resolve-by-id without globbing, P1.4). */export async function handlePath(args: string[]): Promise<CliResult> {
   const parsed = parseCommand(args, ["project"]);
   const id = parsed.positionals[0];
   if (id === undefined) return fail("usage: wiki path <id> [--project <name>]");
@@ -99,6 +99,23 @@ export async function handlePath(args: string[]): Promise<CliResult> {
   } catch (error) {
     return handleError(error);
   }
+}
+
+/** wiki retitle <id> --title <t> — link-preserving retitle for any kind (id kept, file re-slugged). */
+export async function handleRetitle(args: string[]): Promise<CliResult> {
+  const parsed = parseCommand(args, ["project", "title"]);
+  const id = parsed.positionals[0];
+  const title = typeof parsed.values.title === "string" ? parsed.values.title : undefined;
+  if (id === undefined || title === undefined) {
+    return fail("usage: wiki retitle <id> --title <title> [--project <name>]");
+  }
+  const target = await resolveTarget(id, parsed);
+  if (typeof target === "string") return fail(target);
+  return run(target, () => relocateArtifact({ ...target, title }), (artifact) => ({
+    id: target.id,
+    title: artifact.fields.title ?? null,
+    path: (artifact as { path?: string }).path ?? null,
+  }), `retitled ${target.id}`);
 }
 
 async function resolveTarget(id: string, parsed: ParsedCommand): Promise<Target | string> {
@@ -133,8 +150,8 @@ async function coerceValue(type: TemplateType, field: string, values: string[]):
 
 async function run(
   target: Target,
-  write: () => Promise<{ fields: Record<string, unknown> }>,
-  json: (artifact: { fields: Record<string, unknown> }) => Record<string, unknown>,
+  write: () => Promise<{ fields: Record<string, unknown>; path?: string }>,
+  json: (artifact: { fields: Record<string, unknown>; path?: string }) => Record<string, unknown>,
   human: string,
 ): Promise<CliResult> {
   try {

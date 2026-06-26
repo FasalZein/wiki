@@ -89,6 +89,20 @@ describe("mutation verbs", () => {
     expect(JSON.parse(result.stdout).path).toContain(`${slice}-`);
   });
 
+  test("wiki retitle changes a non-doc artifact's title/slug, preserving id and links", async () => {
+    const f = await fixture();
+    const slice = await seedSlice(f);
+
+    const result = await runWiki(["retitle", slice, "--title", "A brand new title", "--project", "wiki-v2", "--json"], f);
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout).id).toBe(slice); // id preserved
+    const files = await readdir(join(f.projectPath, "slices"));
+    // re-slugged filename keeps the id prefix
+    expect(files.some((file) => file.startsWith(`${slice}-`) && file.includes("brand-new-title"))).toBe(true);
+    expect(await readSlice(f, slice)).toContain("title: A brand new title");
+  });
+
   test("wiki schema slice lists the enum including superseded (--json)", async () => {
     const f = await fixture();
 

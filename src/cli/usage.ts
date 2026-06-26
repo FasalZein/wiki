@@ -166,6 +166,16 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
     },
     example: "wiki links SLICE-0032",
   },
+  retitle: {
+    summary: "Change an artifact's title and re-slug its filename for any kind; the id (and [[id]] links) survive.",
+    usage: "wiki retitle <id> --title <title> [--project <name>] [--json]",
+    flags: {
+      "--project": "project name (required if the repo isn't linked)",
+      "--title": "new title (required)",
+      "--json": "emit {id,title,path} to stdout",
+    },
+    example: 'wiki retitle SLICE-0032 --title "A clearer title"',
+  },
   schema: {
     summary: "List an artifact type's fields, types, required flags, and enum values.",
     usage: "wiki schema <prd|slice|decision|doc|handoff> [--json]",

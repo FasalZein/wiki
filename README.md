@@ -132,6 +132,7 @@ wiki create handoff  --project myproj --body -
 wiki set      SLICE-0001 status closed       # schema-validated; type inferred from id
 wiki block    SLICE-0002 --on SLICE-0001     # sets blocked_by, auto-wraps [[..]]
 wiki supersede ADR-0003 --by ADR-0007
+wiki retitle  SLICE-0001 --title "A clearer title"  # re-slugs filename; id + links survive
 wiki path     PRD-0001                        # resolve id → file path
 wiki links    PRD-0001                        # outbound links + inbound backlinks (no qmd)
 wiki schema   slice                           # fields, types, enums before guessing
