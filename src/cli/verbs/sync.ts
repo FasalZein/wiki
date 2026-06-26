@@ -1,5 +1,5 @@
 import { projectPath } from "../../artifacts/paths";
-import { writeProjectIndex } from "../../artifacts/index-md";
+import { writeProjectIndex, writeVaultIndex } from "../../artifacts/index-md";
 import { embedCollection, ensureCollection, QmdError, updateCollection } from "../../integrations/qmd";
 import { assertProjectStructure, loadProjectConfig, ProjectConfigError, projectErrorMessage } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
@@ -54,6 +54,7 @@ export async function handleSync(args: string[]): Promise<CliResult> {
       console.error(`synced collection ${target.name}`);
     }
     await writeProjectIndex(vaultRoot, project);
+    await writeVaultIndex(vaultRoot);
     return { code: 0 };
   } catch (error) {
     if (error instanceof QmdError) {
