@@ -11,6 +11,9 @@ import type { CliResult } from "../dispatch";
 /** The command the installed native hooks invoke (assumes `wiki` is on PATH). */
 const HOOK_COMMAND = "wiki hooks run";
 
+/** The pi extension package that forwards hook events to this CLI (exact scoped name; forks are lookalikes). */
+const PI_BRIDGE_PACKAGE = "@hsingjui/pi-hooks";
+
 /**
  * Stateless session-end reminder. Fired on Stop/SessionEnd with no session state,
  * so it cannot know whether anything was authored or persisted — it reminds
@@ -196,8 +199,41 @@ async function hooksInstall(args: string[]): Promise<CliResult> {
   await mkdir(dirname(file), { recursive: true });
   await writeFile(file, JSON.stringify(config, null, 2) + "\n");
   console.log(file);
-  if (runtime === "pi") console.error("pi needs the hooks package: pi install npm:@hsingjui/pi-hooks");
+  if (runtime === "pi") await warnPiBridge();
   return { code: 0 };
+}
+
+/** A pi `packages[]` entry: a bare git/npm id string, or an object with a `source`. */
+function packageSource(entry: unknown): string {
+  if (typeof entry === "string") return entry;
+  if (typeof entry === "object" && entry !== null && typeof (entry as { source?: unknown }).source === "string") {
+    return (entry as { source: string }).source;
+  }
+  return "";
+}
+
+/**
+ * pi can't see skill invocations on its own — it needs the @hsingjui/pi-hooks
+ * bridge enabled in its global packages[] to forward hook events. If that exact
+ * scoped package is absent, warn loudly and disambiguate it from the lookalikes,
+ * so the install doesn't silently no-op.
+ */
+async function warnPiBridge(): Promise<void> {
+  const settings = await readConfig(join(homedir(), RUNTIMES.pi!.global));
+  const packages = Array.isArray((settings as { packages?: unknown }).packages)
+    ? ((settings as { packages: unknown[] }).packages)
+    : [];
+  const enabled = packages.some((entry) => {
+    const id = packageSource(entry).replace(/^(?:npm:|git:)/, "");
+    return id === PI_BRIDGE_PACKAGE || id.endsWith(`/${PI_BRIDGE_PACKAGE}`);
+  });
+  if (enabled) return;
+  console.error(
+    `pi bridge missing: enable ${PI_BRIDGE_PACKAGE} in pi's packages[] (pi install npm:${PI_BRIDGE_PACKAGE}) — ` +
+      `without it pi never forwards hook events and this hook never fires.\n` +
+      `  Use the exact scoped package: ${PI_BRIDGE_PACKAGE}. Unscoped 'pi-hooks' and '*/pi-hooks' forks ` +
+      `are lookalikes — same name, different contract — and will NOT wire the wiki reminder.`,
+  );
 }
 
 /** Splice out only the entries this CLI installed (command === HOOK_COMMAND), leaving everything else intact. */

@@ -91,6 +91,10 @@ Install also writes a stateless Stop/SessionEnd entry: a blanket session-end per
 reminder that cannot detect whether you actually saved (no session state), so it reminds
 unconditionally. `wiki hooks uninstall --runtime <r> [--global]` splices out only the
 wiki entries; `wiki hooks list`/`status` report which runtimes/scopes are wired.
+For pi, enable the exact scoped bridge `@hsingjui/pi-hooks` in pi's `packages[]`
+(install warns if it's absent; unscoped `pi-hooks` forks are lookalikes). On codex
+and pi the hook only sees a `/skill:name` slash-command in the prompt, not a bare
+mention — Claude Code instead fires a dedicated `Skill` tool event.
 It captures; closing an artifact stays an explicit `wiki set <id> status closed`.
 
 Breaking a PRD into slices? Load `to-slices`. Otherwise the CLI is self-describing —

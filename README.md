@@ -117,6 +117,17 @@ wiki hooks status                                   # show which runtimes are wi
 wiki hooks uninstall --runtime claude-code --global # remove only the wiki entries
 ```
 
+> **pi needs a bridge.** pi can't observe skill invocations on its own — enable
+> the exact scoped package `@hsingjui/pi-hooks` in pi's `packages[]`
+> (`pi install npm:@hsingjui/pi-hooks`). Unscoped `pi-hooks` and `*/pi-hooks`
+> forks are lookalikes with a different contract and will not wire the reminder.
+> `wiki hooks install --runtime pi` warns if the bridge is absent.
+>
+> **codex/pi only detect a `/skill:name` slash-command.** Unlike Claude Code
+> (which fires a `Skill` tool event), codex and pi surface a skill only when you
+> type `/to-slices`, `/handoff`, etc. in the prompt — a bare prose mention of the
+> skill name will not trigger the persist reminder on those runtimes.
+
 **6. Verify:**
 
 ```sh

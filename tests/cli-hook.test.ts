@@ -12,7 +12,7 @@ const repoRoot = import.meta.dir.replace(/\/tests$/, "");
 async function runWiki(
   args: string[],
   opts: { stdin?: string; home?: string; cwd?: string } = {},
-): Promise<{ exitCode: number; stdout: string }> {
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const proc = Bun.spawn(["bun", join(repoRoot, "src", "cli.ts"), ...args], {
     cwd: opts.cwd ?? repoRoot,
     env: { ...process.env, ...(opts.home === undefined ? {} : { HOME: opts.home }) },
@@ -24,8 +24,12 @@ async function runWiki(
     proc.stdin.write(opts.stdin);
     proc.stdin.end();
   }
-  const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-  return { exitCode, stdout };
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  return { exitCode, stdout, stderr };
 }
 
 afterEach(async () => {
@@ -125,6 +129,43 @@ describe("wiki hooks install", () => {
       );
       expect(wired).toBe(true);
     }
+  });
+});
+
+describe("wiki hooks install (pi bridge detection)", () => {
+  test("warns loudly and names @hsingjui/pi-hooks when the bridge is absent from pi packages[]", async () => {
+    const home = await mkdtemp(join(tmpdir(), "wiki-home-"));
+    tempPaths.push(home);
+    const { stderr } = await runWiki(["hooks", "install", "--runtime", "pi", "--global"], { home });
+    expect(stderr).toContain("@hsingjui/pi-hooks");
+    // disambiguation against the unscoped / forked lookalikes
+    expect(stderr.toLowerCase()).toContain("lookalike");
+  });
+
+  test("a lookalike pi-hooks in packages[] does NOT satisfy the bridge check", async () => {
+    const home = await mkdtemp(join(tmpdir(), "wiki-home-"));
+    tempPaths.push(home);
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(join(home, ".pi", "agent"), { recursive: true });
+    await writeFile(
+      join(home, ".pi", "agent", "settings.json"),
+      JSON.stringify({ packages: ["git:github.com/prateekmedia/pi-hooks"] }),
+    );
+    const { stderr } = await runWiki(["hooks", "install", "--runtime", "pi", "--global"], { home });
+    expect(stderr).toContain("@hsingjui/pi-hooks");
+  });
+
+  test("no warning when @hsingjui/pi-hooks is enabled (string or object source)", async () => {
+    const home = await mkdtemp(join(tmpdir(), "wiki-home-"));
+    tempPaths.push(home);
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(join(home, ".pi", "agent"), { recursive: true });
+    await writeFile(
+      join(home, ".pi", "agent", "settings.json"),
+      JSON.stringify({ packages: [{ source: "npm:@hsingjui/pi-hooks" }] }),
+    );
+    const { stderr } = await runWiki(["hooks", "install", "--runtime", "pi", "--global"], { home });
+    expect(stderr).not.toContain("bridge missing");
   });
 });
 
