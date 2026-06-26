@@ -1,5 +1,5 @@
 import { nextId } from "../../artifacts/id";
-import { ARTIFACTS } from "../../artifacts/registry";
+import { ARTIFACTS, loadStructure } from "../../artifacts/registry";
 import type { TemplateType } from "../../schema/load";
 import { getVaultRoot } from "../../config/vault";
 import type { CliResult } from "../dispatch";
@@ -22,7 +22,8 @@ export async function handleNextId(args: string[]): Promise<CliResult> {
   }
 
   const vaultRoot = await getVaultRoot();
-  const id = await nextId(type as TemplateType, vaultRoot, project);
+  const structure = await loadStructure(vaultRoot);
+  const id = await nextId(type as TemplateType, vaultRoot, project, structure);
   if (jsonEnabled()) emitJson({ id, type, project });
   else console.log(id);
   return { code: 0 };

@@ -3,7 +3,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { projectPath } from "./paths";
-import { ARTIFACTS } from "./registry";
+import { DEFAULT_STRUCTURE, type Structure } from "./registry";
 
 /**
  * The frontmatter-`id` -> absolute-path index for one project. An id mapping to
@@ -11,11 +11,11 @@ import { ARTIFACTS } from "./registry";
  * appear. This is the single spine reused by resolution, allocation, duplicate
  * detection, and link validation — filename is no longer the source of truth.
  */
-export async function buildIdIndex(vaultRoot: string, project: string): Promise<Map<string, string[]>> {
+export async function buildIdIndex(vaultRoot: string, project: string, structure: Structure = DEFAULT_STRUCTURE): Promise<Map<string, string[]>> {
   const root = projectPath(vaultRoot, project);
   const index = new Map<string, string[]>();
-  // Folders are data in wiki.json; a Set dedups kinds that share a folder.
-  for (const folder of new Set(Object.values(ARTIFACTS).map((spec) => spec.folder))) {
+  // Folders are data in the structure; folders already dedups shared folders.
+  for (const folder of structure.folders) {
     await collectIds(join(root, folder), index);
   }
   return index;
