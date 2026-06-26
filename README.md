@@ -94,8 +94,18 @@ wiki project link --project myproj --repo ~/code/myproj   # --repo defaults to c
 npx skills add FasalZein/wiki -g
 ```
 
-This installs three skills: `wiki` (the router), `to-slices` (PRD → vertical
-slices), and `handoff` (session handoffs).
+This installs one skill from this repo: `wiki` (the router under `skills/`). The
+**authoring skills** that produce artifacts (`to-slices`, `handoff`, …) live in
+your own skill collection, not here — `wiki.json` only names which of them the
+persist hook recognizes. The hook maps each authoring skill to the kind it
+writes:
+
+<!-- skill-map:begin (generated from wiki.json — keep in sync) -->
+- `to-prd` → authors `prd`
+- `to-slices` → authors `slice`
+- `grill-with-docs` → authors `decision`
+- `handoff` → authors `handoff`
+<!-- skill-map:end -->
 
 **5. (Optional) Auto-persist skill output.** Wire a native hook so that when a
 skill that authors an artifact runs, the agent is reminded to save its result to
@@ -199,7 +209,7 @@ Tests run against temp vaults; the dedup/search gate is driven by a fake `qmd`
 │   ├── artifacts/   create/render/store, dedup, registry (kinds from wiki.json)
 │   ├── schema/      template frontmatter schema loading
 │   └── integrations/  qmd subprocess layer
-├── skills/          Agent skill bundle: wiki, to-slices, handoff (one SKILL.md each)
+├── skills/          Agent skill bundle: the `wiki` router (one SKILL.md)
 ├── templates/       Bundled artifact templates (prd, slice, decision, doc, handoff)
 ├── wiki.json        Artifact kind definitions (prefix, folder, dedup, skill)
 ├── tests/           Suites + fixtures
