@@ -43,6 +43,53 @@ describe("mutation verbs", () => {
     expect(await readSlice(f, slice)).toContain("tdd_exempt: true");
   });
 
+  test("wiki set --add appends to a link_list without destroying prior items (wraps [[id]])", async () => {
+    const f = await fixture();
+    const slice = await seedSlice(f);
+    expect((await runWiki(["block", slice, "--on", "SLICE-0030", "--project", "wiki-v2"], f)).exitCode).toBe(0);
+
+    const result = await runWiki(["set", slice, "blocked_by", "--add", "SLICE-0031", "--project", "wiki-v2", "--json"], f);
+
+    expect(result.exitCode).toBe(0);
+    const body = await readSlice(f, slice);
+    expect(body).toContain("[[SLICE-0030]]"); // prior item survived
+    expect(body).toContain("[[SLICE-0031]]"); // new item written as a wikilink
+  });
+
+  test("wiki set --remove drops one link_list item and leaves the rest", async () => {
+    const f = await fixture();
+    const slice = await seedSlice(f);
+    expect((await runWiki(["block", slice, "--on", "SLICE-0030", "--on", "SLICE-0031", "--project", "wiki-v2"], f)).exitCode).toBe(0);
+
+    const result = await runWiki(["set", slice, "blocked_by", "--remove", "SLICE-0030", "--project", "wiki-v2"], f);
+
+    expect(result.exitCode).toBe(0);
+    const body = await readSlice(f, slice);
+    expect(body).not.toContain("[[SLICE-0030]]");
+    expect(body).toContain("[[SLICE-0031]]");
+  });
+
+  test("wiki set --clear empties a list field", async () => {
+    const f = await fixture();
+    const slice = await seedSlice(f);
+    expect((await runWiki(["block", slice, "--on", "SLICE-0030", "--project", "wiki-v2"], f)).exitCode).toBe(0);
+
+    const result = await runWiki(["set", slice, "blocked_by", "--clear", "--project", "wiki-v2"], f);
+
+    expect(result.exitCode).toBe(0);
+    expect(await readSlice(f, slice)).not.toContain("[[SLICE-0030]]");
+  });
+
+  test("wiki set --add rejects a non-list field", async () => {
+    const f = await fixture();
+    const slice = await seedSlice(f);
+
+    const result = await runWiki(["set", slice, "status", "--add", "blocked", "--project", "wiki-v2", "--json"], f);
+
+    expect(result.exitCode).not.toBe(0);
+    expect(JSON.parse(result.stderr).error).toContain("list");
+  });
+
   test("wiki block wraps bare ids as wikilinks with no comma corruption", async () => {
     const f = await fixture();
     const slice = await seedSlice(f);

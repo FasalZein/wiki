@@ -130,6 +130,7 @@ wiki create handoff  --project myproj --body -
 
 # mutate existing artifacts (never hand-edit frontmatter)
 wiki set      SLICE-0001 status closed       # schema-validated; type inferred from id
+wiki set      SLICE-0001 blocked_by --add SLICE-0002   # additive; --remove/--clear too (bare set replaces)
 wiki block    SLICE-0002 --on SLICE-0001     # sets blocked_by, auto-wraps [[..]]
 wiki supersede ADR-0003 --by ADR-0007
 wiki retitle  SLICE-0001 --title "A clearer title"  # re-slugs filename; id + links survive

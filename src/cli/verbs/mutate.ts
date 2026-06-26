@@ -26,15 +26,27 @@ import { resolveProject } from "../resolve-project";
 
 type Target = { type: TemplateType; vaultRoot: string; project: string; id: string };
 
-/** wiki set <id> <field> <value...> — never comma-splits; coerces by schema type. */
+/**
+ * wiki set <id> <field> <value...> — full-replace; never comma-splits; coerces by schema type.
+ * For list/link_list fields, --add/--remove/--clear do an additive read-merge-validate-write
+ * so a single edit never silently overwrites the rest of the list (PRD-0015 item 10).
+ * Bare `set` stays full-replace. link_list values are written as [[id]].
+ */
 export async function handleSet(args: string[]): Promise<CliResult> {
-  const parsed = parseCommand(args, ["project"]);
+  const parsed = parseCommand(args, ["project", "add", "remove"], ["add", "remove"], ["clear"]);
   const [id, field, ...values] = parsed.positionals;
-  if (id === undefined || field === undefined || values.length === 0) {
-    return fail("usage: wiki set <id> <field> <value...> [--project <name>]");
+  const add = listValue(parsed.values.add);
+  const remove = listValue(parsed.values.remove);
+  const clear = booleanValue(parsed.values, "clear");
+  const additive = add.length > 0 || remove.length > 0 || clear;
+
+  if (id === undefined || field === undefined || (!additive && values.length === 0)) {
+    return fail("usage: wiki set <id> <field> <value...> | --add <v> | --remove <v> | --clear [--project <name>]");
   }
   const target = await resolveTarget(id, parsed);
   if (typeof target === "string") return fail(target);
+
+  if (additive) return setListField(target, field, { add, remove, clear });
 
   const coerced = await coerceValue(target.type, field, values);
   if (typeof coerced === "object" && coerced !== null && "error" in coerced) return fail((coerced as { error: string }).error);
@@ -43,6 +55,48 @@ export async function handleSet(args: string[]): Promise<CliResult> {
     id: target.id,
     field,
     value: artifact.fields[field] ?? null,
+  }), `set ${field} on ${target.id}`);
+}
+
+/** Additive list mutation: read current value, apply add/remove/clear, validate-write. */
+async function setListField(
+  target: Target,
+  field: string,
+  ops: { add: string[]; remove: string[]; clear: boolean },
+): Promise<CliResult> {
+  const schema = await loadTemplate(target.type);
+  const def = schema.fields.find((candidate) => candidate.name === field);
+  if (def === undefined) return fail(`unknown field for ${target.type}: ${field}`);
+  if (def.type !== "list" && def.type !== "link_list") {
+    return fail(`--add/--remove/--clear only apply to list or link_list fields; ${field} is ${def.type}`);
+  }
+  const isLinkList = def.type === "link_list";
+  const wrap = (value: string) => (isLinkList && !/^\[\[.*\]\]$/.test(value) ? `[[${value}]]` : value);
+  const bare = (value: string) => value.replace(/^\[\[/, "").replace(/\]\]$/, "");
+
+  let current: string[];
+  try {
+    const existing = await readArtifact(target);
+    const value = existing.fields[field];
+    current = Array.isArray(value) ? value.map(String) : [];
+  } catch (error) {
+    return handleError(error);
+  }
+
+  let next = ops.clear ? [] : [...current];
+  for (const value of ops.add) {
+    const wrapped = wrap(value);
+    if (!next.some((item) => bare(item) === bare(wrapped))) next.push(wrapped);
+  }
+  if (ops.remove.length > 0) {
+    const drop = new Set(ops.remove.map(bare));
+    next = next.filter((item) => !drop.has(bare(item)));
+  }
+
+  return run(target, () => setField({ ...target, field, value: next }), () => ({
+    id: target.id,
+    field,
+    value: next,
   }), `set ${field} on ${target.id}`);
 }
 

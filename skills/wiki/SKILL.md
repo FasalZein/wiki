@@ -44,7 +44,10 @@ artifact, not just this chat, so it outlives the session. Repos stay clean.
 One validated `wiki` call per intent — never hand-edit frontmatter:
 
 - `wiki set <id> <field> <value...>` — schema-validated, comma-safe, type-coerced
-  (e.g. `wiki set PRD-0001 status closed`). Type is inferred from the id.
+  (e.g. `wiki set PRD-0001 status closed`). Type is inferred from the id. Bare `set`
+  full-replaces; for list/link_list fields use `--add <v>` / `--remove <v>` / `--clear`
+  for an additive edit that never overwrites the rest of the list (link_list values
+  are written as `[[id]]`).
 - `wiki block <id> --on <id> [--on <id>…]` — sets `blocked_by`, auto-wrapping `[[…]]`.
 - `wiki supersede <oldId> --by <newId>` — links an existing artifact to its replacement.
 - `wiki retitle <id> --title <t>` — retitle any kind, re-slugging the filename; the id (and `[[id]]` links) survive. `doc recategorize` stays the doc-only category move.

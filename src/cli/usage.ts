@@ -120,13 +120,16 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
     example: "wiki next-id slice --project myproj",
   },
   set: {
-    summary: "Set a field on an existing artifact (schema-validated). Type is inferred from the id.",
-    usage: "wiki set <id> <field> <value...> [--project <name>] [--json]",
+    summary: "Set a field on an existing artifact (schema-validated). Type is inferred from the id. Bare set replaces; --add/--remove/--clear edit list/link_list fields additively.",
+    usage: "wiki set <id> <field> <value...> | --add <v> | --remove <v> | --clear [--project <name>] [--json]",
     flags: {
       "--project": "project name (required if the repo isn't linked)",
+      "--add": "append a value to a list/link_list field without overwriting the rest (repeatable)",
+      "--remove": "drop a value from a list/link_list field (repeatable)",
+      "--clear": "empty a list/link_list field",
       "--json": "emit {id,field,value} to stdout; {error,...} to stderr on failure",
     },
-    example: "wiki set SLICE-0032 status green",
+    example: "wiki set SLICE-0032 blocked_by --add SLICE-0031",
   },
   block: {
     summary: "Set an artifact's blocked_by list; bare ids are auto-wrapped as [[..]] (no comma corruption).",
