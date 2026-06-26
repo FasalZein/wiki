@@ -53,17 +53,11 @@ function buildLocationLex(query: string): string {
     .filter((token) => token.length >= 3)
     .filter((token) => !STOP_WORDS.has(token.toLowerCase()));
 
+  // ponytail: only the prd hint survives — it is the single test-pinned branch
+  // (search-upgrade: "where do PRDs live" => "PRDs prd spec specs"). The full
+  // keep/cut of the domain-hint vocabulary is deferred; the tokenizer above stays.
   const hints: string[] = [];
   if (/\bprds?\b/u.test(normalizedQuestion)) hints.push("prd", "spec", "specs");
-  if (/\b(slice|task)\b/u.test(normalizedQuestion)) hints.push("slice", "task", "work item", "specs", "plan", "test-plan");
-  if (/\b(module|modules)\b/u.test(normalizedQuestion)) hints.push("module", "spec");
-  if (/\b(file|files|doc|docs|page|pages)\b/u.test(normalizedQuestion)) hints.push("docs", "page", "spec");
-  if (/\b(decision|decisions|forge)\b/u.test(normalizedQuestion)) hints.push("decisions", "forge", "lifecycle", "workflow");
-  if (/\bgrill\b/u.test(normalizedQuestion)) hints.push("grill", "challenge", "terminology");
-  if (/\bevidence\b/u.test(normalizedQuestion)) hints.push("evidence", "proof", "verification");
-  if (/\bhand(?:off|over)\b/u.test(normalizedQuestion)) hints.push("handoff", "handover", "transfer");
-  if (/\bphase\b/u.test(normalizedQuestion)) hints.push("phase", "stage", "step");
-  if (/\bvault\b/u.test(normalizedQuestion)) hints.push("vault", "knowledge", "wiki");
 
   const terms = [...baseTerms, ...hints];
   const deduped = terms.filter((term, index) => terms.indexOf(term) === index);

@@ -233,6 +233,23 @@ describe("doc CLI", () => {
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("not found");
   });
+
+  test("doc retitle --json emits {id,path} (SLICE-0088)", async () => {
+    const vaultRoot = await createFixtureVault("test-project");
+    await runWiki(createArgs(), vaultRoot); // DOC-0001 in docs/runbooks/
+
+    const result = await runWiki([
+      "doc", "retitle", "DOC-0001",
+      "--project", "test-project",
+      "--title", "Kamal deploy preflight checklist",
+      "--json",
+    ], vaultRoot);
+
+    expect(result.exitCode).toBe(0);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.id).toBe("DOC-0001");
+    expect(parsed.path).toContain("DOC-0001-kamal-deploy-preflight-checklist.md");
+  });
 });
 
 function createArgs(): string[] {

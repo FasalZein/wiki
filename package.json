@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "bun --watch src/cli.ts",
-    "build": "bun build src/cli.ts --outdir dist --target bun",
+    "build": "bun build src/cli.ts --outdir dist --target bun && rm -rf dist/templates && cp -R templates dist/templates",
     "test": "bun test tests/",
     "typecheck": "tsc --noEmit"
   },

@@ -4,12 +4,13 @@ import { join, relative } from "node:path";
 import matter from "gray-matter";
 
 import { orderBySchema } from "../../artifacts/render";
-import { FOLDER_TO_TYPE } from "../../artifacts/registry";
+import { bodySectionDrift } from "../../artifacts/body";
+import { artifactTypeForVaultPath, PREFIX_TO_TYPE } from "../../artifacts/registry";
+import { slugifyTitle } from "../../artifacts/store";
 import { projectPath } from "../../artifacts/paths";
 import { assertProjectStructure, loadProjectConfig, ProjectConfigError, projectErrorMessage } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
-import { loadTemplate, type TemplateType } from "../../schema/load";
-import type { Schema } from "../../schema/types";
+import { loadTemplate, normalizeInlineMaps, resolveTemplatePath, type TemplateType } from "../../schema/load";
 import { booleanValue, parseCommand } from "../parse";
 import { resolveProject } from "../resolve-project";
 import type { CliResult } from "../dispatch";
@@ -58,6 +59,15 @@ export async function handleFmt(args: string[]): Promise<CliResult> {
     console.log(write ? `fixed ${label}` : label);
   }
   const manual: string[] = [...renumber.collisions];
+
+  // Rename mismatched files to ${id}-${slug}.md after renumbering, so it sees
+  // the post-renumber names. The id is preserved, so [[id]] links survive.
+  const renamed = await renameToId(vaultRoot, projPath, write);
+  total += renamed.labels.length;
+  for (const label of renamed.labels) {
+    console.log(write ? `fixed ${label}` : label);
+  }
+  manual.push(...renamed.collisions);
 
   for (const filePath of await markdownFiles(projPath)) {
     const raw = await readFile(filePath, "utf8");
@@ -121,14 +131,14 @@ type Diagnostic = (content: string, file: string) => string[] | Promise<string[]
 const DIAGNOSTICS: Diagnostic[] = [
   diagnoseIdentity,
   diagnoseCoreFields,
+  diagnoseBodySections,
   diagnoseLinkListProse,
   diagnoseNarrativeFrontmatter,
   diagnoseGuidanceOnlySections,
 ];
 
 function artifactTypeOf(file: string): TemplateType | undefined {
-  const folder = file.split("/")[2];
-  return folder === undefined ? undefined : FOLDER_TO_TYPE[folder];
+  return artifactTypeForVaultPath(file);
 }
 
 function diagnoseIdentity(content: string, file: string): string[] {
@@ -149,14 +159,37 @@ async function diagnoseCoreFields(content: string, file: string): Promise<string
   if (type === undefined) return [];
   const data = frontmatterOf(content);
   if (data === undefined || typeof data.id !== "string") return []; // identity covers
-  const core = new Set(["id", "title", "project", "status", "created", "updated"]);
-  const schema = await schemaFor(type);
+  const schema = await loadTemplate(type);
   const missing = schema.fields
-    .filter((field) => core.has(field.name) && (field.required || field.name === "created" || field.name === "updated"))
+    .filter((field) => field.required && field.name !== "id") // id is identity's job
     .filter((field) => data[field.name] === undefined)
     .map((field) => field.name);
   if (missing.length === 0) return [];
   return [`${file}: missing required fields: ${missing.join(", ")} — hint: set them with 'wiki set <id> <field> <value>'`];
+}
+
+/**
+ * Body-section drift (SLICE-0087): a required H2 section removed (or an unknown
+ * one added) after an edit. Reuses the same template-derived contract validate
+ * uses, so the two never disagree. Flag-only — authoring is a judgment call.
+ */
+async function diagnoseBodySections(content: string, file: string): Promise<string[]> {
+  const type = artifactTypeOf(file);
+  if (type === undefined) return [];
+  const data = frontmatterOf(content);
+  if (data === undefined || typeof data.id !== "string") return []; // identity covers id-less files
+  const schema = await loadTemplate(type);
+  const templateBody = matter(normalizeInlineMaps(await Bun.file(resolveTemplatePath(`${type}.md`)).text())).content;
+  const fieldNames = new Set(schema.fields.map((field) => field.name));
+  const drift = bodySectionDrift(templateBody, fieldNames, matter(content).content);
+  const findings: string[] = [];
+  for (const heading of drift.missing) {
+    findings.push(`${file}: missing required body section "## ${heading}" — hint: add the section back`);
+  }
+  for (const heading of drift.unknown) {
+    findings.push(`${file}: unknown body section "## ${heading}" (not in the ${type} template) — hint: remove or rename it`);
+  }
+  return findings;
 }
 
 const ARTIFACT_ID = /^[A-Z]+-\d+$/;
@@ -166,7 +199,7 @@ async function diagnoseLinkListProse(content: string, file: string): Promise<str
   if (type === undefined) return [];
   const data = frontmatterOf(content);
   if (data === undefined || typeof data.id !== "string") return [];
-  const schema = await schemaFor(type);
+  const schema = await loadTemplate(type);
   const findings: string[] = [];
   for (const field of schema.fields) {
     if (field.type !== "link_list") continue;
@@ -239,7 +272,7 @@ async function renumberLegacyIds(
   }
 
   for (const [id, filePath] of idToPath) {
-    const legacy = /^(PRD|SLICE)-(\d{3})$/.exec(id);
+    const legacy = LEGACY_ID.exec(id);
     if (legacy === null || legacy[1] === undefined || legacy[2] === undefined) continue;
     const newId = `${legacy[1]}-0${legacy[2]}`;
     const file = relative(vaultRoot, filePath);
@@ -277,7 +310,52 @@ async function renumberLegacyIds(
   return { labels, collisions, map };
 }
 
-/** Date fields must be quoted date-only strings: created: '2026-05-25'. */
+/**
+ * Rename a file to ${id}-${slug}.md when its frontmatter id/slug mismatch the
+ * filename. The id is kept, so [[id]] links (resolved through the id index)
+ * survive the rename. id-less files are left to diagnoseIdentity (flag-only) —
+ * never auto-named, since inventing an id is a judgment call. A target name
+ * already taken by another file is skipped and flagged, never clobbered.
+ */
+async function renameToId(
+  vaultRoot: string,
+  projectPath: string,
+  write: boolean,
+): Promise<{ labels: string[]; collisions: string[] }> {
+  const labels: string[] = [];
+  const collisions: string[] = [];
+
+  for (const filePath of await markdownFiles(projectPath)) {
+    const file = relative(vaultRoot, filePath);
+    if (artifactTypeOf(file) === undefined) continue;
+    const data = frontmatterOf(await readFile(filePath, "utf8"));
+    const id = data?.id;
+    const title = data?.title;
+    if (typeof id !== "string" || typeof title !== "string") continue; // id-less / titleless: flag-only
+    const expected = `${id}-${slugifyTitle(title)}.md`;
+    const dir = filePath.slice(0, filePath.lastIndexOf("/"));
+    const base = filePath.slice(filePath.lastIndexOf("/") + 1);
+    if (base === expected) continue;
+    const target = join(dir, expected);
+    if (await fileExists(target)) {
+      collisions.push(`${file}: cannot rename to ${expected} (name already taken); resolve manually`);
+      continue;
+    }
+    labels.push(`${file}: filename does not match id-slug -> ${expected}`);
+    if (write) await rename(filePath, target);
+  }
+
+  return { labels, collisions };
+}
+
+async function fileExists(path: string): Promise<boolean> {
+  return Bun.file(path).exists();
+}
+
+/** Legacy short-id pattern over every registered prefix, derived from the
+ *  registry so any kind is covered, not just PRD/SLICE. */
+const LEGACY_ID = new RegExp(`^(${Object.keys(PREFIX_TO_TYPE).join("|")})-(\\d{3})$`);
+
 function fixDates(content: string, file: string): CategoryResult {
   const labels: string[] = [];
   const lines = content.split("\n");
@@ -354,17 +432,6 @@ function fixClosedSliceTodos(content: string, file: string): CategoryResult {
   };
 }
 
-const schemaCache = new Map<TemplateType, Promise<Schema>>();
-
-function schemaFor(type: TemplateType): Promise<Schema> {
-  let cached = schemaCache.get(type);
-  if (cached === undefined) {
-    cached = loadTemplate(type);
-    schemaCache.set(type, cached);
-  }
-  return cached;
-}
-
 /**
  * Frontmatter shape (SLICE-0059): aliases backfilled to [<ID>] where missing,
  * fields in schema declaration order (id first), unknown fields preserved
@@ -373,8 +440,7 @@ function schemaFor(type: TemplateType): Promise<Schema> {
  */
 async function fixFrontmatterShape(content: string, file: string): Promise<CategoryResult> {
   const noop = { labels: [], fixed: content };
-  const folder = file.split("/")[2];
-  const type = folder === undefined ? undefined : FOLDER_TO_TYPE[folder];
+  const type = artifactTypeOf(file);
   if (type === undefined || !content.startsWith("---")) return noop;
 
   let parsed: matter.GrayMatterFile<string>;
@@ -393,7 +459,7 @@ async function fixFrontmatterShape(content: string, file: string): Promise<Categ
     labels.push(`${file}: missing aliases (backfilled [${id}])`);
   }
 
-  const schema = await schemaFor(type);
+  const schema = await loadTemplate(type);
   const originalKeys = Object.keys(parsed.data).join(" ");
   const orderedOriginalKeys = Object.keys(orderBySchema(schema, parsed.data as Record<string, unknown>)).join(" ");
   if (originalKeys !== orderedOriginalKeys) {

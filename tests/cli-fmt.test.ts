@@ -12,8 +12,12 @@ afterEach(async () => {
 const DIRTY_SLICE = `---
 id: SLICE-0001
 title: Test slice
+summary: A test slice fixture with all required fields present.
 project: wiki-v2
 status: open
+type: AFK
+acceptance:
+  - one
 created: 2026-05-25T00:00:00.000Z
 updated: 2026-05-26
 ---
@@ -28,8 +32,12 @@ id: SLICE-0002
 aliases:
   - SLICE-0002
 title: Clean slice
+summary: A canonical slice fixture with all required fields present.
 project: wiki-v2
 status: open
+type: AFK
+acceptance:
+  - one
 created: '2026-05-25'
 updated: '2026-05-26'
 ---
@@ -99,8 +107,12 @@ describe("fmt CLI", () => {
   const TEMPLATER_SLICE = `---
 id: SLICE-0003
 title: Templater leak
+summary: A slice fixture exercising Templater comment stripping.
 project: wiki-v2
 status: open
+type: AFK
+acceptance:
+  - one
 created: '2026-05-25'
 updated: '2026-05-25'
 ---
@@ -264,8 +276,12 @@ aliases:
   - SLICE-0007
 todo: legacy field
 id: SLICE-0007
+summary: A slice fixture with frontmatter in non-canonical order.
 project: wiki-v2
 status: open
+type: AFK
+acceptance:
+  - one
 created: '2026-05-25'
 updated: '2026-05-25'
 ---
@@ -309,12 +325,37 @@ id: PRD-001
 aliases:
   - PRD-001
 title: Legacy padded PRD
+summary: A legacy PRD fixture with a 3-digit id to be renumbered.
 project: wiki-v2
 status: closed
 created: '2026-05-25'
 updated: '2026-05-25'
 ---
 ## Problem Statement
+
+Old.
+
+## Solution
+
+Old.
+
+## User Stories
+
+Old.
+
+## Implementation Decisions
+
+Old.
+
+## Testing Decisions
+
+Old.
+
+## Out of Scope
+
+Old.
+
+## Further Notes
 
 Old.
 `;
@@ -324,9 +365,13 @@ id: SLICE-001
 aliases:
   - SLICE-001
 title: Legacy padded slice
+summary: A legacy slice fixture with a 3-digit id to be renumbered.
 project: wiki-v2
 parent_prd: PRD-001
 status: closed
+type: AFK
+acceptance:
+  - one
 created: '2026-05-25'
 updated: '2026-05-25'
 ---
@@ -340,11 +385,15 @@ id: SLICE-0042
 aliases:
   - SLICE-0042
 title: References legacy ids
+summary: A slice fixture that references legacy ids to be rewritten.
 project: wiki-v2
 parent_prd: PRD-001
 blocked_by:
   - SLICE-001
 status: open
+type: AFK
+acceptance:
+  - one
 created: '2026-05-25'
 updated: '2026-05-25'
 ---
@@ -492,7 +541,11 @@ id: SLICE-0099
 aliases:
   - SLICE-0099
 title: No status field
+summary: A slice fixture missing only its required status field.
 project: wiki-v2
+type: AFK
+acceptance:
+  - one
 created: '2026-05-25'
 updated: '2026-05-25'
 ---
@@ -500,6 +553,63 @@ updated: '2026-05-25'
 
 X.
 `;
+
+  const MISSING_SUMMARY_SLICE = `---
+id: SLICE-0098
+aliases:
+  - SLICE-0098
+title: No summary field
+project: wiki-v2
+status: planned
+type: AFK
+acceptance:
+  - one
+created: '2026-05-25'
+updated: '2026-05-25'
+---
+## What to build
+
+X.
+`;
+
+  const COMPLETE_REQUIRED_SLICE = `---
+id: SLICE-0097
+aliases:
+  - SLICE-0097
+title: All required fields present
+summary: A complete slice with every schema-required field filled in.
+project: wiki-v2
+status: planned
+type: AFK
+acceptance:
+  - one
+created: '2026-05-25'
+updated: '2026-05-25'
+---
+## What to build
+
+X.
+`;
+
+  test("check flags a file missing required summary (driven off schema.required) (SLICE-0080)", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    await writeSlice(vaultRoot, "SLICE-0098-no-summary-field.md", MISSING_SUMMARY_SLICE);
+
+    const check = await runWiki(["fmt", "--project", "wiki-v2"], vaultRoot);
+
+    expect(check.exitCode).toBe(1);
+    expect(check.stdout).toContain("missing required fields: summary");
+  });
+
+  test("a file with all schema-required fields passes clean (SLICE-0080)", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    await writeSlice(vaultRoot, "SLICE-0097-all-required-fields-present.md", COMPLETE_REQUIRED_SLICE);
+
+    const check = await runWiki(["fmt", "--project", "wiki-v2"], vaultRoot);
+
+    expect(check.exitCode).toBe(0);
+    expect(check.stdout).not.toContain("missing required fields");
+  });
 
   test("check flags flag-only findings with hints and exits 1 (SLICE-0061)", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
@@ -542,6 +652,100 @@ X.
     const rewrite = await runWiki(["fmt", "--project", "wiki-v2", "--write"], vaultRoot);
     expect(rewrite.exitCode).toBe(0);
     expect(rewrite.stdout).toContain("needs manual attention:");
+  });
+
+  // --- SLICE-0079: rename-to-id + registry-derived renumber prefixes ---
+
+  const MISNAMED_SLICE = `---
+id: SLICE-0008
+aliases:
+  - SLICE-0008
+title: Renamed me
+summary: A slice fixture whose filename no longer matches its title.
+project: wiki-v2
+status: open
+type: AFK
+acceptance:
+  - one
+created: '2026-05-25'
+updated: '2026-05-25'
+---
+## What to build
+
+Filename no longer matches the title.
+`;
+
+  test("--write renames a mismatched file to id-slug.md preserving the id, and the [[id]] link still resolves (SLICE-0079)", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    await writeSlice(vaultRoot, "SLICE-0008-old-wrong-name.md", MISNAMED_SLICE);
+
+    const check = await runWiki(["fmt", "--project", "wiki-v2"], vaultRoot);
+    expect(check.exitCode).toBe(1);
+    expect(check.stdout).toContain("SLICE-0008-old-wrong-name.md");
+
+    const write = await runWiki(["fmt", "--project", "wiki-v2", "--write"], vaultRoot);
+    expect(write.exitCode).toBe(0);
+
+    const sliceFiles = await readdir(join(vaultRoot, "projects", "wiki-v2", "slices"));
+    expect(sliceFiles).toContain("SLICE-0008-renamed-me.md");
+    expect(sliceFiles).not.toContain("SLICE-0008-old-wrong-name.md");
+    // id preserved inside the file
+    const renamed = await readFile(slicePath(vaultRoot, "SLICE-0008-renamed-me.md"), "utf8");
+    expect(renamed).toContain("id: SLICE-0008");
+
+    // the [[id]] link still resolves to the renamed file
+    const resolved = await runWiki(["path", "SLICE-0008", "--project", "wiki-v2"], vaultRoot);
+    expect(resolved.exitCode).toBe(0);
+    expect(resolved.stdout).toContain("SLICE-0008-renamed-me.md");
+
+    const recheck = await runWiki(["fmt", "--project", "wiki-v2"], vaultRoot);
+    expect(recheck.exitCode).toBe(0);
+  });
+
+  test("an id-less file is flagged, never auto-renamed (SLICE-0079)", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    await writeFile(
+      join(vaultRoot, "projects", "wiki-v2", "handoffs", "0001-grilling-session-1.md"),
+      PRE_SCHEMA_HANDOFF,
+    );
+
+    const check = await runWiki(["fmt", "--project", "wiki-v2"], vaultRoot);
+    expect(check.exitCode).toBe(1);
+    expect(check.stdout).toContain("no id in frontmatter");
+
+    const write = await runWiki(["fmt", "--project", "wiki-v2", "--write"], vaultRoot);
+    expect(write.exitCode).toBe(0);
+    // file untouched — never auto-renamed when there is no id
+    const handoffFiles = await readdir(join(vaultRoot, "projects", "wiki-v2", "handoffs"));
+    expect(handoffFiles).toContain("0001-grilling-session-1.md");
+  });
+
+  const LEGACY_DOC = `---
+id: DOC-001
+aliases:
+  - DOC-001
+title: Legacy padded doc
+project: wiki-v2
+status: published
+created: '2026-05-25'
+updated: '2026-05-25'
+---
+## Overview
+
+Old doc.
+`;
+
+  test("--write renumbers a legacy id for any registry kind, not just PRD/SLICE (SLICE-0079)", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    await writeFile(join(vaultRoot, "projects", "wiki-v2", "docs", "DOC-001-legacy-padded-doc.md"), LEGACY_DOC);
+
+    const write = await runWiki(["fmt", "--project", "wiki-v2", "--write"], vaultRoot);
+    expect(write.exitCode).toBe(0);
+    expect(write.stdout).toContain("DOC-001 -> DOC-0001");
+
+    const docFiles = await readdir(join(vaultRoot, "projects", "wiki-v2", "docs"));
+    expect(docFiles).toContain("DOC-0001-legacy-padded-doc.md");
+    expect(docFiles).not.toContain("DOC-001-legacy-padded-doc.md");
   });
 
   test("fmt --help documents check-default and --write semantics", async () => {

@@ -109,3 +109,15 @@ export function typeForId(id: string): TemplateType | undefined {
   const prefix = id.split("-")[0]?.toUpperCase();
   return prefix === undefined ? undefined : PREFIX_TO_TYPE[prefix];
 }
+
+/** Infer the artifact type from a vault-relative path. The convention is
+ *  `projects/<project>/<folder>/<file>.md`, so the type comes from the folder
+ *  segment (index 2). Returns undefined for paths outside that layout. */
+export function artifactTypeForVaultPath(rel: string): TemplateType | undefined {
+  const parts = rel.split("/");
+  const folder = parts[2];
+  if (parts[0] !== "projects" || parts.length < 4 || folder === undefined) {
+    return undefined;
+  }
+  return FOLDER_TO_TYPE[folder];
+}

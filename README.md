@@ -94,21 +94,45 @@ wiki project link --project myproj --repo ~/code/myproj   # --repo defaults to c
 npx skills add FasalZein/wiki -g
 ```
 
-This installs three skills: `wiki` (the router), `to-slices` (PRD → vertical
-slices), and `handoff` (session handoffs).
+This installs one skill from this repo: `wiki` (the router under `skills/`). The
+**authoring skills** that produce artifacts (`to-slices`, `handoff`, …) live in
+your own skill collection, not here — `wiki.json` only names which of them the
+persist hook recognizes. The hook maps each authoring skill to the kind it
+writes:
 
-**5. (Optional) Auto-persist skill output.** Wire a native hook so that when a
+<!-- skill-map:begin (generated from wiki.json — keep in sync) -->
+- `to-prd` → authors `prd`
+- `to-slices` → authors `slice`
+- `grill-with-docs` → authors `decision`
+- `handoff` → authors `handoff`
+<!-- skill-map:end -->
+
+**5. (Optional) Auto-persist skill output.** Wire native hooks so that when a
 skill that authors an artifact runs, the agent is reminded to save its result to
-the vault:
+the vault, plus a stateless session-end reminder:
 
 ```sh
 wiki hooks install --runtime claude-code --global   # or codex / pi
+wiki hooks status                                   # show which runtimes are wired
+wiki hooks uninstall --runtime claude-code --global # remove only the wiki entries
 ```
+
+> **pi needs a bridge.** pi can't observe skill invocations on its own — enable
+> the exact scoped package `@hsingjui/pi-hooks` in pi's `packages[]`
+> (`pi install npm:@hsingjui/pi-hooks`). Unscoped `pi-hooks` and `*/pi-hooks`
+> forks are lookalikes with a different contract and will not wire the reminder.
+> `wiki hooks install --runtime pi` warns if the bridge is absent.
+>
+> **codex/pi only detect a `/skill:name` slash-command.** Unlike Claude Code
+> (which fires a `Skill` tool event), codex and pi surface a skill only when you
+> type `/to-slices`, `/handoff`, etc. in the prompt — a bare prose mention of the
+> skill name will not trigger the persist reminder on those runtimes.
 
 **6. Verify:**
 
 ```sh
 wiki doctor          # vault health: docs-structure + repo-binding drift
+wiki doctor --setup  # distribution health: binary freshness, skill bundle, hook wiring
 wiki status          # recent artifacts (lists projects when none is bound)
 ```
 
@@ -119,7 +143,8 @@ verbs. Recall first, then write.
 
 ```sh
 # recall before acting
-wiki search "auth flow" --project myproj   # ranked hybrid search
+wiki search "auth flow" --project myproj   # ranked hybrid search, one line per artifact with id/kind/title (--json for a {id,kind,title,path,score,snippet} array)
+wiki search "what changed recently" --recent # order by last-modified instead of relevance (--since 2026-06-01 to bound it)
 wiki status --project myproj               # recent artifacts
 
 # create — one-shot, body via stdin, schema-validated
@@ -129,10 +154,14 @@ wiki create decision --project myproj --title "..." --body -    # ADR
 wiki create handoff  --project myproj --body -
 
 # mutate existing artifacts (never hand-edit frontmatter)
-wiki set      SLICE-0001 status closed       # schema-validated; type inferred from id
+wiki set      SLICE-0001 status closed       # schema-validated; type inferred from id (field names: kebab or snake)
+wiki set      SLICE-0001 blocked_by --add SLICE-0002   # additive; --remove/--clear too (bare set replaces)
 wiki block    SLICE-0002 --on SLICE-0001     # sets blocked_by, auto-wraps [[..]]
 wiki supersede ADR-0003 --by ADR-0007
+wiki retitle  SLICE-0001 --title "A clearer title"  # re-slugs filename; id + links survive
+wiki delete   SLICE-0001                      # refuses if linked; --force to override (run sync after)
 wiki path     PRD-0001                        # resolve id → file path
+wiki links    PRD-0001                        # outbound links + inbound backlinks (no qmd)
 wiki schema   slice                           # fields, types, enums before guessing
 
 # index after writing
@@ -153,15 +182,18 @@ Good to know:
 
 ```sh
 wiki doctor                          # vault health report
+wiki doctor --setup                  # distribution health: binary freshness, skill-bundle presence, hook install state
 wiki fmt --project myproj            # check mode: report format drift, exit 1 if any
 wiki fmt --project myproj --write    # apply mechanical fixes (idempotent)
-wiki validate <file>                 # check one artifact against its template schema
+wiki validate <file>                 # check one artifact against its template schema + required body sections (--json: {ok,type,errors})
 ```
 
 `wiki fmt` normalizes dates, frontmatter order, and 4-digit IDs (renumbering
-legacy 3-digit IDs vault-wide, references included), strips leaked Templater
-blocks, and expands unrendered template sections. Findings it won't auto-fix
-(missing required fields, prose in link lists) are reported with hints.
+legacy 3-digit IDs of any kind vault-wide, references included), renames a file
+to `<ID>-<slug>.md` when its id/slug drift from the filename (the id is kept so
+`[[id]]` links survive), strips leaked Templater blocks, and expands unrendered
+template sections. Findings it won't auto-fix (missing required fields, id-less
+files, prose in link lists) are reported with hints.
 
 ## Environment variables
 
@@ -192,7 +224,7 @@ Tests run against temp vaults; the dedup/search gate is driven by a fake `qmd`
 │   ├── artifacts/   create/render/store, dedup, registry (kinds from wiki.json)
 │   ├── schema/      template frontmatter schema loading
 │   └── integrations/  qmd subprocess layer
-├── skills/          Agent skill bundle: wiki, to-slices, handoff (one SKILL.md each)
+├── skills/          Agent skill bundle: the `wiki` router (one SKILL.md)
 ├── templates/       Bundled artifact templates (prd, slice, decision, doc, handoff)
 ├── wiki.json        Artifact kind definitions (prefix, folder, dedup, skill)
 ├── tests/           Suites + fixtures

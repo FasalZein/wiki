@@ -41,7 +41,7 @@ async function listProjectsCommand(): Promise<CliResult> {
 }
 
 async function createProject(args: string[]): Promise<CliResult> {
-  const parsed = parseCommand(args, ["repo", "test-command"]);
+  const parsed = parseCommand(args, ["repo"]);
   const name = parsed.positionals[0];
   if (name === undefined) {
     console.error("missing project name");

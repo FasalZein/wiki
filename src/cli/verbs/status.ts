@@ -1,16 +1,11 @@
-import { readdir, stat } from "node:fs/promises";
-import { join, relative } from "node:path";
-
 import { projectPath } from "../../artifacts/paths";
-import { ARTIFACT_FOLDERS } from "../../artifacts/registry";
+import { recentArtifacts, RECENT_LIMIT } from "../../artifacts/recent";
 import { listProjects, loadProjectConfig, ProjectConfigError, projectErrorMessage } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import { readLinkedProject } from "../repo-link";
 import { emitJson, jsonEnabled } from "../output";
 import type { CliResult } from "../dispatch";
 import { parseCommand, stringValue } from "../parse";
-
-const RECENT_LIMIT = 10;
 
 export async function handleStatus(args: string[]): Promise<CliResult> {
   const parsed = parseCommand(args, ["project"]);
@@ -36,7 +31,7 @@ export async function handleStatus(args: string[]): Promise<CliResult> {
     throw error;
   }
 
-  const recent = await recentArtifacts(vaultRoot, projPath);
+  const recent = (await recentArtifacts(vaultRoot, projPath)).slice(0, RECENT_LIMIT);
 
   if (jsonEnabled()) {
     emitJson({ project, recent: recent.map((r) => r.rel) });
@@ -53,27 +48,6 @@ export async function handleStatus(args: string[]): Promise<CliResult> {
     console.log(`  ${r.rel}`);
   }
   return { code: 0 };
-}
-
-/** The most-recently-modified artifact files across the project's kind folders. */
-async function recentArtifacts(vaultRoot: string, projectPath: string): Promise<{ rel: string; mtime: number }[]> {
-  const files: { rel: string; mtime: number }[] = [];
-  for (const folder of ARTIFACT_FOLDERS) {
-    const dir = join(projectPath, folder);
-    let entries;
-    try {
-      entries = await readdir(dir, { withFileTypes: true, recursive: true });
-    } catch {
-      continue;
-    }
-    for (const entry of entries) {
-      if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
-      const full = join(entry.parentPath, entry.name);
-      const stats = await stat(full);
-      files.push({ rel: relative(vaultRoot, full), mtime: stats.mtimeMs });
-    }
-  }
-  return files.sort((a, b) => b.mtime - a.mtime).slice(0, RECENT_LIMIT);
 }
 
 /** Vault-wide summary: list every project. */

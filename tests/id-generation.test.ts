@@ -4,9 +4,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { nextId } from "../src/artifacts/id";
+import { buildIdIndex } from "../src/artifacts/id-index";
 import { createArtifact } from "../src/artifacts/store";
 
 const tempPaths: string[] = [];
+
+// The exhaustion test can only force a deterministic collision on a case-INsensitive
+// FS (lowercase-prefix file the id scan misses but an exclusive write still hits).
+// Probe once at load so a case-sensitive FS reports a LOUD skip, not a silent pass.
+const probeDir = await mkdtemp(join(tmpdir(), "wiki-case-"));
+tempPaths.push(probeDir);
+await writeFile(join(probeDir, "caseprobe.md"), "x");
+const CASE_INSENSITIVE = await Bun.file(join(probeDir, "CASEPROBE.md")).exists();
 
 afterEach(async () => {
   await Promise.all(tempPaths.splice(0).map((path) => rm(path, { recursive: true, force: true })));
@@ -106,6 +115,39 @@ describe("nextId", () => {
 
     expect(await nextId("doc", vault, "test")).toBe("DOC-0010");
   });
+
+  test("counts a frontmatter id higher than any filename id", async () => {
+    const vault = await createVault("test");
+    const prds = join(vault, "projects", "test", "prds");
+    // A date-named file whose frontmatter id (PRD-0042) outranks every filename.
+    await writeFile(join(prds, "2026-06-26-some-prd.md"), "---\nid: PRD-0042\n---\nbody\n");
+    await writeFile(join(prds, "PRD-0007.md"), "---\nid: PRD-0007\n---\nbody\n");
+
+    expect(await nextId("prd", vault, "test")).toBe("PRD-0043");
+  });
+});
+
+describe("buildIdIndex", () => {
+  test("maps frontmatter id -> path and ignores id-less files", async () => {
+    const vault = await createVault("test");
+    const prds = join(vault, "projects", "test", "prds");
+    await writeFile(join(prds, "2026-06-26-named.md"), "---\nid: PRD-0042\n---\nbody\n");
+    await writeFile(join(prds, "no-id.md"), "---\ntitle: nope\n---\nbody\n");
+
+    const index = await buildIdIndex(vault, "test");
+    expect(index.get("PRD-0042")).toEqual([join(prds, "2026-06-26-named.md")]);
+    expect([...index.keys()]).toEqual(["PRD-0042"]);
+  });
+
+  test("records a duplicate id as multiple paths", async () => {
+    const vault = await createVault("test");
+    const prds = join(vault, "projects", "test", "prds");
+    await writeFile(join(prds, "a.md"), "---\nid: PRD-0001\n---\nbody\n");
+    await writeFile(join(prds, "b.md"), "---\nid: PRD-0001\n---\nbody\n");
+
+    const index = await buildIdIndex(vault, "test");
+    expect(index.get("PRD-0001")?.length).toBe(2);
+  });
 });
 
 describe("createArtifact collision safety", () => {
@@ -124,5 +166,24 @@ describe("createArtifact collision safety", () => {
     expect(a.id).not.toBe(b.id);
     expect(await Bun.file(a.path).exists()).toBe(true);
     expect(await Bun.file(b.path).exists()).toBe(true);
+  });
+
+  test.skipIf(!CASE_INSENSITIVE)("throws after exhausting MAX_ATTEMPTS when every recomputed id keeps colliding", async () => {
+    const vault = await createVault("test");
+    const prds = join(vault, "projects", "test", "prds");
+    // Pre-create the allocator's target path with a name the filename scan and id
+    // index both MISS (lowercase prefix, no frontmatter id), so nextId always returns
+    // PRD-0001. The allocator slugs "Collide" -> "collide"; on a case-insensitive FS
+    // the exclusive ('wx') write to PRD-0001-collide.md collides with this every
+    // attempt, so the bounded retry loop exhausts and throws.
+    await writeFile(join(prds, "prd-0001-collide.md"), "x");
+    await expect(
+      createArtifact({
+        type: "prd",
+        vaultRoot: vault,
+        project: "test",
+        fields: { title: "Collide", summary: "A populated summary here." },
+      }),
+    ).rejects.toThrow();
   });
 });

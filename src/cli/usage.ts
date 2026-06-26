@@ -84,14 +84,14 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
     subverbs: {
       retitle: {
         summary: "Rename a doc's title and re-slug its filename (stays in its category).",
-        usage: "wiki doc retitle <DOC-NNNN> --project <name> --title <new title>",
-        flags: { "--project": "project name (required)", "--title": "new title (required)" },
+        usage: "wiki doc retitle <DOC-NNNN> --project <name> --title <new title> [--json]",
+        flags: { "--project": "project name (required)", "--title": "new title (required)", "--json": "emit {id,path} to stdout" },
         example: 'wiki doc retitle DOC-0001 --project myproj --title "Clearer title"',
       },
       recategorize: {
         summary: "Move a doc into another locked category subfolder.",
-        usage: "wiki doc recategorize <DOC-NNNN> --project <name> --category <category>",
-        flags: { "--project": "project name (required)", "--category": "architecture|research|runbooks|specs|notes|legacy" },
+        usage: "wiki doc recategorize <DOC-NNNN> --project <name> --category <category> [--json]",
+        flags: { "--project": "project name (required)", "--category": "architecture|research|runbooks|specs|notes|legacy", "--json": "emit {id,path} to stdout" },
         example: "wiki doc recategorize DOC-0001 --project myproj --category runbooks",
       },
     },
@@ -104,13 +104,23 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
   },
   search: {
     summary: "Search artifacts by keyword. Vault-wide with no --project.",
-    usage: "wiki search <query> [--project <name>] [--type <type>] [--include-research]",
-    flags: { "--project": "narrow to one project (optional; default: all projects)", "--type": "filter by artifact type", "--include-research": "include research collection" },
+    usage: "wiki search <query> [--project <name>] [--type <type>] [--recent] [--since <date>] [--include-research] [--explain] [--no-refresh] [--json]",
+    flags: {
+      "--project": "narrow to one project (optional; default: all projects)",
+      "--type": "filter by artifact type",
+      "--recent": "order by last-modified (newest first) instead of relevance; a temporal query (e.g. 'what changed recently') triggers this too",
+      "--since": "only artifacts modified at/after this date (e.g. 2026-06-01); implies --recent ordering",
+      "--include-research": "include research collection",
+      "--explain": "include qmd's match explanation",
+      "--no-refresh": "skip the pre-query incremental embed",
+      "--json": "emit a JSON array of {id,kind,title,path,score,snippet} hits ([] when empty)",
+    },
     example: 'wiki search "rate limiting"',
   },
   validate: {
-    summary: "Validate a single artifact file against its template schema.",
-    usage: "wiki validate <file>",
+    summary: "Validate a single artifact file against its template schema and required body sections.",
+    usage: "wiki validate <file> [--json]",
+    flags: { "--json": "emit {ok,type,errors:[{field,reason,expected}]} to stdout" },
     example: "wiki validate projects/myproj/adrs/ADR-0001-foo.md",
   },
   "next-id": {
@@ -120,13 +130,16 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
     example: "wiki next-id slice --project myproj",
   },
   set: {
-    summary: "Set a field on an existing artifact (schema-validated). Type is inferred from the id.",
-    usage: "wiki set <id> <field> <value...> [--project <name>] [--json]",
+    summary: "Set a field on an existing artifact (schema-validated). Type is inferred from the id. Bare set replaces; --add/--remove/--clear edit list/link_list fields additively.",
+    usage: "wiki set <id> <field> <value...> | --add <v> | --remove <v> | --clear [--project <name>] [--json]",
     flags: {
       "--project": "project name (required if the repo isn't linked)",
+      "--add": "append a value to a list/link_list field without overwriting the rest (repeatable)",
+      "--remove": "drop a value from a list/link_list field (repeatable)",
+      "--clear": "empty a list/link_list field",
       "--json": "emit {id,field,value} to stdout; {error,...} to stderr on failure",
     },
-    example: "wiki set SLICE-0032 status green",
+    example: "wiki set SLICE-0032 blocked_by --add SLICE-0031",
   },
   block: {
     summary: "Set an artifact's blocked_by list; bare ids are auto-wrapped as [[..]] (no comma corruption).",
@@ -157,6 +170,35 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
     },
     example: "wiki path SLICE-0032",
   },
+  links: {
+    summary: "Show an artifact's outbound links and inbound backlinks (pure vault read, no qmd).",
+    usage: "wiki links <id> [--project <name>] [--json]",
+    flags: {
+      "--project": "project name (required if the repo isn't linked)",
+      "--json": "emit {id,outbound,inbound} to stdout",
+    },
+    example: "wiki links SLICE-0032",
+  },
+  retitle: {
+    summary: "Change an artifact's title and re-slug its filename for any kind; the id (and [[id]] links) survive.",
+    usage: "wiki retitle <id> --title <title> [--project <name>] [--json]",
+    flags: {
+      "--project": "project name (required if the repo isn't linked)",
+      "--title": "new title (required)",
+      "--json": "emit {id,title,path} to stdout",
+    },
+    example: 'wiki retitle SLICE-0032 --title "A clearer title"',
+  },
+  delete: {
+    summary: "Remove an artifact file; refuses if other artifacts link to it unless --force. Run wiki sync to drop it from search.",
+    usage: "wiki delete <id> [--force] [--project <name>] [--json]",
+    flags: {
+      "--project": "project name (required if the repo isn't linked)",
+      "--force": "delete even when inbound references exist",
+      "--json": "emit {id,deleted,inbound} to stdout",
+    },
+    example: "wiki delete SLICE-0032",
+  },
   schema: {
     summary: "List an artifact type's fields, types, required flags, and enum values.",
     usage: "wiki schema <prd|slice|decision|doc|handoff> [--json]",
@@ -164,12 +206,13 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
     example: "wiki schema slice",
   },
   doctor: {
-    summary: "Check vault health (docs-structure and repo-binding drift).",
-    usage: "wiki doctor",
-    example: "wiki doctor",
+    summary: "Check vault health (docs-structure and repo-binding drift). --setup checks distribution health (binary freshness, skill-bundle presence, hook install state).",
+    usage: "wiki doctor [--setup]",
+    flags: { "--setup": "check distribution health instead of vault drift (binary freshness, skill bundle, hook wiring)" },
+    example: "wiki doctor --setup",
   },
   fmt: {
-    summary: "Format vault artifacts. Default mode is check: report format drift and exit 1 if any; --write applies the mechanical fixes idempotently.",
+    summary: "Format vault artifacts. Default mode is check: report format drift and exit 1 if any; --write applies the mechanical fixes idempotently (dates, frontmatter order, legacy-id renumber, and renaming files to <ID>-<slug>.md when id/slug drift from the filename — id preserved so links survive).",
     usage: "wiki fmt [--project <name>] [--write]",
     flags: {
       "--project": "project name (required if the repo isn't linked)",
@@ -199,9 +242,10 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
         example: "wiki vault init ~/Knowledge",
       },
       doctor: {
-        summary: "Report docs-structure and repo-binding drift.",
-        usage: "wiki vault doctor",
-        example: "wiki vault doctor",
+        summary: "Report docs-structure and repo-binding drift. --setup reports distribution health (binary freshness, skill-bundle presence, hook install state).",
+        usage: "wiki vault doctor [--setup]",
+        flags: { "--setup": "check distribution health instead of vault drift" },
+        example: "wiki vault doctor --setup",
       },
     },
   },
@@ -236,17 +280,36 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
   },
   hooks: {
     summary: "Install per-runtime hooks that remind the agent to persist a skill's output to the vault.",
-    usage: "wiki hooks <install|run>",
+    usage: "wiki hooks <install|uninstall|list|status|run>",
     example: "wiki hooks install --runtime claude-code --global",
     subverbs: {
       install: {
-        summary: "Write the skill→artifact hook into a runtime's native config (merges, never clobbers).",
+        summary: "Write the skill→artifact hook plus a session-end persist reminder into a runtime's native config (merges, never clobbers).",
         usage: "wiki hooks install --runtime <claude-code|codex|pi> [--global]",
         flags: {
           "--runtime": "claude-code, codex, or pi",
           "--global": "write to the user-level config (~/...) instead of the current repo",
         },
         example: "wiki hooks install --runtime claude-code --global",
+      },
+      uninstall: {
+        summary: "Splice out only the wiki hook entries (command === 'wiki hooks run'), leaving unrelated hooks/keys intact.",
+        usage: "wiki hooks uninstall --runtime <claude-code|codex|pi> [--global]",
+        flags: {
+          "--runtime": "claude-code, codex, or pi",
+          "--global": "target the user-level config (~/...) instead of the current repo",
+        },
+        example: "wiki hooks uninstall --runtime claude-code --global",
+      },
+      list: {
+        summary: "List each runtime/scope and whether the wiki hook is wired.",
+        usage: "wiki hooks list",
+        example: "wiki hooks list",
+      },
+      status: {
+        summary: "Report which runtimes/scopes have the wiki hook wired.",
+        usage: "wiki hooks status",
+        example: "wiki hooks status",
       },
       run: {
         summary: "Hook callback: reads a runtime's hook payload on stdin, emits guidance on stdout. Invoked by the installed config, not by hand.",
@@ -305,6 +368,9 @@ export function renderVerbList(): string {
   for (const verb of VERB_NAMES) {
     lines.push(`  ${verb.padEnd(width)}  ${USAGE_REGISTRY[verb]?.summary ?? ""}`);
   }
+  lines.push("");
+  lines.push("A value that starts with '-' (e.g. a title) is read as a flag. Pass it as");
+  lines.push("--flag=value (e.g. --title=-foo) or after a '--' escape so it parses as a value.");
   return lines.join("\n");
 }
 

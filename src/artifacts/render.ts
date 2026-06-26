@@ -2,6 +2,7 @@ import matter from "gray-matter";
 
 import { normalizeInlineMaps } from "../schema/load";
 import type { NormalizedRecord, Schema } from "../schema/types";
+import { isRecord } from "../util";
 
 export function renderArtifact(
   template: string,
@@ -123,8 +124,4 @@ function readTemplateDefaults(template: string): Record<string, unknown> {
     }
   }
   return defaults;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

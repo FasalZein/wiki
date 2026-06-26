@@ -12,7 +12,7 @@ const repoRoot = import.meta.dir.replace(/\/tests$/, "");
 async function runWiki(
   args: string[],
   opts: { stdin?: string; home?: string; cwd?: string } = {},
-): Promise<{ exitCode: number; stdout: string }> {
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const proc = Bun.spawn(["bun", join(repoRoot, "src", "cli.ts"), ...args], {
     cwd: opts.cwd ?? repoRoot,
     env: { ...process.env, ...(opts.home === undefined ? {} : { HOME: opts.home }) },
@@ -24,8 +24,12 @@ async function runWiki(
     proc.stdin.write(opts.stdin);
     proc.stdin.end();
   }
-  const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-  return { exitCode, stdout };
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  return { exitCode, stdout, stderr };
 }
 
 afterEach(async () => {
@@ -75,6 +79,15 @@ describe("wiki hooks run (callback)", () => {
     });
     expect(stdout).toBe("{}");
   });
+
+  test("a Stop/SessionEnd event injects a stateless blanket persist reminder", async () => {
+    const { stdout } = await runWiki(["hooks", "run"], {
+      stdin: JSON.stringify({ hook_event_name: "Stop" }),
+    });
+    const out = JSON.parse(stdout);
+    expect(out.hookSpecificOutput.hookEventName).toBe("Stop");
+    expect(out.hookSpecificOutput.additionalContext).toContain("wiki create");
+  });
 });
 
 describe("wiki hooks install", () => {
@@ -90,9 +103,118 @@ describe("wiki hooks install", () => {
     expect(first.hooks.PreToolUse[0].matcher).toBe("Skill");
     expect(first.hooks.PreToolUse[0].hooks[0].command).toBe("wiki hooks run");
 
+    // a Stop entry is written alongside the skill entry
+    expect(first.hooks.Stop[0].hooks[0].command).toBe("wiki hooks run");
+
     // re-run must not append a duplicate entry
     await runWiki(["hooks", "install", "--runtime", "claude-code", "--global"], { home });
     const second = JSON.parse(await readFile(settings, "utf8"));
     expect(second.hooks.PreToolUse).toHaveLength(1);
+    expect(second.hooks.Stop).toHaveLength(1);
+  });
+
+  test("a Stop entry is written per runtime", async () => {
+    for (const [runtime, file] of [
+      ["claude-code", ".claude/settings.json"],
+      ["codex", ".codex/hooks.json"],
+      ["pi", ".pi/agent/settings.json"],
+    ] as const) {
+      const home = await mkdtemp(join(tmpdir(), "wiki-home-"));
+      tempPaths.push(home);
+      await runWiki(["hooks", "install", "--runtime", runtime, "--global"], { home });
+      const config = JSON.parse(await readFile(join(home, file), "utf8"));
+      const stopEvent = runtime === "claude-code" ? "Stop" : "SessionEnd";
+      const wired = (config.hooks[stopEvent] as { hooks?: { command?: string }[] }[]).some((e) =>
+        e.hooks?.some((h) => h.command === "wiki hooks run"),
+      );
+      expect(wired).toBe(true);
+    }
+  });
+});
+
+describe("wiki hooks install (pi bridge detection)", () => {
+  test("warns loudly and names @hsingjui/pi-hooks when the bridge is absent from pi packages[]", async () => {
+    const home = await mkdtemp(join(tmpdir(), "wiki-home-"));
+    tempPaths.push(home);
+    const { stderr } = await runWiki(["hooks", "install", "--runtime", "pi", "--global"], { home });
+    expect(stderr).toContain("@hsingjui/pi-hooks");
+    // disambiguation against the unscoped / forked lookalikes
+    expect(stderr.toLowerCase()).toContain("lookalike");
+  });
+
+  test("a lookalike pi-hooks in packages[] does NOT satisfy the bridge check", async () => {
+    const home = await mkdtemp(join(tmpdir(), "wiki-home-"));
+    tempPaths.push(home);
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(join(home, ".pi", "agent"), { recursive: true });
+    await writeFile(
+      join(home, ".pi", "agent", "settings.json"),
+      JSON.stringify({ packages: ["git:github.com/prateekmedia/pi-hooks"] }),
+    );
+    const { stderr } = await runWiki(["hooks", "install", "--runtime", "pi", "--global"], { home });
+    expect(stderr).toContain("@hsingjui/pi-hooks");
+  });
+
+  test("no warning when @hsingjui/pi-hooks is enabled (string or object source)", async () => {
+    const home = await mkdtemp(join(tmpdir(), "wiki-home-"));
+    tempPaths.push(home);
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(join(home, ".pi", "agent"), { recursive: true });
+    await writeFile(
+      join(home, ".pi", "agent", "settings.json"),
+      JSON.stringify({ packages: [{ source: "npm:@hsingjui/pi-hooks" }] }),
+    );
+    const { stderr } = await runWiki(["hooks", "install", "--runtime", "pi", "--global"], { home });
+    expect(stderr).not.toContain("bridge missing");
+  });
+});
+
+describe("wiki hooks uninstall", () => {
+  test("splices out only the wiki entry, leaving unrelated hooks/keys intact", async () => {
+    const home = await mkdtemp(join(tmpdir(), "wiki-home-"));
+    tempPaths.push(home);
+    const settings = join(home, ".claude", "settings.json");
+    // pre-existing unrelated config that must survive install + uninstall
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(join(home, ".claude"), { recursive: true });
+    await writeFile(
+      settings,
+      JSON.stringify({
+        model: "opus",
+        hooks: {
+          PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "other-tool" }] }],
+        },
+      }),
+    );
+
+    await runWiki(["hooks", "install", "--runtime", "claude-code", "--global"], { home });
+    await runWiki(["hooks", "uninstall", "--runtime", "claude-code", "--global"], { home });
+
+    const after = JSON.parse(await readFile(settings, "utf8"));
+    expect(after.model).toBe("opus");
+    // the unrelated Bash hook survives
+    expect(after.hooks.PreToolUse).toHaveLength(1);
+    expect(after.hooks.PreToolUse[0].hooks[0].command).toBe("other-tool");
+    // no wiki entry remains anywhere
+    const json = JSON.stringify(after);
+    expect(json).not.toContain("wiki hooks run");
+  });
+});
+
+describe("wiki hooks list / status", () => {
+  test("report the wired state after install", async () => {
+    const home = await mkdtemp(join(tmpdir(), "wiki-home-"));
+    tempPaths.push(home);
+    await runWiki(["hooks", "install", "--runtime", "claude-code", "--global"], { home });
+
+    const status = await runWiki(["hooks", "status"], { home });
+    expect(status.exitCode).toBe(0);
+    expect(status.stdout).toContain("claude-code");
+    expect(status.stdout).toContain("wired");
+
+    const list = await runWiki(["hooks", "list"], { home });
+    expect(list.exitCode).toBe(0);
+    expect(list.stdout).toContain("claude-code");
+    expect(list.stdout).toContain("wired");
   });
 });

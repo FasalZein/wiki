@@ -56,6 +56,23 @@ describe("path containment", () => {
     const moved = await relocateArtifact({ type: "decision", vaultRoot, project: "wiki-v2", id: a.id, title: "Renamed" });
     expect(moved.id).toBe(a.id);
   });
+
+  test("resolves a date-named file by its frontmatter id", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    const datePath = join(vaultRoot, "projects", "wiki-v2", "slices", "2026-06-26-legacy-name.md");
+    await writeFile(datePath, "---\nid: SLICE-9001\ntitle: Legacy\n---\nBody here.\n");
+    const read = await readArtifact({ type: "slice", vaultRoot, project: "wiki-v2", id: "SLICE-9001" });
+    expect(read.id).toBe("SLICE-9001");
+    expect(read.path).toBe(datePath);
+  });
+
+  test("well-named file still resolves by filename glob (no regression)", async () => {
+    const vaultRoot = await createFixtureVault("wiki-v2");
+    const named = join(vaultRoot, "projects", "wiki-v2", "slices", "SLICE-9002-good-name.md");
+    await writeFile(named, "---\nid: SLICE-9002\ntitle: Good\n---\nBody.\n");
+    const read = await readArtifact({ type: "slice", vaultRoot, project: "wiki-v2", id: "SLICE-9002" });
+    expect(read.path).toBe(named);
+  });
 });
 
 function decisionFields(title = "Use SQLite"): Record<string, string> {

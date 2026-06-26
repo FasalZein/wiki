@@ -1,5 +1,13 @@
 import { parseArgs, type ParseArgsConfig } from "node:util";
 
+/** Thrown when argument parsing fails, with an actionable message (not node internals). */
+export class ParseError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ParseError";
+  }
+}
+
 export type ParsedValues = Record<string, string | boolean | string[] | undefined>;
 
 export type ParsedCommand = {
@@ -21,13 +29,28 @@ export function parseCommand(
   for (const flag of booleanFlags) {
     options[flag] = { type: "boolean" };
   }
-  const parsed = parseArgs({
-    args,
-    allowPositionals: true,
-    strict: true,
-    tokens: true,
-    options,
-  });
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args,
+      allowPositionals: true,
+      strict: true,
+      tokens: true,
+      options,
+    });
+  } catch (error) {
+    // parseArgs throws raw node-internals errors. The common one is a value that
+    // begins with a dash (a title/summary like "-foo"): surface an actionable
+    // message naming both fixes instead of the ERR_PARSE_ARGS_* wording.
+    const code = (error as { code?: string }).code;
+    if (code === "ERR_PARSE_ARGS_INVALID_OPTION_VALUE" || code === "ERR_PARSE_ARGS_UNKNOWN_OPTION") {
+      throw new ParseError(
+        "a value beginning with '-' is ambiguous. Use --flag=value (e.g. --title=-foo) or put the value after a '--' escape so it isn't read as a flag.",
+      );
+    }
+    if (error instanceof Error) throw new ParseError(error.message);
+    throw error;
+  }
   return {
     positionals: parsed.positionals.length > 0 ? parsed.positionals : trailingPositionals(parsed.tokens ?? []),
     values: normalizeValues(parsed.values),

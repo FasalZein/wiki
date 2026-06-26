@@ -11,6 +11,8 @@
  * This depends on that human-readable output shape ("name (qmd://name/)").
  */
 
+import { isRecord } from "../util";
+
 export type QmdResult = {
   path: string;
   score: string;
@@ -53,6 +55,18 @@ export async function ensureCollection(qmdCommand: string, name: string, path: s
 
 export async function updateCollection(qmdCommand: string, name: string, pull: boolean): Promise<void> {
   await runQmd(qmdCommand, pull ? ["update", "--pull", "-c", name] : ["update", "-c", name]);
+}
+
+/**
+ * Shared refresh-before-query step: run an incremental (non-pull) update for
+ * each already-ensured collection so a freshly written artifact is visible to
+ * the next query. Used by both `search` and the dedup gate so freshness cannot
+ * drift between the two query paths.
+ */
+export async function refreshCollections(qmdCommand: string, names: string[]): Promise<void> {
+  for (const name of names) {
+    await updateCollection(qmdCommand, name, false);
+  }
 }
 
 export async function embedCollection(qmdCommand: string, name: string, force: boolean): Promise<void> {
@@ -130,10 +144,6 @@ export function parseQmdResults(stdout: string): QmdResult[] {
       },
     ];
   });
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
 }
 
 function stringField(record: Record<string, unknown>, key: string): string | undefined {

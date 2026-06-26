@@ -162,6 +162,41 @@ describe("sync CLI", () => {
     expect(index.indexOf("## Backend")).toBeLessThan(index.indexOf("## General"));
   });
 
+  test("sync index.md emits an Unindexed (no id) trailer + disambiguates duplicate ids; re-run byte-identical (SLICE-0081)", async () => {
+    const fixture = await createSyncFixture("wiki-v2");
+    // two files sharing one id (duplicate-id drift)
+    await writeFile(
+      join(fixture.projectPath, "slices", "SLICE-0001-a.md"),
+      "---\nid: SLICE-0001\ntitle: First copy\nsummary: Copy A.\nstatus: planned\n---\nbody\n",
+    );
+    await writeFile(
+      join(fixture.projectPath, "slices", "SLICE-0001-b.md"),
+      "---\nid: SLICE-0001\ntitle: Second copy\nsummary: Copy B.\nstatus: planned\n---\nbody\n",
+    );
+    // an id-less file (skipped for lacking an id)
+    await writeFile(
+      join(fixture.projectPath, "slices", "loose-note.md"),
+      "---\ntitle: A loose note\n---\nbody\n",
+    );
+
+    expect((await runWiki(["sync", "--project", "wiki-v2"], fixture)).exitCode).toBe(0);
+
+    const indexPath = join(fixture.projectPath, "index.md");
+    const first = await readFile(indexPath, "utf8");
+    // Unindexed trailer lists the id-less file by path
+    expect(first).toContain("## Unindexed (no id)");
+    expect(first).toContain("slices/loose-note.md");
+    // duplicate id disambiguated inline by path so both copies are visible
+    expect(first).toContain("slices/SLICE-0001-a.md");
+    expect(first).toContain("slices/SLICE-0001-b.md");
+    expect(first).toContain("First copy");
+    expect(first).toContain("Second copy");
+
+    // re-run is byte-identical
+    expect((await runWiki(["sync", "--project", "wiki-v2"], fixture)).exitCode).toBe(0);
+    expect(await readFile(indexPath, "utf8")).toBe(first);
+  });
+
   test("sync exits 10 and surfaces qmd stderr when qmd fails", async () => {
     const fixture = await createSyncFixture("wiki-v2", { failUpdate: true });
 

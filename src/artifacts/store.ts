@@ -1,6 +1,6 @@
 import matter from "gray-matter";
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
-import { dirname, join, relative } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 
 import { loadTemplate, normalizeInlineMaps, resolveTemplatePath, type TemplateType } from "../schema/load";
 import { BodyParseError, parseBodySections } from "./body";
@@ -8,7 +8,9 @@ import { validate } from "../schema/validate";
 import type { NormalizedRecord, Schema, ValidationError } from "../schema/types";
 import { type DocCategory, isDocCategory } from "./registry";
 import { nextId } from "./id";
+import { buildIdIndex } from "./id-index";
 import { artifactDirectory, assertSafeSegment } from "./paths";
+import { isFileNotFound } from "../util";
 import { applyDefaults, orderBySchema, renderArtifact } from "./render";
 
 export type CreateArtifactInput = {
@@ -291,6 +293,14 @@ function artifactPath(type: TemplateType, vaultRoot: string, project: string, id
 async function resolveArtifactPath(type: TemplateType, vaultRoot: string, project: string, id: string): Promise<string> {
   assertSafeSegment(id, "artifact id");
   const directory = artifactDirectory(type, vaultRoot, project);
+
+  // Frontmatter id is the spine: resolve through the id index first so date-named
+  // and id-only files still reach repair verbs. Only accept a hit inside this
+  // type's directory so a shared id can't pull in another kind's file.
+  const indexed = (await buildIdIndex(vaultRoot, project)).get(id);
+  const inDir = indexed?.find((path) => path.startsWith(directory + sep) || dirname(path) === directory);
+  if (inDir !== undefined) return inDir;
+
   const exact = join(directory, `${id}.md`);
   try {
     await readFile(exact, "utf8");
@@ -338,7 +348,7 @@ function existingCategory(docsDirectory: string, currentPath: string): string | 
   return segments.length > 1 ? segments[0] : undefined;
 }
 
-function slugifyTitle(title: string): string {
+export function slugifyTitle(title: string): string {
   const slug = title
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -347,10 +357,6 @@ function slugifyTitle(title: string): string {
     .replace(/^-+|-+$/g, "")
     .replace(/-{2,}/g, "-");
   return slug.length > 0 ? slug.slice(0, 80).replace(/-+$/g, "") : "untitled";
-}
-
-function isFileNotFound(error: unknown): boolean {
-  return error instanceof Error && "code" in error && error.code === "ENOENT";
 }
 
 function isFileExists(error: unknown): boolean {

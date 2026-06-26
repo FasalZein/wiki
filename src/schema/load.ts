@@ -3,13 +3,14 @@ import matter from "gray-matter";
 import { resolve } from "node:path";
 
 import type { Constraints, FieldDef, FieldType, Schema } from "./types";
+import { isRecord } from "../util";
 
 export function resolveTemplatePath(filename: string): string {
-  // Try relative to source first (dev mode), then relative to dist (bundled)
+  // Dev mode: src/schema/ -> ../../templates. Bundled: dist/ -> ./templates
+  // (the build copies templates/ into dist/templates so a relocated dist works).
   const fromSrc = resolve(import.meta.dir, "..", "..", "templates", filename);
   if (existsSync(fromSrc)) return fromSrc;
-  const fromDist = resolve(import.meta.dir, "..", "templates", filename);
-  return fromDist;
+  return resolve(import.meta.dir, "templates", filename);
 }
 
 /**
@@ -32,7 +33,22 @@ const fieldTypes: ReadonlySet<string> = new Set<FieldType>([
   "file_ref",
 ]);
 
-export async function loadTemplate(type: TemplateType): Promise<Schema> {
+// Templates are immutable data shipped beside the binary (resolveTemplatePath
+// never reads the vault), so the parse is identical for a given kind across the
+// whole run — memoize it here so create/fmt/store/mutate/validate share one
+// parse instead of each re-reading the file. Replaces fmt's bespoke schemaCache.
+const templateCache = new Map<TemplateType, Promise<Schema>>();
+
+export function loadTemplate(type: TemplateType): Promise<Schema> {
+  let cached = templateCache.get(type);
+  if (cached === undefined) {
+    cached = parseTemplate(type);
+    templateCache.set(type, cached);
+  }
+  return cached;
+}
+
+async function parseTemplate(type: TemplateType): Promise<Schema> {
   const file = Bun.file(resolveTemplatePath(`${type}.md`));
   const parsed = matter(normalizeInlineMaps(await file.text()));
 
@@ -93,8 +109,4 @@ function isFieldType(value: unknown): value is FieldType {
 
 export function normalizeInlineMaps(template: string): string {
   return template.replace(/^(\s*[A-Za-z0-9_]+):(\s*\{)/gm, "$1: $2");
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

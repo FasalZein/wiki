@@ -8,15 +8,21 @@
  * exposes richer frontmatter, this can move into runQuery.
  */
 
-import { ensureCollection, QmdError, runQuery, updateCollection, type QmdResult } from "../../integrations/qmd";
+import matter from "gray-matter";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+
+import { ensureCollection, QmdError, refreshCollections, runQuery, type QmdResult } from "../../integrations/qmd";
 import { artifactFolder, projectPath } from "../../artifacts/paths";
-import { ARTIFACTS } from "../../artifacts/registry";
+import { ARTIFACTS, FOLDER_TO_TYPE } from "../../artifacts/registry";
+import { recentArtifacts, RECENT_LIMIT, type RecentArtifact } from "../../artifacts/recent";
 import { assertProjectStructure, listProjects, loadProjectConfig, type ProjectConfig, ProjectConfigError, projectErrorMessage } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import type { TemplateType } from "../../schema/load";
 import { classifyIntent } from "../../search/intent";
 import { buildStructuredQuery } from "../../search/query-builder";
 import { booleanValue, parseCommand, stringValue } from "../parse";
+import { emitJsonArray, jsonEnabled } from "../output";
 import type { CliResult } from "../dispatch";
 
 const allowedTypes: readonly TemplateType[] = Object.keys(ARTIFACTS) as TemplateType[];
@@ -27,7 +33,7 @@ const allowedTypes: readonly TemplateType[] = Object.keys(ARTIFACTS) as Template
 const TYPE_FILTER_FETCH = 50;
 
 export async function handleSearch(args: string[]): Promise<CliResult> {
-  const parsed = parseCommand(args, ["project", "type"], [], ["include-research", "explain", "no-refresh"]);
+  const parsed = parseCommand(args, ["project", "type", "since"], [], ["include-research", "explain", "no-refresh", "recent"]);
   const query = parsed.positionals[0]?.trim();
   if (query === undefined || query.length === 0) {
     console.error("missing required field: query");
@@ -41,6 +47,21 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
   }
   const explain = booleanValue(parsed.values, "explain");
   const noRefresh = booleanValue(parsed.values, "no-refresh");
+
+  // Recency path: --recent, --since, or a temporal query ("what changed recently")
+  // orders artifacts by mtime off disk — no qmd ranking. Reuses status's
+  // recent-artifacts list so "recent" means the same thing in both verbs.
+  const sinceRaw = stringValue(parsed.values, "since");
+  let since: number | undefined;
+  if (sinceRaw !== undefined) {
+    const parsedDate = new Date(sinceRaw).getTime();
+    if (Number.isNaN(parsedDate)) {
+      console.error(`invalid --since date: ${sinceRaw} (use e.g. 2026-06-01)`);
+      return { code: 1 };
+    }
+    since = parsedDate;
+  }
+  const recency = booleanValue(parsed.values, "recent") || since !== undefined || classifyIntent(query) === "temporal";
 
   const vaultRoot = await getVaultRoot();
 
@@ -64,6 +85,10 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
       throw error;
     }
     targetProjects = [project];
+  }
+
+  if (recency) {
+    return handleRecency(vaultRoot, targetProjects, { type, since });
   }
 
   try {
@@ -93,10 +118,15 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
       qmdCommand = resolved;
     }
 
+    // collection name -> base directory, so a qmd://<collection>/<rel> URI can be
+    // resolved back to a file on disk for frontmatter enrichment.
+    const collectionBases = new Map<string, string>();
     const collections: string[] = [];
     for (const [proj] of configs) {
-      await ensureCollection(qmdCommand, proj, projectPath(vaultRoot, proj));
+      const base = projectPath(vaultRoot, proj);
+      await ensureCollection(qmdCommand, proj, base);
       collections.push(proj);
+      collectionBases.set(proj, base);
     }
     if (booleanValue(parsed.values, "include-research")) {
       const researchPath = uniformConfigValue(configs.map(([proj, c]) => [proj, c.research_path] as const));
@@ -106,13 +136,13 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
       }
       await ensureCollection(qmdCommand, "research", researchPath);
       collections.push("research");
+      collectionBases.set("research", researchPath);
     }
 
-    // Auto-refresh collections before querying (unless --no-refresh)
+    // Auto-refresh collections before querying (unless --no-refresh), via the
+    // same shared helper the dedup gate uses so freshness cannot drift.
     if (!noRefresh) {
-      for (const collection of collections) {
-        await updateCollection(qmdCommand, collection, false);
-      }
+      await refreshCollections(qmdCommand, collections);
     }
 
     // Build structured query document instead of passing raw text
@@ -125,7 +155,7 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
       }),
       type,
     );
-    writeResults(results);
+    await writeResults(results, collectionBases);
     return { code: 0 };
   } catch (error) {
     if (error instanceof QmdError) {
@@ -184,13 +214,139 @@ function uriPath(path: string): string {
   }
 }
 
-function writeResults(results: QmdResult[]): void {
-  if (results.length === 0) {
-    return;
-  }
-  process.stdout.write(results.map(formatResult).join("\n") + "\n");
+type EnrichedHit = {
+  id: string;
+  kind: string;
+  title: string;
+  path: string;
+  score: string;
+  snippet: string;
+};
+
+async function writeResults(results: QmdResult[], collectionBases: Map<string, string>): Promise<void> {
+  // SLICE-0092: group hits one line per artifact (qmd returns multiple chunks of
+  // the same file) and enrich each with id/kind/title from frontmatter. --json
+  // emits the same shape as an array; empty prints a no-results line in human
+  // mode and a valid [] in json mode.
+  emitHits(await enrichHits(results, collectionBases));
 }
 
-function formatResult(result: QmdResult): string {
-  return `${result.path}\t${result.score}\t${result.snippet.replaceAll(/\s*\n\s*/g, " ").trim()}`;
+/** Shared terminal: same shape for the qmd path and the recency path. */
+function emitHits(hits: EnrichedHit[]): void {
+  if (jsonEnabled()) {
+    emitJsonArray(hits);
+    return;
+  }
+  if (hits.length === 0) {
+    process.stdout.write("no results\n");
+    return;
+  }
+  process.stdout.write(hits.map(formatHit).join("\n") + "\n");
+}
+
+/**
+ * SLICE-0093: the temporal/recency path. Orders artifacts by mtime off disk
+ * (reusing status's recentArtifacts) instead of qmd ranking; --since filters to
+ * files modified at/after a date; --type narrows to one kind. Score is blank —
+ * there is no relevance score, only recency.
+ */
+async function handleRecency(
+  vaultRoot: string,
+  targetProjects: string[],
+  opts: { type: TemplateType | undefined; since: number | undefined },
+): Promise<CliResult> {
+  let artifacts: RecentArtifact[] = [];
+  for (const proj of targetProjects) {
+    artifacts.push(...(await recentArtifacts(vaultRoot, projectPath(vaultRoot, proj))));
+  }
+  artifacts.sort((a, b) => b.mtime - a.mtime);
+  if (opts.since !== undefined) {
+    const since = opts.since;
+    artifacts = artifacts.filter((a) => a.mtime >= since);
+  }
+  if (opts.type !== undefined) {
+    // rel is projects/<proj>/<folder>/...; match the folder segment exactly so a
+    // kind name appearing elsewhere in the path can't pull in the wrong artifacts.
+    const folder = artifactFolder(opts.type);
+    artifacts = artifacts.filter((a) => a.rel.split(/[\\/]/).includes(folder));
+  }
+  const hits: EnrichedHit[] = [];
+  for (const artifact of artifacts.slice(0, RECENT_LIMIT)) {
+    hits.push(await recencyHit(artifact.full, artifact.rel));
+  }
+  emitHits(hits);
+  return { code: 0 };
+}
+
+/** Build an EnrichedHit for a recency result: id/kind/title from frontmatter (or
+ *  filename/folder fallback), blank score and snippet (recency carries neither). */
+async function recencyHit(filePath: string, rel: string): Promise<EnrichedHit> {
+  const { id, kind, title } = await readMeta(rel, filePath);
+  return { id, kind, title, path: filePath, score: "", snippet: "" };
+}
+
+/** Collapse per-file chunks to one hit each (highest-ranked wins; qmd ranks desc)
+ *  and enrich with id/kind/title read from the resolved file's frontmatter. */
+async function enrichHits(results: QmdResult[], collectionBases: Map<string, string>): Promise<EnrichedHit[]> {
+  const seen = new Set<string>();
+  const hits: EnrichedHit[] = [];
+  for (const result of results) {
+    const filePath = resolveFilePath(result.path, collectionBases);
+    const dedupKey = filePath ?? result.path;
+    if (seen.has(dedupKey)) continue;
+    seen.add(dedupKey);
+    const { id, kind, title } = await readMeta(result.path, filePath);
+    hits.push({
+      id,
+      kind,
+      title,
+      path: result.path,
+      score: result.score,
+      snippet: result.snippet.replaceAll(/\s*\n\s*/g, " ").trim(),
+    });
+  }
+  return hits;
+}
+
+/** Map a qmd://<collection>/<rel> URI (or a raw filesystem path) to a file on
+ *  disk; null when the collection is unknown. */
+function resolveFilePath(path: string, collectionBases: Map<string, string>): string | null {
+  if (path.startsWith("qmd://")) {
+    const rest = path.slice("qmd://".length);
+    const slash = rest.indexOf("/");
+    if (slash === -1) return null;
+    const collection = rest.slice(0, slash);
+    const rel = rest.slice(slash + 1);
+    const base = collectionBases.get(collection);
+    return base === undefined ? null : join(base, rel);
+  }
+  return path; // already a filesystem path
+}
+
+/** id/kind/title from frontmatter when the file is readable, else a filename/
+ *  folder fallback (id from the basename stem, kind from the parent folder). */
+async function readMeta(uri: string, filePath: string | null): Promise<{ id: string; kind: string; title: string }> {
+  const segments = uriPath(uri).split(/[\\/]/).filter((s) => s.length > 0);
+  const fileName = segments[segments.length - 1] ?? "";
+  const folder = segments[segments.length - 2] ?? "";
+  const kind = FOLDER_TO_TYPE[folder] ?? folder;
+  // Filename is ID-slug.md where ID is PREFIX-NNNN; fall back to that id shape,
+  // else the whole basename stem.
+  const stem = fileName.replace(/\.md$/, "");
+  let id = /^[A-Za-z]+-\d+/.exec(stem)?.[0] ?? stem;
+  let title = "";
+  if (filePath !== null) {
+    try {
+      const data = matter(await readFile(filePath, "utf8")).data;
+      if (typeof data.id === "string" && data.id.length > 0) id = data.id;
+      if (typeof data.title === "string") title = data.title;
+    } catch {
+      // file not on disk (e.g. stale index) — keep the filename/folder fallback
+    }
+  }
+  return { id, kind, title };
+}
+
+function formatHit(hit: EnrichedHit): string {
+  return `${hit.id}\t${hit.kind}\t${hit.title}\t${hit.score}\t${hit.snippet}`;
 }

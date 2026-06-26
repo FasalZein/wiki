@@ -10,6 +10,21 @@ afterEach(async () => {
 });
 
 describe("advisory dedup", () => {
+  test("dedup refreshes the collection before querying so a freshly created artifact is visible (SLICE-0089)", async () => {
+    const fixture = await createDedupFixture("wiki-v2");
+
+    const result = await runWiki(decisionArgs(), fixture);
+
+    expect(result.exitCode).toBe(0);
+    const state = await readFile(fixture.stateFile, "utf8");
+    const lines = state.split("\n").filter((l) => l.length > 0);
+    const updateIdx = lines.findIndex((l) => l.startsWith("update ") && l.includes("-c wiki-v2"));
+    const queryIdx = lines.findIndex((l) => l.startsWith("query "));
+    expect(updateIdx).toBeGreaterThanOrEqual(0);
+    expect(queryIdx).toBeGreaterThanOrEqual(0);
+    expect(updateIdx).toBeLessThan(queryIdx);
+  });
+
   test("decision create proceeds when QMD returns no high-score match", async () => {
     const fixture = await createDedupFixture("wiki-v2");
 
@@ -17,9 +32,20 @@ describe("advisory dedup", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("ADR-0001\n");
-    expect(await readFile(fixture.stateFile, "utf8")).toContain(
-      "query Use SQLite Need a durable local index. Use SQLite for local persistence. Keep migrations small and explicit. --json --collection wiki-v2\n",
-    );
+  });
+
+  test("dedup routes its query through buildStructuredQuery, not a raw concatenated body (SLICE-0090)", async () => {
+    const fixture = await createDedupFixture("wiki-v2");
+
+    const result = await runWiki(decisionArgs(), fixture);
+
+    expect(result.exitCode).toBe(0);
+    const state = await readFile(fixture.stateFile, "utf8");
+    const queryLine = state.split("\n").find((l) => l.startsWith("query "))!;
+    // Structured-query document: same intent/lex/vec lines search builds.
+    expect(queryLine).toBe("query intent: Answer a question about project wiki-v2.");
+    expect(state).toContain("\nlex: Use SQLite Need a durable local index. Use SQLite for local persistence. Keep migrations small and explicit.");
+    expect(state).toContain("\nvec: Use SQLite Need a durable local index. Use SQLite for local persistence. Keep migrations small and explicit. --json --collection wiki-v2");
   });
 
   test("create no longer nags to run wiki sync (SLICE-0064: lean delivery loop)", async () => {
@@ -295,6 +321,9 @@ case "\${1:-}" in
         echo "$3" >> "$REGISTERED_FILE"
         ;;
     esac
+    ;;
+  update)
+    : # refresh is a no-op in the fixture; the call is logged above
     ;;
   query)
     cat "$RESULTS_FILE"

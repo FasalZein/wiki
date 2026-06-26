@@ -3,6 +3,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 import { ARTIFACT_FOLDERS } from "../artifacts/registry";
+import { expandHome, isFileNotFound } from "../util";
 
 export type ProjectConfig = {
   repo: string;
@@ -106,26 +107,4 @@ function isNonEmptyString(value: unknown): value is string {
 
 function numberValue(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
-}
-
-function expandHome(path: string): string {
-  if (path === "~") {
-    return homeDirectory();
-  }
-  if (path.startsWith("~/")) {
-    return `${homeDirectory()}${path.slice(1)}`;
-  }
-  return path;
-}
-
-function homeDirectory(): string {
-  const home = process.env.HOME;
-  if (home === undefined || home.length === 0) {
-    throw new Error("HOME is not set");
-  }
-  return home;
-}
-
-function isFileNotFound(error: unknown): boolean {
-  return error instanceof Error && "code" in error && error.code === "ENOENT";
 }

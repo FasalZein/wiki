@@ -43,6 +43,53 @@ describe("mutation verbs", () => {
     expect(await readSlice(f, slice)).toContain("tdd_exempt: true");
   });
 
+  test("wiki set --add appends to a link_list without destroying prior items (wraps [[id]])", async () => {
+    const f = await fixture();
+    const slice = await seedSlice(f);
+    expect((await runWiki(["block", slice, "--on", "SLICE-0030", "--project", "wiki-v2"], f)).exitCode).toBe(0);
+
+    const result = await runWiki(["set", slice, "blocked_by", "--add", "SLICE-0031", "--project", "wiki-v2", "--json"], f);
+
+    expect(result.exitCode).toBe(0);
+    const body = await readSlice(f, slice);
+    expect(body).toContain("[[SLICE-0030]]"); // prior item survived
+    expect(body).toContain("[[SLICE-0031]]"); // new item written as a wikilink
+  });
+
+  test("wiki set --remove drops one link_list item and leaves the rest", async () => {
+    const f = await fixture();
+    const slice = await seedSlice(f);
+    expect((await runWiki(["block", slice, "--on", "SLICE-0030", "--on", "SLICE-0031", "--project", "wiki-v2"], f)).exitCode).toBe(0);
+
+    const result = await runWiki(["set", slice, "blocked_by", "--remove", "SLICE-0030", "--project", "wiki-v2"], f);
+
+    expect(result.exitCode).toBe(0);
+    const body = await readSlice(f, slice);
+    expect(body).not.toContain("[[SLICE-0030]]");
+    expect(body).toContain("[[SLICE-0031]]");
+  });
+
+  test("wiki set --clear empties a list field", async () => {
+    const f = await fixture();
+    const slice = await seedSlice(f);
+    expect((await runWiki(["block", slice, "--on", "SLICE-0030", "--project", "wiki-v2"], f)).exitCode).toBe(0);
+
+    const result = await runWiki(["set", slice, "blocked_by", "--clear", "--project", "wiki-v2"], f);
+
+    expect(result.exitCode).toBe(0);
+    expect(await readSlice(f, slice)).not.toContain("[[SLICE-0030]]");
+  });
+
+  test("wiki set --add rejects a non-list field", async () => {
+    const f = await fixture();
+    const slice = await seedSlice(f);
+
+    const result = await runWiki(["set", slice, "status", "--add", "blocked", "--project", "wiki-v2", "--json"], f);
+
+    expect(result.exitCode).not.toBe(0);
+    expect(JSON.parse(result.stderr).error).toContain("list");
+  });
+
   test("wiki block wraps bare ids as wikilinks with no comma corruption", async () => {
     const f = await fixture();
     const slice = await seedSlice(f);
@@ -89,6 +136,67 @@ describe("mutation verbs", () => {
     expect(JSON.parse(result.stdout).path).toContain(`${slice}-`);
   });
 
+  test("wiki retitle changes a non-doc artifact's title/slug, preserving id and links", async () => {
+    const f = await fixture();
+    const slice = await seedSlice(f);
+
+    const result = await runWiki(["retitle", slice, "--title", "A brand new title", "--project", "wiki-v2", "--json"], f);
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout).id).toBe(slice); // id preserved
+    const files = await readdir(join(f.projectPath, "slices"));
+    // re-slugged filename keeps the id prefix
+    expect(files.some((file) => file.startsWith(`${slice}-`) && file.includes("brand-new-title"))).toBe(true);
+    expect(await readSlice(f, slice)).toContain("title: A brand new title");
+  });
+
+  test("wiki delete refuses when an inbound reference exists and lists the referrers", async () => {
+    const f = await fixture();
+    const target = await seedSlice(f);
+    const referrer = await seedSlice(f);
+    // make `referrer` point at `target`
+    expect((await runWiki(["block", referrer, "--on", target, "--project", "wiki-v2"], f)).exitCode).toBe(0);
+
+    const result = await runWiki(["delete", target, "--project", "wiki-v2", "--json"], f);
+
+    expect(result.exitCode).not.toBe(0);
+    const err = JSON.parse(result.stderr);
+    expect(err.error).toContain("inbound");
+    expect(err.inbound).toContain(referrer);
+    // file still present
+    const files = await readdir(join(f.projectPath, "slices"));
+    expect(files.some((file) => file.startsWith(`${target}-`))).toBe(true);
+  });
+
+  test("wiki delete --force removes an artifact despite inbound references", async () => {
+    const f = await fixture();
+    const target = await seedSlice(f);
+    const referrer = await seedSlice(f);
+    expect((await runWiki(["block", referrer, "--on", target, "--project", "wiki-v2"], f)).exitCode).toBe(0);
+
+    const result = await runWiki(["delete", target, "--force", "--project", "wiki-v2", "--json"], f);
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout).id).toBe(target);
+    const files = await readdir(join(f.projectPath, "slices"));
+    expect(files.some((file) => file.startsWith(`${target}-`))).toBe(false);
+  });
+
+  test("wiki delete removes an unreferenced artifact without --force", async () => {
+    const f = await fixture();
+    // a standalone slice nothing links to (seedSlice's parent-PRD backlink would count as inbound)
+    await writeFile(
+      join(f.projectPath, "slices", "SLICE-0099.md"),
+      "---\nid: SLICE-0099\ntitle: Lonely slice\nsummary: No links.\nstatus: planned\n---\nbody\n",
+    );
+
+    const result = await runWiki(["delete", "SLICE-0099", "--project", "wiki-v2", "--json"], f);
+
+    expect(result.exitCode).toBe(0);
+    const files = await readdir(join(f.projectPath, "slices"));
+    expect(files.some((file) => file.startsWith("SLICE-0099"))).toBe(false);
+  });
+
   test("wiki schema slice lists the enum including superseded (--json)", async () => {
     const f = await fixture();
 
@@ -97,6 +205,47 @@ describe("mutation verbs", () => {
     expect(result.exitCode).toBe(0);
     const status = JSON.parse(result.stdout).fields.find((field: { name: string }) => field.name === "status");
     expect(status.values).toContain("superseded");
+  });
+
+  test("wiki set accepts a kebab-case field name for a snake_case schema field (SLICE-0088)", async () => {
+    const f = await fixture();
+    const slice = await seedSlice(f);
+
+    const result = await runWiki(["set", slice, "parent-prd", "PRD-0001", "--project", "wiki-v2"], f);
+
+    expect(result.exitCode).toBe(0);
+    expect(await readSlice(f, slice)).toContain("parent_prd: PRD-0001");
+  });
+
+  test("wiki set human-mode enum error lists the expected set (SLICE-0088)", async () => {
+    const f = await fixture();
+    const slice = await seedSlice(f);
+
+    const result = await runWiki(["set", slice, "status", "nope", "--project", "wiki-v2"], f);
+
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain("one of:");
+    expect(result.stderr).toContain("planned");
+  });
+
+  test("wiki create accepts a snake_case flag name for a kebab CLI flag (SLICE-0088)", async () => {
+    const f = await fixture();
+    if ((await readdir(join(f.projectPath, "prds"))).length === 0) {
+      await runWiki(["create", "prd", "--title", "Parent PRD for casing test", "--summary", "Parent PRD.", "--project", "wiki-v2", "--force-new", "seeding a parent prd for the casing test"], f);
+    }
+    const result = await runWiki([
+      "create", "slice",
+      "--title", "Slice via snake_case flag",
+      "--summary", "Slice via snake_case flag.",
+      "--project", "wiki-v2",
+      "--parent_prd", "PRD-0001",
+      "--acceptance", "does the thing",
+      "--force-new", "seeding the snake_case casing slice for the test",
+    ], f);
+
+    expect(result.exitCode).toBe(0);
+    const id = result.stdout.trim();
+    expect(await readSlice(f, id)).toContain("parent_prd: PRD-0001");
   });
 });
 
