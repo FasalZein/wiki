@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { nextId } from "../src/artifacts/id";
+import { buildIdIndex } from "../src/artifacts/id-index";
 import { createArtifact } from "../src/artifacts/store";
 
 const tempPaths: string[] = [];
@@ -105,6 +106,39 @@ describe("nextId", () => {
     await writeFile(join(docs, "DOC-0002-flat.md"), "existing");
 
     expect(await nextId("doc", vault, "test")).toBe("DOC-0010");
+  });
+
+  test("counts a frontmatter id higher than any filename id", async () => {
+    const vault = await createVault("test");
+    const prds = join(vault, "projects", "test", "prds");
+    // A date-named file whose frontmatter id (PRD-0042) outranks every filename.
+    await writeFile(join(prds, "2026-06-26-some-prd.md"), "---\nid: PRD-0042\n---\nbody\n");
+    await writeFile(join(prds, "PRD-0007.md"), "---\nid: PRD-0007\n---\nbody\n");
+
+    expect(await nextId("prd", vault, "test")).toBe("PRD-0043");
+  });
+});
+
+describe("buildIdIndex", () => {
+  test("maps frontmatter id -> path and ignores id-less files", async () => {
+    const vault = await createVault("test");
+    const prds = join(vault, "projects", "test", "prds");
+    await writeFile(join(prds, "2026-06-26-named.md"), "---\nid: PRD-0042\n---\nbody\n");
+    await writeFile(join(prds, "no-id.md"), "---\ntitle: nope\n---\nbody\n");
+
+    const index = await buildIdIndex(vault, "test");
+    expect(index.get("PRD-0042")).toEqual([join(prds, "2026-06-26-named.md")]);
+    expect([...index.keys()]).toEqual(["PRD-0042"]);
+  });
+
+  test("records a duplicate id as multiple paths", async () => {
+    const vault = await createVault("test");
+    const prds = join(vault, "projects", "test", "prds");
+    await writeFile(join(prds, "a.md"), "---\nid: PRD-0001\n---\nbody\n");
+    await writeFile(join(prds, "b.md"), "---\nid: PRD-0001\n---\nbody\n");
+
+    const index = await buildIdIndex(vault, "test");
+    expect(index.get("PRD-0001")?.length).toBe(2);
   });
 });
 

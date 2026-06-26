@@ -1,0 +1,120 @@
+{
+  "version": 1,
+  "runtime_contract": {
+    "source_docs": [],
+    "verification_gates": [
+      { "name": "build", "command": "bun run build" },
+      { "name": "typecheck", "command": "bunx tsc --noEmit" },
+      { "name": "test", "command": "bun run test" }
+    ],
+    "require_progress_append": true,
+    "require_one_item_per_iteration": true,
+    "require_commit": true
+  },
+  "items": [
+    {
+      "category": "functional",
+      "description": "PRD-0013 item 1 (SLICE-0076): Add one frontmatter-id->path index builder in the store, scoped per project, and make id allocation read the max frontmatter id per prefix instead of a filename regex.",
+      "steps": [
+        "Add an id-index builder in the store that maps frontmatter id -> path per project",
+        "Change allocation to compute next id from the max frontmatter id per prefix",
+        "Write a test: create after an id-only or date-named file with a higher id does NOT re-mint a colliding id",
+        "Confirm existing filename-based allocation tests stay green"
+      ],
+      "passes": true,
+      "regression_notes": ""
+    },
+    {
+      "category": "functional",
+      "description": "PRD-0013 item 2 (SLICE-0077): Make resolveArtifactPath resolve via the id index first, falling back to the existing filename-prefix glob. Blocked by item 1.",
+      "steps": [
+        "resolveArtifactPath checks the id index, then falls back to the filename-prefix glob",
+        "Write a test: set/path on a date-named file resolves by frontmatter id",
+        "Write a test: a well-named file still resolves (no regression)"
+      ],
+      "passes": false,
+      "regression_notes": ""
+    },
+    {
+      "category": "functional",
+      "description": "PRD-0013 item 3 (SLICE-0078): Add doctor duplicate-id and dangling-link drift checks via its existing DIAGNOSTICS array; skip cross-project/cross-prefix ids and document that.",
+      "steps": [
+        "doctor groups files by frontmatter id and flags any id mapping to more than one file",
+        "doctor resolves link/link_list values and [[id]] body wikilinks against the project id set and flags dangles",
+        "Cross-project / cross-prefix ids are skipped; write a test with a planted duplicate id and a planted dangling link, and one cross-project link that is NOT flagged"
+      ],
+      "passes": false,
+      "regression_notes": ""
+    },
+    {
+      "category": "functional",
+      "description": "PRD-0013 item 4 (SLICE-0079): Add a fmt rename-to-id category (rename to id-slug.md when id/slug mismatch the name, id preserved; id-less files flag-only) and derive renumberLegacyIds prefix set from the registry.",
+      "steps": [
+        "fmt --write renames a mismatched file to id-slug.md preserving the id",
+        "Write a test: a [[id]] link to the renamed file still resolves",
+        "Write a test: an id-less file is flagged, never auto-renamed",
+        "renumberLegacyIds derives its prefix set from the registry (any kind, not just PRD/SLICE)"
+      ],
+      "passes": false,
+      "regression_notes": ""
+    },
+    {
+      "category": "functional",
+      "description": "PRD-0013 item 5 (SLICE-0080): Drive diagnoseCoreFields off schema.required instead of a hardcoded core-field set so a missing required summary or any required field is flagged.",
+      "steps": [
+        "diagnoseCoreFields reads schema.required",
+        "Write a test: a file missing required summary is flagged",
+        "Write a test: a file with all required fields passes clean"
+      ],
+      "passes": false,
+      "regression_notes": ""
+    },
+    {
+      "category": "functional",
+      "description": "PRD-0013 item 6 (SLICE-0081): index.md generation emits an Unindexed (no id) trailer for skipped id-less files and disambiguates duplicate ids inline; re-run stays byte-identical.",
+      "steps": [
+        "index.md emits an Unindexed (no id) trailer listing skipped id-less files",
+        "Duplicate ids are disambiguated inline",
+        "Write a test: an id-less file appears in the trailer, a duplicate id is disambiguated, and re-run is byte-identical"
+      ],
+      "passes": false,
+      "regression_notes": ""
+    },
+    {
+      "category": "functional",
+      "description": "PRD-0013 item 7 (SLICE-0082): New verb wiki links <id> printing outbound links (frontmatter link/link_list + body [[..]]) and inbound backlinks scanned via the id index, as a pure vault read (no qmd). Blocked by items 1,2.",
+      "steps": [
+        "wiki links <id> prints outbound links from frontmatter and body wikilinks",
+        "wiki links <id> prints inbound backlinks scanned via the id index",
+        "Write a test asserting the expected in/out sets",
+        "Update src/cli/usage.ts, the README, and skills/wiki/SKILL.md"
+      ],
+      "passes": false,
+      "regression_notes": ""
+    },
+    {
+      "category": "functional",
+      "description": "PRD-0013 item 8 (SLICE-0083): New verb wiki retitle <id> --title <t> generalizing the type-agnostic relocateArtifact to all kinds (id preserved); keep doc recategorize doc-only. Blocked by item 2.",
+      "steps": [
+        "wiki retitle <id> --title <t> retitles any kind with the id preserved and inbound links surviving",
+        "doc recategorize stays doc-only",
+        "Write a test for a non-doc artifact retitle",
+        "Update src/cli/usage.ts, the README, and skills/wiki/SKILL.md"
+      ],
+      "passes": false,
+      "regression_notes": ""
+    },
+    {
+      "category": "functional",
+      "description": "PRD-0013 item 9 (SLICE-0084): New verb wiki delete <id> that scans inbound references via the id index and refuses (or warns + lists) before removing, with an explicit override; sync owns index cleanup. Blocked by items 1,2.",
+      "steps": [
+        "wiki delete <id> scans inbound references via the id index",
+        "It refuses (or warns + lists) when an inbound reference exists; an explicit override forces removal",
+        "Write a test: delete refuses with an inbound reference and the override forces it",
+        "Update src/cli/usage.ts, the README, and skills/wiki/SKILL.md"
+      ],
+      "passes": false,
+      "regression_notes": ""
+    }
+  ]
+}
