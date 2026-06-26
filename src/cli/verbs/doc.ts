@@ -4,7 +4,7 @@ import {
   ArtifactValidationError,
   relocateArtifact,
 } from "../../artifacts/store";
-import { DOC_CATEGORIES, isDocCategory, type DocCategory } from "../../artifacts/registry";
+import { DOC_CATEGORIES, isDocCategory, loadStructure, type DocCategory } from "../../artifacts/registry";
 import { assertProjectStructure, ProjectConfigError } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import { emitJson, jsonEnabled } from "../output";
@@ -53,8 +53,9 @@ async function relocate(project: string, id: string, change: { title?: string; c
   const vaultRoot = await getVaultRoot();
   const projPath = projectPath(vaultRoot, project);
   try {
-    await assertProjectStructure(projPath);
-    const artifact = await relocateArtifact({ type: "doc", vaultRoot, project, id, ...change });
+    const structure = await loadStructure(vaultRoot);
+    await assertProjectStructure(projPath, structure);
+    const artifact = await relocateArtifact({ type: "doc", vaultRoot, project, id, ...change }, structure);
     if (jsonEnabled()) emitJson({ id: artifact.id, path: artifact.path });
     else console.log(artifact.id);
     console.error(`updated ${artifact.id}`);

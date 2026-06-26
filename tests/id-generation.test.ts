@@ -3,9 +3,16 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { nextId } from "../src/artifacts/id";
-import { buildIdIndex } from "../src/artifacts/id-index";
-import { createArtifact } from "../src/artifacts/store";
+import { nextId as _nextId } from "../src/artifacts/id";
+import { buildIdIndex as _buildIdIndex } from "../src/artifacts/id-index";
+import { createArtifact as _createArtifact } from "../src/artifacts/store";
+import { DEFAULT_STRUCTURE } from "../src/artifacts/registry";
+
+// SLICE-0104: thread DEFAULT_STRUCTURE (the default kinds these tests use).
+const nextId = (type: string, vaultRoot: string, project: string) => _nextId(type, vaultRoot, project, DEFAULT_STRUCTURE);
+const buildIdIndex = (vaultRoot: string, project: string) => _buildIdIndex(vaultRoot, project, DEFAULT_STRUCTURE);
+const createArtifact = (input: Omit<Parameters<typeof _createArtifact>[0], "structure">) =>
+  _createArtifact({ ...input, structure: DEFAULT_STRUCTURE });
 
 const tempPaths: string[] = [];
 

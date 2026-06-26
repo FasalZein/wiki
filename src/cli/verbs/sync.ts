@@ -3,6 +3,7 @@ import { writeProjectIndex, writeVaultIndex } from "../../artifacts/index-md";
 import { embedCollection, ensureCollection, QmdError, updateCollection } from "../../integrations/qmd";
 import { assertProjectStructure, loadProjectConfig, ProjectConfigError, projectErrorMessage } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
+import { loadStructure } from "../../artifacts/registry";
 import { checkProjectDocsStructure } from "../../bootstrap/doctor";
 import { booleanValue, parseCommand } from "../parse";
 import { resolveProject } from "../resolve-project";
@@ -17,6 +18,7 @@ export async function handleSync(args: string[]): Promise<CliResult> {
   }
 
   const vaultRoot = await getVaultRoot();
+  const structure = await loadStructure(vaultRoot);
   const projPath = projectPath(vaultRoot, project);
   try {
     await loadProjectConfig(projPath);
@@ -39,7 +41,7 @@ export async function handleSync(args: string[]): Promise<CliResult> {
   }
 
   try {
-    await assertProjectStructure(projPath);
+    await assertProjectStructure(projPath, structure);
     const config = await loadProjectConfig(projPath);
     const qmdCommand = process.env.QMD_COMMAND ?? config.qmd_command;
     const targets = [{ name: project, path: projPath }];
@@ -53,7 +55,7 @@ export async function handleSync(args: string[]): Promise<CliResult> {
       await embedCollection(qmdCommand, target.name, booleanValue(parsed.values, "force-embed"));
       console.error(`synced collection ${target.name}`);
     }
-    await writeProjectIndex(vaultRoot, project);
+    await writeProjectIndex(vaultRoot, project, structure);
     await writeVaultIndex(vaultRoot);
     return { code: 0 };
   } catch (error) {

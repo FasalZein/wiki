@@ -4,7 +4,7 @@ import { join, sep } from "node:path";
 
 import type { TemplateType } from "../schema/load";
 import { listProjects } from "../config/project";
-import { ARTIFACTS, typeForId } from "./registry";
+import { type Structure } from "./registry";
 import { projectPath } from "./paths";
 
 type Entry = {
@@ -17,8 +17,6 @@ type Entry = {
   path: string;
 };
 
-const DEFAULT_GROUP = "General";
-
 /** Hidden sidecar holding the parsed roster keyed by path+mtime, so a regen only
  *  re-reads files whose mtime moved instead of parsing the whole tree each sync.
  *  The dot-prefix keeps it out of readdir's artifact scan (it skips non-.md anyway). */
@@ -26,6 +24,8 @@ const CACHE_FILE = ".index-cache.json";
 
 type CacheRecord = { mtimeMs: number; entry: Entry | null }; // entry null = id-less (Unindexed)
 type Cache = Record<string, CacheRecord>;
+
+const DEFAULT_GROUP = "General";
 
 /** How many files this regen parsed fresh vs. served from the mtime cache. */
 export type RegenStats = { parsed: number; reused: number };
@@ -39,9 +39,11 @@ async function loadCache(root: string): Promise<Cache> {
   }
 }
 
-/** Definition-order kind ranking from wiki.json — a stable total order for sort,
+/** Definition-order kind ranking from the structure — a stable total order for sort,
  *  independent of readdir's unstable traversal order. */
-const KIND_ORDER: TemplateType[] = Object.keys(ARTIFACTS) as TemplateType[];
+function kindOrder(structure: Structure): TemplateType[] {
+  return Object.keys(structure.kinds) as TemplateType[];
+}
 
 function field(data: Record<string, unknown>, name: string): string {
   const value = data[name];
@@ -56,7 +58,7 @@ function field(data: Record<string, unknown>, name: string): string {
  * unchanged entries and only parse files whose mtime moved (or new files).
  * ponytail: list, not a table — summaries can contain `|` and would break table cells.
  */
-export async function writeProjectIndex(vaultRoot: string, project: string): Promise<RegenStats> {
+export async function writeProjectIndex(vaultRoot: string, project: string, structure: Structure): Promise<RegenStats> {
   const root = projectPath(vaultRoot, project);
   const files = await readdir(root, { recursive: true });
   const cache = await loadCache(root);
@@ -91,7 +93,7 @@ export async function writeProjectIndex(vaultRoot: string, project: string): Pro
       nextCache[relPath] = { mtimeMs, entry: null };
       continue;
     }
-    const kind = typeForId(id);
+    const kind = structure.typeForId(id);
     if (kind === undefined) continue; // skip non-artifact / unrecognized files
     const entry: Entry = {
       kind,
@@ -106,6 +108,7 @@ export async function writeProjectIndex(vaultRoot: string, project: string): Pro
     nextCache[relPath] = { mtimeMs, entry };
   }
 
+  const KIND_ORDER = kindOrder(structure);
   entries.sort((a, b) => {
     const k = KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind);
     if (k !== 0) return k;

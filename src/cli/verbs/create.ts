@@ -21,7 +21,7 @@ import {
 } from "../../artifacts/store";
 import { authoredSections } from "../../artifacts/body";
 import { projectPath } from "../../artifacts/paths";
-import { ARTIFACTS, defaultCategoryForDocType, DOC_CATEGORIES, isDocCategory, specFor, type DocCategory } from "../../artifacts/registry";
+import { DEFAULT_STRUCTURE, defaultCategoryForDocType, DOC_CATEGORIES, isDocCategory, loadStructure, type DocCategory, type Structure } from "../../artifacts/registry";
 import { assertProjectStructure, loadProjectConfig, ProjectConfigError } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import { loadTemplate, normalizeInlineMaps, resolveTemplatePath, type TemplateType } from "../../schema/load";
@@ -33,8 +33,8 @@ import { unknownMessage } from "../usage";
 
 export async function handleCreate(args: string[]): Promise<CliResult> {
   const [kind, ...rest] = args;
-  if (kind === undefined || ARTIFACTS[kind] === undefined) {
-    console.error(unknownMessage("artifact type", kind ?? "", Object.keys(ARTIFACTS)));
+  if (kind === undefined || DEFAULT_STRUCTURE.kinds[kind] === undefined) {
+    console.error(unknownMessage("artifact type", kind ?? "", Object.keys(DEFAULT_STRUCTURE.kinds)));
     return { code: 1 };
   }
   return createGeneric(kind, rest);
@@ -174,23 +174,24 @@ async function createWithSupersede(req: CreateRequest): Promise<CliResult> {
   if (typeof override === "string") { console.error(override); return { code: 1 }; }
 
   const vaultRoot = await getVaultRoot();
+  const structure = await loadStructure(vaultRoot);
   const projPath = projectPath(vaultRoot, project);
-  await assertProjectStructure(projPath);
+  await assertProjectStructure(projPath, structure);
   try {
     // Snapshot the to-be-superseded artifact (single read) so a post-write
     // failure can byte-restore it. setFields can't undo the supersede: it merges
     // onto the *current* (already-mutated) frontmatter, so the added
     // `superseded_by` would survive a field-level revert.
     const supersededBefore = override.kind === "supersedes"
-      ? await readArtifact({ type, vaultRoot, project, id: override.id })
+      ? await readArtifact({ type, vaultRoot, project, id: override.id }, structure)
       : null;
     const supersededSnapshot = supersededBefore ? await Bun.file(supersededBefore.path).text() : null;
     // Pre-flight the parent PRD before any write, mirroring backlinkParentPrd's
     // guard, so a missing/garbage --parent-prd fails before supersede runs.
     if (type === "slice" && typeof fields.parent_prd === "string" && fields.parent_prd.length > 0) {
-      await readArtifact({ type: "prd", vaultRoot, project, id: fields.parent_prd });
+      await readArtifact({ type: "prd", vaultRoot, project, id: fields.parent_prd }, structure);
     }
-    const dedupBlock = await advisoryDedup(type, project, projPath, dedupQuery, override);
+    const dedupBlock = await advisoryDedup(type, project, projPath, dedupQuery, override, structure);
     if (dedupBlock !== null) return dedupBlock;
     const artifact = await createArtifact({
       type,
@@ -199,6 +200,7 @@ async function createWithSupersede(req: CreateRequest): Promise<CliResult> {
       category,
       body,
       fields: { ...fields, ...fieldsForDedupOverride(override) },
+      structure,
     });
     // Post-write steps mutate *other* artifacts and can fail (e.g. supersede a
     // type without a `superseded` status). If any throws, roll back the new
@@ -206,9 +208,9 @@ async function createWithSupersede(req: CreateRequest): Promise<CliResult> {
     // leaves an orphan (P0.2/P0.3).
     try {
       if (override.kind === "supersedes") {
-        await supersedeArtifact({ type, vaultRoot, project, id: override.id, by: artifact.id });
+        await supersedeArtifact({ type, vaultRoot, project, id: override.id, by: artifact.id }, structure);
       }
-      await backlinkParentPrd(type, vaultRoot, project, artifact.id, fields);
+      await backlinkParentPrd(type, vaultRoot, project, artifact.id, fields, structure);
     } catch (postWriteError) {
       await removeArtifactFile(artifact.path);
       if (supersededBefore && supersededSnapshot !== null) {
@@ -245,8 +247,8 @@ async function createWithSupersede(req: CreateRequest): Promise<CliResult> {
  * only in opt-in strict mode (config.dedup_strong_blocks). *Weak* matches always
  * stay advisory and proceed.
  */
-async function advisoryDedup(type: TemplateType, project: string, projectPath: string, query: string, override: DedupOverride): Promise<CliResult | null> {
-  if (override.kind !== "none" || !specFor(type).dedup) return null;
+async function advisoryDedup(type: TemplateType, project: string, projectPath: string, query: string, override: DedupOverride, structure: Structure): Promise<CliResult | null> {
+  if (override.kind !== "none" || !structure.specFor(type).dedup) return null;
   let config;
   try {
     config = await loadProjectConfig(projectPath);
@@ -298,14 +300,15 @@ async function backlinkParentPrd(
   project: string,
   sliceId: string,
   fields: Record<string, unknown>,
+  structure: Structure,
 ): Promise<void> {
   if (type !== "slice") return;
   const parentPrd = fields.parent_prd;
   if (typeof parentPrd !== "string" || parentPrd.length === 0) return;
-  const prd = await readArtifact({ type: "prd", vaultRoot, project, id: parentPrd });
+  const prd = await readArtifact({ type: "prd", vaultRoot, project, id: parentPrd }, structure);
   const current = Array.isArray(prd.fields.slices) ? prd.fields.slices.map(String) : [];
   if (current.includes(sliceId)) return;
-  await setField({ type: "prd", vaultRoot, project, id: parentPrd, field: "slices", value: [...current, sliceId] });
+  await setField({ type: "prd", vaultRoot, project, id: parentPrd, field: "slices", value: [...current, sliceId] }, structure);
 }
 
 function parseOverride(values: Record<string, string | string[] | boolean | undefined>) {

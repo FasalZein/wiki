@@ -5,7 +5,7 @@ import matter from "gray-matter";
 
 import { orderBySchema } from "../../artifacts/render";
 import { bodySectionDrift } from "../../artifacts/body";
-import { artifactTypeForVaultPath, PREFIX_TO_TYPE } from "../../artifacts/registry";
+import { loadStructure, type Structure } from "../../artifacts/registry";
 import { slugifyTitle } from "../../artifacts/store";
 import { projectPath } from "../../artifacts/paths";
 import { assertProjectStructure, loadProjectConfig, ProjectConfigError, projectErrorMessage } from "../../config/project";
@@ -22,7 +22,7 @@ import type { CliResult } from "../dispatch";
  * in additional categories.
  */
 type CategoryResult = { labels: string[]; fixed: string };
-type Category = (content: string, file: string) => CategoryResult | Promise<CategoryResult>;
+type Category = (content: string, file: string, structure: Structure) => CategoryResult | Promise<CategoryResult>;
 
 const CATEGORIES: Category[] = [fixDates, fixTemplaterBlocks, fixAcceptanceEach, fixClosedSliceTodos, fixFrontmatterShape];
 
@@ -35,6 +35,7 @@ export async function handleFmt(args: string[]): Promise<CliResult> {
   }
 
   const vaultRoot = await getVaultRoot();
+  const structure = await loadStructure(vaultRoot);
   const projPath = projectPath(vaultRoot, project);
   try {
     await loadProjectConfig(projPath);
@@ -45,7 +46,7 @@ export async function handleFmt(args: string[]): Promise<CliResult> {
     }
     throw error;
   }
-  await assertProjectStructure(projPath);
+  await assertProjectStructure(projPath, structure);
 
   const write = booleanValue(parsed.values, "write");
   let total = 0;
@@ -53,7 +54,7 @@ export async function handleFmt(args: string[]): Promise<CliResult> {
   // Renumbering runs before the per-file pipeline: it renames files and
   // rewrites cross-references vault-wide, so the pipeline below sees the
   // post-rename world.
-  const renumber = await renumberLegacyIds(vaultRoot, projPath, write);
+  const renumber = await renumberLegacyIds(vaultRoot, projPath, write, structure);
   total += renumber.labels.length;
   for (const label of renumber.labels) {
     console.log(write ? `fixed ${label}` : label);
@@ -62,7 +63,7 @@ export async function handleFmt(args: string[]): Promise<CliResult> {
 
   // Rename mismatched files to ${id}-${slug}.md after renumbering, so it sees
   // the post-renumber names. The id is preserved, so [[id]] links survive.
-  const renamed = await renameToId(vaultRoot, projPath, write);
+  const renamed = await renameToId(vaultRoot, projPath, write, structure);
   total += renamed.labels.length;
   for (const label of renamed.labels) {
     console.log(write ? `fixed ${label}` : label);
@@ -75,12 +76,12 @@ export async function handleFmt(args: string[]): Promise<CliResult> {
     let content = raw;
     const labels: string[] = [];
     for (const category of CATEGORIES) {
-      const result = await category(content, file);
+      const result = await category(content, file, structure);
       labels.push(...result.labels);
       content = result.fixed;
     }
     for (const diagnostic of DIAGNOSTICS) {
-      manual.push(...(await diagnostic(content, file)));
+      manual.push(...(await diagnostic(content, file, structure)));
     }
     if (labels.length === 0) continue;
     total += labels.length;
@@ -126,7 +127,7 @@ export async function handleFmt(args: string[]): Promise<CliResult> {
  * with a manual-fix hint but never touches. They fail --check; --write lists
  * them under "needs manual attention" and still exits 0.
  */
-type Diagnostic = (content: string, file: string) => string[] | Promise<string[]>;
+type Diagnostic = (content: string, file: string, structure: Structure) => string[] | Promise<string[]>;
 
 const DIAGNOSTICS: Diagnostic[] = [
   diagnoseIdentity,
@@ -137,12 +138,12 @@ const DIAGNOSTICS: Diagnostic[] = [
   diagnoseGuidanceOnlySections,
 ];
 
-function artifactTypeOf(file: string): TemplateType | undefined {
-  return artifactTypeForVaultPath(file);
+function artifactTypeOf(file: string, structure: Structure): TemplateType | undefined {
+  return structure.artifactTypeForVaultPath(file);
 }
 
-function diagnoseIdentity(content: string, file: string): string[] {
-  if (artifactTypeOf(file) === undefined) return [];
+function diagnoseIdentity(content: string, file: string, structure: Structure): string[] {
+  if (artifactTypeOf(file, structure) === undefined) return [];
   const id = frontmatterOf(content)?.id;
   if (typeof id !== "string") {
     return [`${file}: no id in frontmatter (pre-schema artifact) — hint: assign the next free id, fill the schema fields, and rename the file to <ID>-<slug>.md`];
@@ -154,8 +155,8 @@ function diagnoseIdentity(content: string, file: string): string[] {
   return [];
 }
 
-async function diagnoseCoreFields(content: string, file: string): Promise<string[]> {
-  const type = artifactTypeOf(file);
+async function diagnoseCoreFields(content: string, file: string, structure: Structure): Promise<string[]> {
+  const type = artifactTypeOf(file, structure);
   if (type === undefined) return [];
   const data = frontmatterOf(content);
   if (data === undefined || typeof data.id !== "string") return []; // identity covers
@@ -173,8 +174,8 @@ async function diagnoseCoreFields(content: string, file: string): Promise<string
  * one added) after an edit. Reuses the same template-derived contract validate
  * uses, so the two never disagree. Flag-only — authoring is a judgment call.
  */
-async function diagnoseBodySections(content: string, file: string): Promise<string[]> {
-  const type = artifactTypeOf(file);
+async function diagnoseBodySections(content: string, file: string, structure: Structure): Promise<string[]> {
+  const type = artifactTypeOf(file, structure);
   if (type === undefined) return [];
   const data = frontmatterOf(content);
   if (data === undefined || typeof data.id !== "string") return []; // identity covers id-less files
@@ -194,8 +195,8 @@ async function diagnoseBodySections(content: string, file: string): Promise<stri
 
 const ARTIFACT_ID = /^[A-Z]+-\d+$/;
 
-async function diagnoseLinkListProse(content: string, file: string): Promise<string[]> {
-  const type = artifactTypeOf(file);
+async function diagnoseLinkListProse(content: string, file: string, structure: Structure): Promise<string[]> {
+  const type = artifactTypeOf(file, structure);
   if (type === undefined) return [];
   const data = frontmatterOf(content);
   if (data === undefined || typeof data.id !== "string") return [];
@@ -212,8 +213,8 @@ async function diagnoseLinkListProse(content: string, file: string): Promise<str
   return findings;
 }
 
-function diagnoseNarrativeFrontmatter(content: string, file: string): string[] {
-  if (artifactTypeOf(file) !== "decision") return [];
+function diagnoseNarrativeFrontmatter(content: string, file: string, structure: Structure): string[] {
+  if (artifactTypeOf(file, structure) !== "decision") return [];
   const data = frontmatterOf(content);
   if (data === undefined) return [];
   const narrative = ["context", "decision", "consequences", "alternatives"].filter(
@@ -223,8 +224,8 @@ function diagnoseNarrativeFrontmatter(content: string, file: string): string[] {
   return [`${file}: narrative stored in frontmatter (${narrative.join(", ")}) — hint: move it into the body ## Context / ## Decision / ## Consequences sections and drop the fields`];
 }
 
-function diagnoseGuidanceOnlySections(content: string, file: string): string[] {
-  if (artifactTypeOf(file) !== "prd") return [];
+function diagnoseGuidanceOnlySections(content: string, file: string, structure: Structure): string[] {
+  if (artifactTypeOf(file, structure) !== "prd") return [];
   const findings: string[] = [];
   let section: string | undefined;
   let lines: string[] = [];
@@ -259,10 +260,14 @@ async function renumberLegacyIds(
   vaultRoot: string,
   projectPath: string,
   write: boolean,
+  structure: Structure,
 ): Promise<{ labels: string[]; collisions: string[]; map: Map<string, string> }> {
   const labels: string[] = [];
   const collisions: string[] = [];
   const map = new Map<string, string>();
+  // Legacy short-id pattern over every configured prefix, derived from the
+  // structure so any kind is covered, not just PRD/SLICE.
+  const legacyId = new RegExp(`^(${Object.keys(structure.kinds).map((k) => structure.specFor(k as TemplateType).prefix).join("|")})-(\\d{3})$`);
 
   const files = await markdownFiles(projectPath);
   const idToPath = new Map<string, string>();
@@ -272,7 +277,7 @@ async function renumberLegacyIds(
   }
 
   for (const [id, filePath] of idToPath) {
-    const legacy = LEGACY_ID.exec(id);
+    const legacy = legacyId.exec(id);
     if (legacy === null || legacy[1] === undefined || legacy[2] === undefined) continue;
     const newId = `${legacy[1]}-0${legacy[2]}`;
     const file = relative(vaultRoot, filePath);
@@ -321,13 +326,14 @@ async function renameToId(
   vaultRoot: string,
   projectPath: string,
   write: boolean,
+  structure: Structure,
 ): Promise<{ labels: string[]; collisions: string[] }> {
   const labels: string[] = [];
   const collisions: string[] = [];
 
   for (const filePath of await markdownFiles(projectPath)) {
     const file = relative(vaultRoot, filePath);
-    if (artifactTypeOf(file) === undefined) continue;
+    if (artifactTypeOf(file, structure) === undefined) continue;
     const data = frontmatterOf(await readFile(filePath, "utf8"));
     const id = data?.id;
     const title = data?.title;
@@ -352,9 +358,8 @@ async function fileExists(path: string): Promise<boolean> {
   return Bun.file(path).exists();
 }
 
-/** Legacy short-id pattern over every registered prefix, derived from the
- *  registry so any kind is covered, not just PRD/SLICE. */
-const LEGACY_ID = new RegExp(`^(${Object.keys(PREFIX_TO_TYPE).join("|")})-(\\d{3})$`);
+/** Legacy short-id pattern over every registered prefix — derived per-vault from
+ *  the structure inside renumberLegacyIds, so any kind is covered. */
 
 function fixDates(content: string, file: string): CategoryResult {
   const labels: string[] = [];
@@ -438,9 +443,9 @@ function fixClosedSliceTodos(content: string, file: string): CategoryResult {
  * after the schema fields. Skips files outside artifact folders and files
  * without an id (pre-schema artifacts are flag-only territory).
  */
-async function fixFrontmatterShape(content: string, file: string): Promise<CategoryResult> {
+async function fixFrontmatterShape(content: string, file: string, structure: Structure): Promise<CategoryResult> {
   const noop = { labels: [], fixed: content };
-  const type = artifactTypeOf(file);
+  const type = artifactTypeOf(file, structure);
   if (type === undefined || !content.startsWith("---")) return noop;
 
   let parsed: matter.GrayMatterFile<string>;

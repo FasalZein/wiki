@@ -4,7 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { assertSafeSegment } from "../src/artifacts/paths";
-import { createArtifact, readArtifact, relocateArtifact } from "../src/artifacts/store";
+import { createArtifact as _createArtifact, readArtifact as _readArtifact, relocateArtifact as _relocateArtifact } from "../src/artifacts/store";
+import { DEFAULT_STRUCTURE } from "../src/artifacts/registry";
+
+// SLICE-0104: thread DEFAULT_STRUCTURE (the default kinds these tests use).
+const createArtifact = (input: Omit<Parameters<typeof _createArtifact>[0], "structure">) =>
+  _createArtifact({ ...input, structure: DEFAULT_STRUCTURE });
+const readArtifact = (input: Parameters<typeof _readArtifact>[0]) => _readArtifact(input, DEFAULT_STRUCTURE);
+const relocateArtifact = (input: Parameters<typeof _relocateArtifact>[0]) => _relocateArtifact(input, DEFAULT_STRUCTURE);
 
 const tempPaths: string[] = [];
 

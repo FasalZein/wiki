@@ -1,10 +1,10 @@
 import { join } from "node:path";
 
 import type { TemplateType } from "../schema/load";
-import { specFor } from "./registry";
+import { type Structure } from "./registry";
 
-export function artifactFolder(type: TemplateType): string {
-  return specFor(type).folder;
+export function artifactFolder(type: TemplateType, structure: Structure): string {
+  return structure.specFor(type).folder;
 }
 
 /** Reject a path segment that could escape its parent directory. Project names and
@@ -29,6 +29,6 @@ export function projectPath(vaultRoot: string, project: string): string {
   return join(vaultRoot, "projects", project);
 }
 
-export function artifactDirectory(type: TemplateType, vaultRoot: string, project: string): string {
-  return join(projectPath(vaultRoot, project), artifactFolder(type));
+export function artifactDirectory(type: TemplateType, vaultRoot: string, project: string, structure: Structure): string {
+  return join(projectPath(vaultRoot, project), artifactFolder(type, structure));
 }

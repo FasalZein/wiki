@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
-import { ARTIFACTS } from "../src/artifacts/registry";
+import { DEFAULT_STRUCTURE } from "../src/artifacts/registry";
 import { dispatch } from "../src/cli/dispatch";
 import { USAGE_REGISTRY } from "../src/cli/usage";
+
+const ARTIFACTS = DEFAULT_STRUCTURE.kinds;
 
 /**
  * Regression guard for ADR-0023: USAGE_REGISTRY is the authoritative command

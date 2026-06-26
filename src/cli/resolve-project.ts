@@ -6,6 +6,7 @@
  */
 
 import { projectPath } from "../artifacts/paths";
+import { loadStructure } from "../artifacts/registry";
 import { assertProjectStructure } from "../config/project";
 import { getVaultRoot } from "../config/vault";
 import { readLinkedProject } from "./repo-link";
@@ -17,7 +18,8 @@ export async function linkedProjectFromCwd(): Promise<string | null> {
   if (project === null) return null;
   try {
     const vaultRoot = await getVaultRoot();
-    await assertProjectStructure(projectPath(vaultRoot, project));
+    const structure = await loadStructure(vaultRoot);
+    await assertProjectStructure(projectPath(vaultRoot, project), structure);
     return project;
   } catch {
     return null;

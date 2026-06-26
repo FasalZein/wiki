@@ -4,17 +4,18 @@
  * INPUT(select(...)) widget or triggering a validation error to learn them.
  */
 
-import { ARTIFACTS } from "../../artifacts/registry";
+import { loadStructure } from "../../artifacts/registry";
+import { getVaultRoot } from "../../config/vault";
 import { loadTemplate, type TemplateType } from "../../schema/load";
 import type { CliResult } from "../dispatch";
 import { emitJson, emitJsonError, jsonEnabled } from "../output";
 import { parseCommand } from "../parse";
 
-const TYPES = new Set<string>(Object.keys(ARTIFACTS));
-
 export async function handleSchema(args: string[]): Promise<CliResult> {
   const parsed = parseCommand(args, []);
   const type = parsed.positionals[0];
+  const structure = await loadStructure(await getVaultRoot());
+  const TYPES = new Set<string>(Object.keys(structure.kinds));
   if (type === undefined || !TYPES.has(type)) {
     const message = `usage: wiki schema <${[...TYPES].join("|")}>`;
     if (jsonEnabled()) emitJsonError({ error: message });

@@ -5,7 +5,7 @@ import { basename, relative } from "node:path";
 import { bodySectionDrift } from "../../artifacts/body";
 import { loadTemplate, normalizeInlineMaps, resolveTemplatePath } from "../../schema/load";
 import { validate } from "../../schema/validate";
-import { artifactTypeForVaultPath } from "../../artifacts/registry";
+import { loadStructure } from "../../artifacts/registry";
 import { getVaultRoot } from "../../config/vault";
 import { emitJson, jsonEnabled } from "../output";
 import type { CliResult } from "../dispatch";
@@ -26,8 +26,9 @@ export async function handleValidate(args: string[]): Promise<CliResult> {
   }
 
   const vaultRoot = await getVaultRoot();
+  const structure = await loadStructure(vaultRoot);
   const rel = relative(vaultRoot, filePath);
-  const type = artifactTypeForVaultPath(rel);
+  const type = structure.artifactTypeForVaultPath(rel);
   if (type === undefined) {
     console.error(`cannot infer artifact type from path: ${rel}`);
     console.error("expected path under projects/<name>/<prds|slices|adrs|handoffs|docs>/");

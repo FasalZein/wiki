@@ -3,7 +3,9 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { artifactTypeForVaultPath } from "../src/artifacts/registry";
+import { DEFAULT_STRUCTURE } from "../src/artifacts/registry";
+
+const artifactTypeForVaultPath = (rel: string) => DEFAULT_STRUCTURE.artifactTypeForVaultPath(rel);
 import { exists, expandHome, isFileNotFound, isRecord } from "../src/util";
 
 // SLICE-0099: the consolidated util module and the single path-convention helper.

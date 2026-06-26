@@ -4,11 +4,11 @@ import { join } from "node:path";
 import type { TemplateType } from "../schema/load";
 import { buildIdIndex } from "./id-index";
 import { artifactDirectory } from "./paths";
-import { specFor } from "./registry";
+import { type Structure } from "./registry";
 
-export async function nextId(type: TemplateType, vaultRoot: string, project: string): Promise<string> {
-  const prefix = specFor(type).prefix;
-  const directory = artifactDirectory(type, vaultRoot, project);
+export async function nextId(type: TemplateType, vaultRoot: string, project: string, structure: Structure): Promise<string> {
+  const prefix = structure.specFor(type).prefix;
+  const directory = artifactDirectory(type, vaultRoot, project, structure);
   // Docs may be organized into category subfolders; ids stay globally unique
   // per project, so scan recursively for that type. Other types stay flat.
   const entries = type === "doc" ? await readMarkdownNamesRecursive(directory) : await readdir(directory);
@@ -36,16 +36,16 @@ export async function nextId(type: TemplateType, vaultRoot: string, project: str
   // Frontmatter id is the real spine: a date-named or id-only file whose
   // frontmatter id outranks every filename must still bump the counter, or
   // create re-mints a colliding id. Take the max of filename and frontmatter.
-  highest = Math.max(highest, await highestFrontmatterId(prefix, vaultRoot, project));
+  highest = Math.max(highest, await highestFrontmatterId(prefix, vaultRoot, project, structure));
 
   return `${prefix}-${String(highest + 1).padStart(4, "0")}`;
 }
 
 /** The largest numeric suffix among frontmatter ids that share this prefix. */
-async function highestFrontmatterId(prefix: string, vaultRoot: string, project: string): Promise<number> {
+async function highestFrontmatterId(prefix: string, vaultRoot: string, project: string, structure: Structure): Promise<number> {
   const idPattern = new RegExp(`^${prefix}-(\\d+)$`);
   let highest = 0;
-  for (const id of (await buildIdIndex(vaultRoot, project)).keys()) {
+  for (const id of (await buildIdIndex(vaultRoot, project, structure)).keys()) {
     const match = idPattern.exec(id);
     if (match?.[1] !== undefined) {
       highest = Math.max(highest, Number.parseInt(match[1], 10));

@@ -1,7 +1,7 @@
 import { readdir, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
 
-import { ARTIFACT_FOLDERS } from "./registry";
+import { type Structure } from "./registry";
 
 /** Default count of recent artifacts shown by status and the recency search path. */
 export const RECENT_LIMIT = 10;
@@ -13,9 +13,9 @@ export type RecentArtifact = { rel: string; full: string; mtime: number };
  * Shared by `status` (recent list) and `search --recent/--since` (mtime ordering)
  * so the two cannot drift on what "recent" means.
  */
-export async function recentArtifacts(vaultRoot: string, projectPath: string): Promise<RecentArtifact[]> {
+export async function recentArtifacts(vaultRoot: string, projectPath: string, structure: Structure): Promise<RecentArtifact[]> {
   const files: RecentArtifact[] = [];
-  for (const folder of ARTIFACT_FOLDERS) {
+  for (const folder of structure.folders) {
     const dir = join(projectPath, folder);
     let entries;
     try {

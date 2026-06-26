@@ -4,8 +4,11 @@ import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 
 import { getConfig } from "../src/config/config";
-import { assertProjectStructure } from "../src/config/project";
+import { assertProjectStructure as _assertProjectStructure } from "../src/config/project";
 import { getVaultRoot } from "../src/config/vault";
+import { DEFAULT_STRUCTURE } from "../src/artifacts/registry";
+
+const assertProjectStructure = (projectPath: string) => _assertProjectStructure(projectPath, DEFAULT_STRUCTURE);
 
 const originalEnv = { ...process.env };
 const tempPaths: string[] = [];

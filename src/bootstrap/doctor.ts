@@ -4,7 +4,7 @@ import matter from "gray-matter";
 
 import { buildIdIndex } from "../artifacts/id-index";
 import { bareIdOf, collectReferences, isLocalIdRef } from "../artifacts/references";
-import { DOC_CATEGORIES } from "../artifacts/registry";
+import { DOC_CATEGORIES, loadStructure, type Structure } from "../artifacts/registry";
 import { BLOCK_VERSION } from "../cli/repo-link";
 import { exists } from "../util";
 
@@ -33,10 +33,11 @@ export type DoctorResult = {
  */
 export async function runDoctor(vaultPath: string): Promise<DoctorResult> {
   const issues: DriftIssue[] = [];
+  const structure = await loadStructure(vaultPath);
   for (const project of await listVaultProjects(vaultPath)) {
     issues.push(...(await checkProjectDocsStructure(vaultPath, project)));
     issues.push(...(await checkProjectRepoBindings(vaultPath, project)));
-    issues.push(...(await checkProjectIdDrift(vaultPath, project)));
+    issues.push(...(await checkProjectIdDrift(vaultPath, project, structure)));
   }
   return { issues, clean: issues.length === 0 };
 }
@@ -50,9 +51,9 @@ export async function runDoctor(vaultPath: string): Promise<DoctorResult> {
  *    (path-qualified) and cross-prefix (unknown-prefix) references are skipped by
  *    design — shared-ADR references are not false dangles.
  */
-export async function checkProjectIdDrift(vaultPath: string, project: string): Promise<DriftIssue[]> {
+export async function checkProjectIdDrift(vaultPath: string, project: string, structure: Structure): Promise<DriftIssue[]> {
   const issues: DriftIssue[] = [];
-  const index = await buildIdIndex(vaultPath, project);
+  const index = await buildIdIndex(vaultPath, project, structure);
 
   for (const [id, paths] of index) {
     if (paths.length > 1) {
@@ -68,7 +69,7 @@ export async function checkProjectIdDrift(vaultPath: string, project: string): P
     for (const path of paths) {
       for (const ref of await collectReferences(path)) {
         const id = bareIdOf(ref);
-        if (id === undefined || !isLocalIdRef(id)) continue; // cross-project / cross-prefix
+        if (id === undefined || !isLocalIdRef(id, structure)) continue; // cross-project / cross-prefix
         if (!known.has(id)) {
           issues.push({
             type: "dangling-link",

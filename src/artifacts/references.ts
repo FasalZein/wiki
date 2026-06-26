@@ -9,7 +9,7 @@
 import matter from "gray-matter";
 import { readFile } from "node:fs/promises";
 
-import { PREFIX_TO_TYPE } from "./registry";
+import { type Structure } from "./registry";
 
 /** A bare `PREFIX-NNNN` id, the only wikilink form the dangling-link check validates.
  *  Path-qualified links (`[[../other-project/...]]`) are cross-project and skipped. */
@@ -32,10 +32,9 @@ export function bareIdOf(raw: string): string | undefined {
 /** True when an id should be validated against this project's id set: it is a bare
  *  `PREFIX-NNNN` whose prefix is a registered kind. Unknown prefixes are cross-prefix
  *  (external) references and are skipped, as PRD-0013 documents. */
-export function isLocalIdRef(id: string): boolean {
+export function isLocalIdRef(id: string, structure: Structure): boolean {
   if (!BARE_ID_RE.test(id)) return false;
-  const prefix = id.split("-")[0]!;
-  return PREFIX_TO_TYPE[prefix] !== undefined;
+  return structure.typeForId(id) !== undefined;
 }
 
 /** Every link reference in one file: frontmatter string/array values plus body
