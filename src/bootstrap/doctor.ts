@@ -5,6 +5,7 @@ import matter from "gray-matter";
 import { buildIdIndex } from "../artifacts/id-index";
 import { DOC_CATEGORIES, PREFIX_TO_TYPE } from "../artifacts/registry";
 import { BLOCK_VERSION } from "../cli/repo-link";
+import { exists } from "../util";
 
 export type DriftIssue = {
   type:
@@ -23,15 +24,6 @@ export type DoctorResult = {
   issues: DriftIssue[];
   clean: boolean; // true when issues.length === 0
 };
-
-async function exists(path: string): Promise<boolean> {
-  try {
-    await access(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 /**
  * Vault content checks (Obsidian is a viewer now, so there's no plugin/config/template

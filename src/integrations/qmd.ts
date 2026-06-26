@@ -11,6 +11,8 @@
  * This depends on that human-readable output shape ("name (qmd://name/)").
  */
 
+import { isRecord } from "../util";
+
 export type QmdResult = {
   path: string;
   score: string;
@@ -142,10 +144,6 @@ export function parseQmdResults(stdout: string): QmdResult[] {
       },
     ];
   });
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
 }
 
 function stringField(record: Record<string, unknown>, key: string): string | undefined {

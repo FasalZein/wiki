@@ -3,6 +3,7 @@ import matter from "gray-matter";
 import { resolve } from "node:path";
 
 import type { Constraints, FieldDef, FieldType, Schema } from "./types";
+import { isRecord } from "../util";
 
 export function resolveTemplatePath(filename: string): string {
   // Dev mode: src/schema/ -> ../../templates. Bundled: dist/ -> ./templates
@@ -108,8 +109,4 @@ function isFieldType(value: unknown): value is FieldType {
 
 export function normalizeInlineMaps(template: string): string {
   return template.replace(/^(\s*[A-Za-z0-9_]+):(\s*\{)/gm, "$1: $2");
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

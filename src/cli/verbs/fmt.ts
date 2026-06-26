@@ -5,7 +5,7 @@ import matter from "gray-matter";
 
 import { orderBySchema } from "../../artifacts/render";
 import { bodySectionDrift } from "../../artifacts/body";
-import { FOLDER_TO_TYPE, PREFIX_TO_TYPE } from "../../artifacts/registry";
+import { artifactTypeForVaultPath, PREFIX_TO_TYPE } from "../../artifacts/registry";
 import { slugifyTitle } from "../../artifacts/store";
 import { projectPath } from "../../artifacts/paths";
 import { assertProjectStructure, loadProjectConfig, ProjectConfigError, projectErrorMessage } from "../../config/project";
@@ -138,8 +138,7 @@ const DIAGNOSTICS: Diagnostic[] = [
 ];
 
 function artifactTypeOf(file: string): TemplateType | undefined {
-  const folder = file.split("/")[2];
-  return folder === undefined ? undefined : FOLDER_TO_TYPE[folder];
+  return artifactTypeForVaultPath(file);
 }
 
 function diagnoseIdentity(content: string, file: string): string[] {
@@ -440,8 +439,7 @@ function fixClosedSliceTodos(content: string, file: string): CategoryResult {
  */
 async function fixFrontmatterShape(content: string, file: string): Promise<CategoryResult> {
   const noop = { labels: [], fixed: content };
-  const folder = file.split("/")[2];
-  const type = folder === undefined ? undefined : FOLDER_TO_TYPE[folder];
+  const type = artifactTypeOf(file);
   if (type === undefined || !content.startsWith("---")) return noop;
 
   let parsed: matter.GrayMatterFile<string>;

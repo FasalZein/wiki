@@ -2,6 +2,7 @@ import { stat } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import { getConfig } from "./config";
+import { expandHome, isFileNotFound } from "../util";
 
 export async function getVaultRoot(): Promise<string> {
   const configuredRoot = await readConfiguredRoot();
@@ -59,28 +60,6 @@ async function readConfiguredRoot(): Promise<string> {
 
 function unconfiguredError(): Error {
   return new Error("Vault root not configured: set KNOWLEDGE_VAULT_ROOT or ~/.config/wiki/config.toml vault.root");
-}
-
-function expandHome(path: string): string {
-  if (path === "~") {
-    return homeDirectory();
-  }
-  if (path.startsWith("~/")) {
-    return `${homeDirectory()}${path.slice(1)}`;
-  }
-  return path;
-}
-
-function homeDirectory(): string {
-  const home = process.env.HOME;
-  if (home === undefined || home.length === 0) {
-    throw new Error("HOME is not set");
-  }
-  return home;
-}
-
-function isFileNotFound(error: unknown): boolean {
-  return error instanceof Error && "code" in error && error.code === "ENOENT";
 }
 
 function isMissingVaultRoot(error: unknown): boolean {

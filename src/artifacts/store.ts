@@ -10,6 +10,7 @@ import { type DocCategory, isDocCategory } from "./registry";
 import { nextId } from "./id";
 import { buildIdIndex } from "./id-index";
 import { artifactDirectory, assertSafeSegment } from "./paths";
+import { isFileNotFound } from "../util";
 import { applyDefaults, orderBySchema, renderArtifact } from "./render";
 
 export type CreateArtifactInput = {
@@ -356,10 +357,6 @@ export function slugifyTitle(title: string): string {
     .replace(/^-+|-+$/g, "")
     .replace(/-{2,}/g, "-");
   return slug.length > 0 ? slug.slice(0, 80).replace(/-+$/g, "") : "untitled";
-}
-
-function isFileNotFound(error: unknown): boolean {
-  return error instanceof Error && "code" in error && error.code === "ENOENT";
 }
 
 function isFileExists(error: unknown): boolean {

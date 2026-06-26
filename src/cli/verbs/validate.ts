@@ -3,9 +3,9 @@ import { readFile } from "node:fs/promises";
 import { basename, relative } from "node:path";
 
 import { bodySectionDrift } from "../../artifacts/body";
-import { loadTemplate, normalizeInlineMaps, resolveTemplatePath, type TemplateType } from "../../schema/load";
+import { loadTemplate, normalizeInlineMaps, resolveTemplatePath } from "../../schema/load";
 import { validate } from "../../schema/validate";
-import { FOLDER_TO_TYPE } from "../../artifacts/registry";
+import { artifactTypeForVaultPath } from "../../artifacts/registry";
 import { getVaultRoot } from "../../config/vault";
 import { emitJson, jsonEnabled } from "../output";
 import type { CliResult } from "../dispatch";
@@ -27,7 +27,7 @@ export async function handleValidate(args: string[]): Promise<CliResult> {
 
   const vaultRoot = await getVaultRoot();
   const rel = relative(vaultRoot, filePath);
-  const type = inferType(rel);
+  const type = artifactTypeForVaultPath(rel);
   if (type === undefined) {
     console.error(`cannot infer artifact type from path: ${rel}`);
     console.error("expected path under projects/<name>/<prds|slices|adrs|handoffs|docs>/");
@@ -68,13 +68,4 @@ export async function handleValidate(args: string[]): Promise<CliResult> {
     }
   }
   return { code: 1 };
-}
-
-function inferType(rel: string): TemplateType | undefined {
-  const parts = rel.split("/");
-  const dir = parts[2];
-  if (parts[0] === "projects" && parts.length >= 4 && dir !== undefined) {
-    return FOLDER_TO_TYPE[dir];
-  }
-  return undefined;
 }

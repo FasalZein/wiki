@@ -1,5 +1,7 @@
-import { access, readdir, stat } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
+
+import { exists } from "../util";
 
 /** One distribution-health finding from `wiki doctor --setup`. */
 export type SetupIssue = {
@@ -22,15 +24,6 @@ export interface SetupFacts {
   skillBundlePath: string;
   /** Whether the persist-reminder hook is wired in any runtime/scope. */
   hookWired: boolean;
-}
-
-async function exists(path: string): Promise<boolean> {
-  try {
-    await access(path);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 /** Newest mtime (ms) under a directory tree, or 0 if it can't be read. */

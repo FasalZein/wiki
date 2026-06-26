@@ -52,9 +52,9 @@ export async function handleSet(args: string[]): Promise<CliResult> {
   if (additive) return setListField(target, field, { add, remove, clear });
 
   const coerced = await coerceValue(target.type, field, values);
-  if (typeof coerced === "object" && coerced !== null && "error" in coerced) return fail((coerced as { error: string }).error);
+  if (!coerced.ok) return fail(coerced.error);
 
-  return run(target, () => setField({ ...target, field, value: (coerced as { value: unknown }).value }), (artifact) => ({
+  return run(target, () => setField({ ...target, field, value: coerced.value }), (artifact) => ({
     id: target.id,
     field,
     value: artifact.fields[field] ?? null,
@@ -220,24 +220,26 @@ async function resolveTarget(id: string, parsed: ParsedCommand): Promise<Target 
 }
 
 /** Coerce raw CLI string args to the field's schema type (booleans, integers, lists). */
-async function coerceValue(type: TemplateType, field: string, values: string[]): Promise<{ value: unknown } | { error: string }> {
+type CoercedValue = { ok: true; value: unknown } | { ok: false; error: string };
+
+async function coerceValue(type: TemplateType, field: string, values: string[]): Promise<CoercedValue> {
   const schema = await loadTemplate(type);
   const def = schema.fields.find((candidate) => candidate.name === field);
-  if (def === undefined) return { error: `unknown field for ${type}: ${field}` };
-  if (def.type === "list" || def.type === "link_list") return { value: values };
-  if (values.length !== 1) return { error: `field ${field} takes a single value` };
+  if (def === undefined) return { ok: false, error: `unknown field for ${type}: ${field}` };
+  if (def.type === "list" || def.type === "link_list") return { ok: true, value: values };
+  if (values.length !== 1) return { ok: false, error: `field ${field} takes a single value` };
   const raw = values[0]!;
   if (def.type === "boolean") {
-    if (raw === "true") return { value: true };
-    if (raw === "false") return { value: false };
-    return { error: `field ${field} expects true|false` };
+    if (raw === "true") return { ok: true, value: true };
+    if (raw === "false") return { ok: true, value: false };
+    return { ok: false, error: `field ${field} expects true|false` };
   }
   if (def.type === "integer") {
     const n = Number(raw);
-    if (!Number.isInteger(n)) return { error: `field ${field} expects an integer` };
-    return { value: n };
+    if (!Number.isInteger(n)) return { ok: false, error: `field ${field} expects an integer` };
+    return { ok: true, value: n };
   }
-  return { value: raw };
+  return { ok: true, value: raw };
 }
 
 async function run(
