@@ -15,8 +15,6 @@ export type DriftIssue = {
     | "contract-drift"
     | "duplicate-id"
     | "dangling-link";
-  project?: string;
-  actual?: string;
   message: string;
 };
 
@@ -86,8 +84,6 @@ export async function checkProjectIdDrift(vaultPath: string, project: string): P
     if (paths.length > 1) {
       issues.push({
         type: "duplicate-id",
-        project,
-        actual: id,
         message: `${project}: id ${id} maps to ${paths.length} files (${paths.map((p) => p.split("/").pop()).join(", ")}) — ids must be unique. Renumber or merge the duplicates.`,
       });
     }
@@ -102,8 +98,6 @@ export async function checkProjectIdDrift(vaultPath: string, project: string): P
         if (!known.has(id)) {
           issues.push({
             type: "dangling-link",
-            project,
-            actual: id,
             message: `${project}: ${path.split("/").pop()} references ${id}, which has no artifact in this project — fix the link or restore the target.`,
           });
         }
@@ -163,16 +157,12 @@ export async function checkProjectDocsStructure(vaultPath: string, project: stri
       if (!locked.has(entry.name)) {
         issues.push({
           type: "docs-structure",
-          project,
-          actual: entry.name,
           message: `${project}: docs/${entry.name}/ is not a locked category — docs must live in one of: ${DOC_CATEGORIES.join(", ")}. Move its docs with 'wiki doc recategorize' or remove the folder.`,
         });
       }
     } else if (entry.name.endsWith(".md")) {
       issues.push({
         type: "docs-structure",
-        project,
-        actual: entry.name,
         message: `${project}: docs/${entry.name} sits directly under docs/ — docs belong inside a locked category folder, not loose. Recreate via 'wiki create doc' or move it into a category.`,
       });
     }
@@ -214,7 +204,6 @@ export async function checkProjectRepoBindings(vaultPath: string, project: strin
     } catch {
       issues.push({
         type: "repo-binding-warning",
-        project,
         message: `${project}: linked repo '${repoPath}' is not accessible — skipping block check. Remove it from linked_repos or restore the path.`,
       });
       continue;
@@ -230,14 +219,12 @@ export async function checkProjectRepoBindings(vaultPath: string, project: strin
           // File absent — flag as missing
           issues.push({
             type: "repo-binding",
-            project,
             message: `${project}: ${file} in repo '${repoPath}' is missing — run: wiki project link --project ${project} --repo ${repoPath}`,
           });
         } else {
           // Unreadable file — degrade to warning
           issues.push({
             type: "repo-binding-warning",
-            project,
             message: `${project}: ${file} in repo '${repoPath}' could not be read — skipping block check.`,
           });
         }
@@ -249,7 +236,6 @@ export async function checkProjectRepoBindings(vaultPath: string, project: strin
         // No block present
         issues.push({
           type: "repo-binding",
-          project,
           message: `${project}: ${file} in repo '${repoPath}' is missing the wiki block — run: wiki project link --project ${project} --repo ${repoPath}`,
         });
         continue;
@@ -259,7 +245,6 @@ export async function checkProjectRepoBindings(vaultPath: string, project: strin
       if (blockVersion !== BLOCK_VERSION) {
         issues.push({
           type: "repo-binding",
-          project,
           message: `${project}: ${file} in repo '${repoPath}' has a stale wiki block (v${blockVersion}, current is v${BLOCK_VERSION}) — run: wiki project link --project ${project} --repo ${repoPath}`,
         });
       }
@@ -282,7 +267,6 @@ async function checkRepoContractDrift(project: string, repoPath: string): Promis
   if (await exists(join(repoPath, "CONTEXT.md"))) {
     issues.push({
       type: "contract-drift",
-      project,
       message: `${project}: repo '${repoPath}' contains CONTEXT.md — glossary terms belong in the vault. Recreate each term via 'wiki create doc --project ${project} --type reference', then delete the repo file.`,
     });
   }
@@ -293,7 +277,6 @@ async function checkRepoContractDrift(project: string, repoPath: string): Promis
     if (adrFiles.length > 0) {
       issues.push({
         type: "contract-drift",
-        project,
         message: `${project}: repo '${repoPath}' contains docs/adr/ files (${adrFiles.join(", ")}) — decisions belong in the vault. Recreate each via 'wiki create decision --project ${project}', then delete the repo files.`,
       });
     }

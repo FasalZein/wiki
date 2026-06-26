@@ -159,4 +159,32 @@ describe("createArtifact collision safety", () => {
     expect(await Bun.file(a.path).exists()).toBe(true);
     expect(await Bun.file(b.path).exists()).toBe(true);
   });
+
+  test("throws after exhausting MAX_ATTEMPTS when every recomputed id keeps colliding", async () => {
+    const vault = await createVault("test");
+    const prds = join(vault, "projects", "test", "prds");
+    // Pre-create a file at the target path that the filename scan and id index both
+    // MISS (lowercase prefix, no frontmatter id), so nextId always returns PRD-0001.
+    // On a case-insensitive filesystem the exclusive ('wx') write to PRD-0001-*.md
+    // collides with this every attempt, so the bounded retry loop exhausts and throws.
+    const probe = join(prds, "probe.md");
+    await writeFile(probe, "x");
+    const lower = join(prds, "probe-2.md");
+    await writeFile(lower, "x");
+    const caseInsensitive = await Bun.file(join(prds, "PROBE.md")).exists();
+    await rm(probe);
+    await rm(lower);
+    if (!caseInsensitive) return; // can't force a deterministic collision on a case-sensitive FS
+
+    // The allocator slugs "Collide" -> "collide"; pre-occupy the lowercased same path.
+    await writeFile(join(prds, "prd-0001-collide.md"), "x");
+    await expect(
+      createArtifact({
+        type: "prd",
+        vaultRoot: vault,
+        project: "test",
+        fields: { title: "Collide", summary: "A populated summary here." },
+      }),
+    ).rejects.toThrow();
+  });
 });
