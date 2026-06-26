@@ -60,7 +60,8 @@ One validated `wiki` call per intent — never hand-edit frontmatter:
 - `--json` is universal: mutation verbs and `create`/`next-id` give `{id,…}` on stdout
   and `{error,field,expected}` on stderr; `validate --json` gives
   `{ok,type,errors:[{field,reason,expected}]}`; `doc retitle/recategorize --json` give
-  `{id,path}`; `search --json` gives a JSON array of `{path,score,snippet}` hits — detect
+  `{id,path}`; `search --json` gives a JSON array of `{id,kind,title,path,score,snippet}` hits
+  (one per artifact) — detect
   success/failure and read results without scraping prose.
 
 ## Gates and upkeep

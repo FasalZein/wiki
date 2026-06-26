@@ -20,8 +20,9 @@ describe("search CLI", () => {
     expect(result.stderr).toContain("missing required field: query");
   });
 
-  test("search prints QMD results as tab-separated lines", async () => {
+  test("search prints id/kind/title-enriched lines", async () => {
     const fixture = await createSearchFixture("wiki-v2");
+    // Files don't exist on disk: id falls back to the filename, kind to the folder.
     await writeFile(
       fixture.resultsFile,
       JSON.stringify([
@@ -34,8 +35,8 @@ describe("search CLI", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe(
-      `${join(fixture.projectPath, "prds", "PRD-001.md")}\t0.9\tFirst result\n` +
-        `${join(fixture.projectPath, "slices", "SLICE-001.md")}\t0.72\tSecond result\n`,
+      `PRD-001\tprd\t\t0.9\tFirst result\n` +
+        `SLICE-001\tslice\t\t0.72\tSecond result\n`,
     );
     expect(result.stderr).toContain("wiki vault:");
     const log = await readFile(fixture.stateFile, "utf8");
@@ -46,14 +47,60 @@ describe("search CLI", () => {
     expect(log).toContain("lex: vault");
   });
 
-  test("search exits 0 with empty stdout when QMD returns no results", async () => {
+  test("search prints a no-results line when QMD returns no results (SLICE-0092)", async () => {
     const fixture = await createSearchFixture("wiki-v2");
 
     const result = await runWiki(["search", "missing", "--project", "wiki-v2"], fixture);
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe("");
+    expect(result.stdout).toBe("no results\n");
     expect(result.stderr).toContain("wiki vault:");
+  });
+
+  test("search groups hits one line per artifact and enriches from frontmatter (SLICE-0092)", async () => {
+    const fixture = await createSearchFixture("wiki-v2");
+    await writeFile(
+      join(fixture.projectPath, "prds", "PRD-001.md"),
+      `---\nid: PRD-001\ntitle: Rate limiting design\n---\nbody\n`,
+    );
+    // qmd can return several chunks of the same file; they collapse to one line.
+    await writeFile(
+      fixture.resultsFile,
+      JSON.stringify([
+        { path: "qmd://wiki-v2/prds/PRD-001.md", score: 0.9, snippet: "chunk one" },
+        { path: "qmd://wiki-v2/prds/PRD-001.md", score: 0.6, snippet: "chunk two" },
+        { path: "qmd://wiki-v2/slices/SLICE-007.md", score: 0.5, snippet: "slice chunk" },
+      ]),
+    );
+
+    const result = await runWiki(["search", "rate", "--project", "wiki-v2"], fixture);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe(
+      `PRD-001\tprd\tRate limiting design\t0.9\tchunk one\n` +
+        `SLICE-007\tslice\t\t0.5\tslice chunk\n`,
+    );
+  });
+
+  test("search --json enriches each hit with id/kind/title (SLICE-0092)", async () => {
+    const fixture = await createSearchFixture("wiki-v2");
+    await writeFile(
+      join(fixture.projectPath, "prds", "PRD-001.md"),
+      `---\nid: PRD-001\ntitle: Rate limiting design\n---\nbody\n`,
+    );
+    await writeFile(
+      fixture.resultsFile,
+      JSON.stringify([
+        { path: "qmd://wiki-v2/prds/PRD-001.md", score: 0.9, snippet: "First\nresult" },
+      ]),
+    );
+
+    const result = await runWiki(["search", "rate", "--project", "wiki-v2", "--json"], fixture);
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual([
+      { id: "PRD-001", kind: "prd", title: "Rate limiting design", path: "qmd://wiki-v2/prds/PRD-001.md", score: "0.9", snippet: "First result" },
+    ]);
   });
 
   test("search registers the project collection only once across repeated calls", async () => {
@@ -104,8 +151,8 @@ describe("search CLI", () => {
 
     expect(result.exitCode).toBe(0);
     expect(JSON.parse(result.stdout)).toEqual([
-      { path: "qmd://wiki-v2/prds/PRD-001.md", score: "0.9", snippet: "First result" },
-      { path: "qmd://wiki-v2/slices/SLICE-001.md", score: "0.72", snippet: "Second result" },
+      { id: "PRD-001", kind: "prd", title: "", path: "qmd://wiki-v2/prds/PRD-001.md", score: "0.9", snippet: "First result" },
+      { id: "SLICE-001", kind: "slice", title: "", path: "qmd://wiki-v2/slices/SLICE-001.md", score: "0.72", snippet: "Second result" },
     ]);
   });
 
@@ -133,7 +180,7 @@ describe("search CLI", () => {
     const result = await runWiki(["search", "vault", "--project", "wiki-v2", "--type", "slice"], fixture);
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe("qmd://wiki-v2/slices/SLICE-001.md\t0.8\tSlice\n");
+    expect(result.stdout).toBe("SLICE-001\tslice\t\t0.8\tSlice\n");
     // qmd truncates to a default 20-result window before we can filter by folder;
     // a --type filter must over-fetch so matching artifacts below that window survive.
     const log = await readFile(fixture.stateFile, "utf8");

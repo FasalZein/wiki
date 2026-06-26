@@ -111,7 +111,7 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
       "--include-research": "include research collection",
       "--explain": "include qmd's match explanation",
       "--no-refresh": "skip the pre-query incremental embed",
-      "--json": "emit a JSON array of {path,score,snippet} hits ([] when empty)",
+      "--json": "emit a JSON array of {id,kind,title,path,score,snippet} hits ([] when empty)",
     },
     example: 'wiki search "rate limiting"',
   },

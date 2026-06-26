@@ -8,9 +8,13 @@
  * exposes richer frontmatter, this can move into runQuery.
  */
 
+import matter from "gray-matter";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+
 import { ensureCollection, QmdError, refreshCollections, runQuery, type QmdResult } from "../../integrations/qmd";
 import { artifactFolder, projectPath } from "../../artifacts/paths";
-import { ARTIFACTS } from "../../artifacts/registry";
+import { ARTIFACTS, FOLDER_TO_TYPE } from "../../artifacts/registry";
 import { assertProjectStructure, listProjects, loadProjectConfig, type ProjectConfig, ProjectConfigError, projectErrorMessage } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import type { TemplateType } from "../../schema/load";
@@ -94,10 +98,15 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
       qmdCommand = resolved;
     }
 
+    // collection name -> base directory, so a qmd://<collection>/<rel> URI can be
+    // resolved back to a file on disk for frontmatter enrichment.
+    const collectionBases = new Map<string, string>();
     const collections: string[] = [];
     for (const [proj] of configs) {
-      await ensureCollection(qmdCommand, proj, projectPath(vaultRoot, proj));
+      const base = projectPath(vaultRoot, proj);
+      await ensureCollection(qmdCommand, proj, base);
       collections.push(proj);
+      collectionBases.set(proj, base);
     }
     if (booleanValue(parsed.values, "include-research")) {
       const researchPath = uniformConfigValue(configs.map(([proj, c]) => [proj, c.research_path] as const));
@@ -107,6 +116,7 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
       }
       await ensureCollection(qmdCommand, "research", researchPath);
       collections.push("research");
+      collectionBases.set("research", researchPath);
     }
 
     // Auto-refresh collections before querying (unless --no-refresh), via the
@@ -125,7 +135,7 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
       }),
       type,
     );
-    writeResults(results);
+    await writeResults(results, collectionBases);
     return { code: 0 };
   } catch (error) {
     if (error instanceof QmdError) {
@@ -184,24 +194,94 @@ function uriPath(path: string): string {
   }
 }
 
-function writeResults(results: QmdResult[]): void {
-  // SLICE-0088: --json emits the structured array (coordinates with PRD-0014
-  // item 16's richer per-artifact shape); human mode stays the tab-separated
-  // lines. An empty result set is a valid [] in json mode, blank otherwise.
+type EnrichedHit = {
+  id: string;
+  kind: string;
+  title: string;
+  path: string;
+  score: string;
+  snippet: string;
+};
+
+async function writeResults(results: QmdResult[], collectionBases: Map<string, string>): Promise<void> {
+  // SLICE-0092: group hits one line per artifact (qmd returns multiple chunks of
+  // the same file) and enrich each with id/kind/title from frontmatter. --json
+  // emits the same shape as an array; empty prints a no-results line in human
+  // mode and a valid [] in json mode.
+  const hits = await enrichHits(results, collectionBases);
   if (jsonEnabled()) {
-    emitJsonArray(results.map((result) => ({
+    emitJsonArray(hits);
+    return;
+  }
+  if (hits.length === 0) {
+    process.stdout.write("no results\n");
+    return;
+  }
+  process.stdout.write(hits.map(formatHit).join("\n") + "\n");
+}
+
+/** Collapse per-file chunks to one hit each (highest-ranked wins; qmd ranks desc)
+ *  and enrich with id/kind/title read from the resolved file's frontmatter. */
+async function enrichHits(results: QmdResult[], collectionBases: Map<string, string>): Promise<EnrichedHit[]> {
+  const seen = new Set<string>();
+  const hits: EnrichedHit[] = [];
+  for (const result of results) {
+    const filePath = resolveFilePath(result.path, collectionBases);
+    const dedupKey = filePath ?? result.path;
+    if (seen.has(dedupKey)) continue;
+    seen.add(dedupKey);
+    const { id, kind, title } = await readMeta(result.path, filePath);
+    hits.push({
+      id,
+      kind,
+      title,
       path: result.path,
       score: result.score,
       snippet: result.snippet.replaceAll(/\s*\n\s*/g, " ").trim(),
-    })));
-    return;
+    });
   }
-  if (results.length === 0) {
-    return;
-  }
-  process.stdout.write(results.map(formatResult).join("\n") + "\n");
+  return hits;
 }
 
-function formatResult(result: QmdResult): string {
-  return `${result.path}\t${result.score}\t${result.snippet.replaceAll(/\s*\n\s*/g, " ").trim()}`;
+/** Map a qmd://<collection>/<rel> URI (or a raw filesystem path) to a file on
+ *  disk; null when the collection is unknown. */
+function resolveFilePath(path: string, collectionBases: Map<string, string>): string | null {
+  if (path.startsWith("qmd://")) {
+    const rest = path.slice("qmd://".length);
+    const slash = rest.indexOf("/");
+    if (slash === -1) return null;
+    const collection = rest.slice(0, slash);
+    const rel = rest.slice(slash + 1);
+    const base = collectionBases.get(collection);
+    return base === undefined ? null : join(base, rel);
+  }
+  return path; // already a filesystem path
+}
+
+/** id/kind/title from frontmatter when the file is readable, else a filename/
+ *  folder fallback (id from the basename stem, kind from the parent folder). */
+async function readMeta(uri: string, filePath: string | null): Promise<{ id: string; kind: string; title: string }> {
+  const segments = uriPath(uri).split(/[\\/]/).filter((s) => s.length > 0);
+  const fileName = segments[segments.length - 1] ?? "";
+  const folder = segments[segments.length - 2] ?? "";
+  const kind = FOLDER_TO_TYPE[folder] ?? folder;
+  // Filename is ID-slug.md where ID is PREFIX-NNNN; fall back to that id shape,
+  // else the whole basename stem.
+  const stem = fileName.replace(/\.md$/, "");
+  let id = /^[A-Za-z]+-\d+/.exec(stem)?.[0] ?? stem;
+  let title = "";
+  if (filePath !== null) {
+    try {
+      const data = matter(await readFile(filePath, "utf8")).data;
+      if (typeof data.id === "string" && data.id.length > 0) id = data.id;
+      if (typeof data.title === "string") title = data.title;
+    } catch {
+      // file not on disk (e.g. stale index) — keep the filename/folder fallback
+    }
+  }
+  return { id, kind, title };
+}
+
+function formatHit(hit: EnrichedHit): string {
+  return `${hit.id}\t${hit.kind}\t${hit.title}\t${hit.score}\t${hit.snippet}`;
 }
