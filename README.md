@@ -120,6 +120,7 @@ verbs. Recall first, then write.
 ```sh
 # recall before acting
 wiki search "auth flow" --project myproj   # ranked hybrid search, one line per artifact with id/kind/title (--json for a {id,kind,title,path,score,snippet} array)
+wiki search "what changed recently" --recent # order by last-modified instead of relevance (--since 2026-06-01 to bound it)
 wiki status --project myproj               # recent artifacts
 
 # create — one-shot, body via stdin, schema-validated

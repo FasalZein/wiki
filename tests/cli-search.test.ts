@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -205,6 +205,62 @@ describe("search CLI", () => {
     expect(result.exitCode).toBe(10);
     expect(result.stdout).toBe("");
     expect(result.stderr).toContain("fake qmd failed");
+  });
+
+  test("search --recent orders artifacts by mtime, not qmd ranking (SLICE-0093)", async () => {
+    const fixture = await createSearchFixture("wiki-v2");
+    await writeFile(join(fixture.projectPath, "prds", "PRD-001-old.md"), `---\nid: PRD-001\ntitle: Old PRD\n---\nx\n`);
+    await writeFile(join(fixture.projectPath, "slices", "SLICE-002-mid.md"), `---\nid: SLICE-002\ntitle: Mid slice\n---\nx\n`);
+    await writeFile(join(fixture.projectPath, "adrs", "ADR-003-new.md"), `---\nid: ADR-003\ntitle: New ADR\n---\nx\n`);
+    const base = Date.now();
+    await utimes(join(fixture.projectPath, "prds", "PRD-001-old.md"), new Date(base - 30000), new Date(base - 30000));
+    await utimes(join(fixture.projectPath, "slices", "SLICE-002-mid.md"), new Date(base - 15000), new Date(base - 15000));
+    await utimes(join(fixture.projectPath, "adrs", "ADR-003-new.md"), new Date(base), new Date(base));
+
+    const result = await runWiki(["search", "anything", "--project", "wiki-v2", "--recent", "--json"], fixture);
+
+    expect(result.exitCode).toBe(0);
+    const hits = JSON.parse(result.stdout) as Array<{ id: string }>;
+    expect(hits.map((h) => h.id)).toEqual(["ADR-003", "SLICE-002", "PRD-001"]);
+    const log = await readFile(fixture.stateFile, "utf8").catch(() => "");
+    expect(log).not.toContain("query");
+  });
+
+  test("a temporal query routes to recency ordering without --recent (SLICE-0093)", async () => {
+    const fixture = await createSearchFixture("wiki-v2");
+    await writeFile(join(fixture.projectPath, "prds", "PRD-010-a.md"), `---\nid: PRD-010\ntitle: A\n---\nx\n`);
+    await writeFile(join(fixture.projectPath, "prds", "PRD-011-b.md"), `---\nid: PRD-011\ntitle: B\n---\nx\n`);
+    const base = Date.now();
+    await utimes(join(fixture.projectPath, "prds", "PRD-010-a.md"), new Date(base - 10000), new Date(base - 10000));
+    await utimes(join(fixture.projectPath, "prds", "PRD-011-b.md"), new Date(base), new Date(base));
+
+    const result = await runWiki(["search", "what changed recently", "--project", "wiki-v2", "--json"], fixture);
+
+    expect(result.exitCode).toBe(0);
+    const hits = JSON.parse(result.stdout) as Array<{ id: string }>;
+    expect(hits.map((h) => h.id)).toEqual(["PRD-011", "PRD-010"]);
+  });
+
+  test("search --since filters to artifacts modified at/after the date (SLICE-0093)", async () => {
+    const fixture = await createSearchFixture("wiki-v2");
+    await writeFile(join(fixture.projectPath, "prds", "PRD-020-stale.md"), `---\nid: PRD-020\ntitle: Stale\n---\nx\n`);
+    await writeFile(join(fixture.projectPath, "prds", "PRD-021-fresh.md"), `---\nid: PRD-021\ntitle: Fresh\n---\nx\n`);
+    await utimes(join(fixture.projectPath, "prds", "PRD-020-stale.md"), new Date("2000-01-01"), new Date("2000-01-01"));
+
+    const result = await runWiki(["search", "x", "--project", "wiki-v2", "--since", "2020-01-01", "--json"], fixture);
+
+    expect(result.exitCode).toBe(0);
+    const hits = JSON.parse(result.stdout) as Array<{ id: string }>;
+    expect(hits.map((h) => h.id)).toEqual(["PRD-021"]);
+  });
+
+  test("search --since rejects an invalid date (SLICE-0093)", async () => {
+    const fixture = await createSearchFixture("wiki-v2");
+
+    const result = await runWiki(["search", "x", "--project", "wiki-v2", "--since", "not-a-date"], fixture);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("invalid --since date");
   });
 });
 

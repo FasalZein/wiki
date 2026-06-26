@@ -14,7 +14,9 @@ owns all command syntax; never restate flags here — run `wiki <verb> --help`.
 1. Recall before you act, in two tiers: skim `projects/<name>/index.md` — the
    sync-generated **roster** of every artifact with its one-line summary — then
    `wiki search "<query>" --project <name>` (vault-wide without `--project`) for
-   semantic recall. `wiki status` lists a project's recent artifacts, or the
+   semantic recall. `wiki search --recent` (or a temporal query like "what changed
+   recently") orders by last-modified instead of relevance; `--since <date>` bounds
+   it. `wiki status` lists a project's recent artifacts, or the
    projects themselves when none is bound. A month-old decision is one scan away —
    retrieve it instead of re-deriving it.
 2. `wiki <verb> --help` for exact usage before any call. `wiki --help` lists verbs.

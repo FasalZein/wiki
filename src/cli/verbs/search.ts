@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { ensureCollection, QmdError, refreshCollections, runQuery, type QmdResult } from "../../integrations/qmd";
 import { artifactFolder, projectPath } from "../../artifacts/paths";
 import { ARTIFACTS, FOLDER_TO_TYPE } from "../../artifacts/registry";
+import { recentArtifacts, RECENT_LIMIT, type RecentArtifact } from "../../artifacts/recent";
 import { assertProjectStructure, listProjects, loadProjectConfig, type ProjectConfig, ProjectConfigError, projectErrorMessage } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import type { TemplateType } from "../../schema/load";
@@ -32,7 +33,7 @@ const allowedTypes: readonly TemplateType[] = Object.keys(ARTIFACTS) as Template
 const TYPE_FILTER_FETCH = 50;
 
 export async function handleSearch(args: string[]): Promise<CliResult> {
-  const parsed = parseCommand(args, ["project", "type"], [], ["include-research", "explain", "no-refresh"]);
+  const parsed = parseCommand(args, ["project", "type", "since"], [], ["include-research", "explain", "no-refresh", "recent"]);
   const query = parsed.positionals[0]?.trim();
   if (query === undefined || query.length === 0) {
     console.error("missing required field: query");
@@ -46,6 +47,21 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
   }
   const explain = booleanValue(parsed.values, "explain");
   const noRefresh = booleanValue(parsed.values, "no-refresh");
+
+  // Recency path: --recent, --since, or a temporal query ("what changed recently")
+  // orders artifacts by mtime off disk — no qmd ranking. Reuses status's
+  // recent-artifacts list so "recent" means the same thing in both verbs.
+  const sinceRaw = stringValue(parsed.values, "since");
+  let since: number | undefined;
+  if (sinceRaw !== undefined) {
+    const parsedDate = new Date(sinceRaw).getTime();
+    if (Number.isNaN(parsedDate)) {
+      console.error(`invalid --since date: ${sinceRaw} (use e.g. 2026-06-01)`);
+      return { code: 1 };
+    }
+    since = parsedDate;
+  }
+  const recency = booleanValue(parsed.values, "recent") || since !== undefined || classifyIntent(query) === "temporal";
 
   const vaultRoot = await getVaultRoot();
 
@@ -69,6 +85,10 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
       throw error;
     }
     targetProjects = [project];
+  }
+
+  if (recency) {
+    return handleRecency(vaultRoot, targetProjects, { type, since });
   }
 
   try {
@@ -208,7 +228,11 @@ async function writeResults(results: QmdResult[], collectionBases: Map<string, s
   // the same file) and enrich each with id/kind/title from frontmatter. --json
   // emits the same shape as an array; empty prints a no-results line in human
   // mode and a valid [] in json mode.
-  const hits = await enrichHits(results, collectionBases);
+  emitHits(await enrichHits(results, collectionBases));
+}
+
+/** Shared terminal: same shape for the qmd path and the recency path. */
+function emitHits(hits: EnrichedHit[]): void {
   if (jsonEnabled()) {
     emitJsonArray(hits);
     return;
@@ -218,6 +242,44 @@ async function writeResults(results: QmdResult[], collectionBases: Map<string, s
     return;
   }
   process.stdout.write(hits.map(formatHit).join("\n") + "\n");
+}
+
+/**
+ * SLICE-0093: the temporal/recency path. Orders artifacts by mtime off disk
+ * (reusing status's recentArtifacts) instead of qmd ranking; --since filters to
+ * files modified at/after a date; --type narrows to one kind. Score is blank —
+ * there is no relevance score, only recency.
+ */
+async function handleRecency(
+  vaultRoot: string,
+  targetProjects: string[],
+  opts: { type: TemplateType | undefined; since: number | undefined },
+): Promise<CliResult> {
+  let artifacts: RecentArtifact[] = [];
+  for (const proj of targetProjects) {
+    artifacts.push(...(await recentArtifacts(vaultRoot, projectPath(vaultRoot, proj))));
+  }
+  artifacts.sort((a, b) => b.mtime - a.mtime);
+  if (opts.since !== undefined) {
+    artifacts = artifacts.filter((a) => a.mtime >= (opts.since as number));
+  }
+  if (opts.type !== undefined) {
+    const prefix = `/${artifactFolder(opts.type)}/`;
+    artifacts = artifacts.filter((a) => `/${a.rel.split(/[\\/]/).join("/")}`.includes(prefix));
+  }
+  const hits: EnrichedHit[] = [];
+  for (const artifact of artifacts.slice(0, RECENT_LIMIT)) {
+    hits.push(await recencyHit(artifact.full, artifact.rel));
+  }
+  emitHits(hits);
+  return { code: 0 };
+}
+
+/** Build an EnrichedHit for a recency result: id/kind/title from frontmatter (or
+ *  filename/folder fallback), blank score and snippet (recency carries neither). */
+async function recencyHit(filePath: string, rel: string): Promise<EnrichedHit> {
+  const { id, kind, title } = await readMeta(rel, filePath);
+  return { id, kind, title, path: filePath, score: "", snippet: "" };
 }
 
 /** Collapse per-file chunks to one hit each (highest-ranked wins; qmd ranks desc)

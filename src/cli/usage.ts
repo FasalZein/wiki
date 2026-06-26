@@ -104,10 +104,12 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
   },
   search: {
     summary: "Search artifacts by keyword. Vault-wide with no --project.",
-    usage: "wiki search <query> [--project <name>] [--type <type>] [--include-research] [--explain] [--no-refresh] [--json]",
+    usage: "wiki search <query> [--project <name>] [--type <type>] [--recent] [--since <date>] [--include-research] [--explain] [--no-refresh] [--json]",
     flags: {
       "--project": "narrow to one project (optional; default: all projects)",
       "--type": "filter by artifact type",
+      "--recent": "order by last-modified (newest first) instead of relevance; a temporal query (e.g. 'what changed recently') triggers this too",
+      "--since": "only artifacts modified at/after this date (e.g. 2026-06-01); implies --recent ordering",
       "--include-research": "include research collection",
       "--explain": "include qmd's match explanation",
       "--no-refresh": "skip the pre-query incremental embed",
