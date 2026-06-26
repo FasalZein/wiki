@@ -44,7 +44,9 @@ artifact, not just this chat, so it outlives the session. Repos stay clean.
 One validated `wiki` call per intent — never hand-edit frontmatter:
 
 - `wiki set <id> <field> <value...>` — schema-validated, comma-safe, type-coerced
-  (e.g. `wiki set PRD-0001 status closed`). Type is inferred from the id. Bare `set`
+  (e.g. `wiki set PRD-0001 status closed`). Type is inferred from the id. Field names
+  are casing-tolerant (kebab `parent-prd` or snake `parent_prd` both work, in `set` and
+  `create`). Bare `set`
   full-replaces; for list/link_list fields use `--add <v>` / `--remove <v>` / `--clear`
   for an additive edit that never overwrites the rest of the list (link_list values
   are written as `[[id]]`).
@@ -55,8 +57,11 @@ One validated `wiki` call per intent — never hand-edit frontmatter:
 - `wiki schema <type>` — discover fields/enums before guessing a value.
 - `wiki path <id>` — resolve an id to its file path (filenames are `ID-slug.md`).
 - `wiki links <id>` — outbound links + inbound backlinks for an artifact (pure vault read, no qmd).
-- `--json` on these (and `create`/`next-id`) gives `{id,…}` on stdout and
-  `{error,field,expected}` on stderr — detect success/failure without scraping prose.
+- `--json` is universal: mutation verbs and `create`/`next-id` give `{id,…}` on stdout
+  and `{error,field,expected}` on stderr; `validate --json` gives
+  `{ok,type,errors:[{field,reason,expected}]}`; `doc retitle/recategorize --json` give
+  `{id,path}`; `search --json` gives a JSON array of `{path,score,snippet}` hits — detect
+  success/failure and read results without scraping prose.
 
 ## Gates and upkeep
 

@@ -34,7 +34,10 @@ type Target = { type: TemplateType; vaultRoot: string; project: string; id: stri
  */
 export async function handleSet(args: string[]): Promise<CliResult> {
   const parsed = parseCommand(args, ["project", "add", "remove"], ["add", "remove"], ["clear"]);
-  const [id, field, ...values] = parsed.positionals;
+  const [id, rawField, ...values] = parsed.positionals;
+  // SLICE-0088: normalize the field name at the parse boundary so a name copied
+  // from `wiki schema` works whether typed kebab (parent-prd) or snake (parent_prd).
+  const field = rawField === undefined ? undefined : rawField.replace(/-/g, "_");
   const add = listValue(parsed.values.add);
   const remove = listValue(parsed.values.remove);
   const clear = booleanValue(parsed.values, "clear");
@@ -256,7 +259,12 @@ async function run(
 function handleError(error: unknown): CliResult {
   if (error instanceof ArtifactValidationError) {
     const first = error.errors[0];
-    return fail(error.message, first === undefined ? {} : { field: first.field, expected: first.expected });
+    // SLICE-0088: append the computed expected set to the human message so an
+    // enum rejection names the valid values, not just "invalid enum value".
+    const message = error.errors
+      .map((e) => `${e.field}: ${e.reason}${e.expected ? ` (expected: ${e.expected})` : ""}`)
+      .join("; ");
+    return fail(message, first === undefined ? {} : { field: first.field, expected: first.expected });
   }
   if (error instanceof ArtifactNotFoundError) return fail(error.message);
   throw error;

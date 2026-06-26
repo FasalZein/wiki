@@ -21,6 +21,11 @@ export function emitJson(obj: Record<string, unknown>): void {
   console.log(JSON.stringify(obj));
 }
 
+/** Stable success array → stdout (json mode only) — e.g. search hits. */
+export function emitJsonArray(items: unknown[]): void {
+  console.log(JSON.stringify(items));
+}
+
 /** Error object → stderr (json mode only). */
 export function emitJsonError(obj: Record<string, unknown>): void {
   console.error(JSON.stringify(obj));

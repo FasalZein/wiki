@@ -90,6 +90,34 @@ describe("search CLI", () => {
     expect(log).toContain("--collection research");
   });
 
+  test("search --json emits a structured array of hits (SLICE-0088)", async () => {
+    const fixture = await createSearchFixture("wiki-v2");
+    await writeFile(
+      fixture.resultsFile,
+      JSON.stringify([
+        { path: "qmd://wiki-v2/prds/PRD-001.md", score: 0.9, snippet: "First\nresult" },
+        { path: "qmd://wiki-v2/slices/SLICE-001.md", score: 0.72, snippet: "Second result" },
+      ]),
+    );
+
+    const result = await runWiki(["search", "vault", "--project", "wiki-v2", "--json"], fixture);
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual([
+      { path: "qmd://wiki-v2/prds/PRD-001.md", score: "0.9", snippet: "First result" },
+      { path: "qmd://wiki-v2/slices/SLICE-001.md", score: "0.72", snippet: "Second result" },
+    ]);
+  });
+
+  test("search --json emits an empty array on no results (SLICE-0088)", async () => {
+    const fixture = await createSearchFixture("wiki-v2");
+
+    const result = await runWiki(["search", "missing", "--project", "wiki-v2", "--json"], fixture);
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual([]);
+  });
+
   test("search type filter keeps only matching artifact folders", async () => {
     const fixture = await createSearchFixture("wiki-v2");
     // qmd emits "qmd://<collection>/<path>" URIs, not filesystem paths; the type

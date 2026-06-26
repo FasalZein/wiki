@@ -206,6 +206,47 @@ describe("mutation verbs", () => {
     const status = JSON.parse(result.stdout).fields.find((field: { name: string }) => field.name === "status");
     expect(status.values).toContain("superseded");
   });
+
+  test("wiki set accepts a kebab-case field name for a snake_case schema field (SLICE-0088)", async () => {
+    const f = await fixture();
+    const slice = await seedSlice(f);
+
+    const result = await runWiki(["set", slice, "parent-prd", "PRD-0001", "--project", "wiki-v2"], f);
+
+    expect(result.exitCode).toBe(0);
+    expect(await readSlice(f, slice)).toContain("parent_prd: PRD-0001");
+  });
+
+  test("wiki set human-mode enum error lists the expected set (SLICE-0088)", async () => {
+    const f = await fixture();
+    const slice = await seedSlice(f);
+
+    const result = await runWiki(["set", slice, "status", "nope", "--project", "wiki-v2"], f);
+
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain("one of:");
+    expect(result.stderr).toContain("planned");
+  });
+
+  test("wiki create accepts a snake_case flag name for a kebab CLI flag (SLICE-0088)", async () => {
+    const f = await fixture();
+    if ((await readdir(join(f.projectPath, "prds"))).length === 0) {
+      await runWiki(["create", "prd", "--title", "Parent PRD for casing test", "--summary", "Parent PRD.", "--project", "wiki-v2", "--force-new", "seeding a parent prd for the casing test"], f);
+    }
+    const result = await runWiki([
+      "create", "slice",
+      "--title", "Slice via snake_case flag",
+      "--summary", "Slice via snake_case flag.",
+      "--project", "wiki-v2",
+      "--parent_prd", "PRD-0001",
+      "--acceptance", "does the thing",
+      "--force-new", "seeding the snake_case casing slice for the test",
+    ], f);
+
+    expect(result.exitCode).toBe(0);
+    const id = result.stdout.trim();
+    expect(await readSlice(f, id)).toContain("parent_prd: PRD-0001");
+  });
 });
 
 type Fixture = { vaultRoot: string; projectPath: string; env: Record<string, string> };

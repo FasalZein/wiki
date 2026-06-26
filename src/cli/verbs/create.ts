@@ -45,6 +45,15 @@ function flagName(field: string): string {
   return field.replace(/_/g, "-");
 }
 
+/** Normalize an argv token: a --flag[=value]'s name has its _ folded to - (value untouched). */
+function normalizeFlagToken(token: string): string {
+  if (!token.startsWith("--")) return token;
+  const eq = token.indexOf("=");
+  const name = eq === -1 ? token : token.slice(0, eq);
+  const rest = eq === -1 ? "" : token.slice(eq);
+  return name.replace(/_/g, "-") + rest;
+}
+
 /**
  * Fields the CLI sets itself, the dedup override owns, or other verbs manage —
  * never create-time flags. Every other schema field becomes a flag.
@@ -86,7 +95,9 @@ async function createGeneric(kind: TemplateType, args: string[]): Promise<CliRes
   }
   for (const placeholder of placeholders) stringFlags.push(flagName(placeholder));
 
-  const parsed = parseCommand(args, stringFlags, multipleFlags, booleanFlags);
+  // SLICE-0088: normalize incoming flag tokens to kebab so a snake_case name
+  // copied from `wiki schema` (e.g. --parent_prd) matches the kebab CLI flags.
+  const parsed = parseCommand(args.map(normalizeFlagToken), stringFlags, multipleFlags, booleanFlags);
 
   const project = await resolveProject(parsed);
   const missing = missingFields({ project });

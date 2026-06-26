@@ -119,7 +119,7 @@ verbs. Recall first, then write.
 
 ```sh
 # recall before acting
-wiki search "auth flow" --project myproj   # ranked hybrid search
+wiki search "auth flow" --project myproj   # ranked hybrid search (--json for a {path,score,snippet} array)
 wiki status --project myproj               # recent artifacts
 
 # create — one-shot, body via stdin, schema-validated
@@ -129,7 +129,7 @@ wiki create decision --project myproj --title "..." --body -    # ADR
 wiki create handoff  --project myproj --body -
 
 # mutate existing artifacts (never hand-edit frontmatter)
-wiki set      SLICE-0001 status closed       # schema-validated; type inferred from id
+wiki set      SLICE-0001 status closed       # schema-validated; type inferred from id (field names: kebab or snake)
 wiki set      SLICE-0001 blocked_by --add SLICE-0002   # additive; --remove/--clear too (bare set replaces)
 wiki block    SLICE-0002 --on SLICE-0001     # sets blocked_by, auto-wraps [[..]]
 wiki supersede ADR-0003 --by ADR-0007
@@ -159,7 +159,7 @@ Good to know:
 wiki doctor                          # vault health report
 wiki fmt --project myproj            # check mode: report format drift, exit 1 if any
 wiki fmt --project myproj --write    # apply mechanical fixes (idempotent)
-wiki validate <file>                 # check one artifact against its template schema + required body sections
+wiki validate <file>                 # check one artifact against its template schema + required body sections (--json: {ok,type,errors})
 ```
 
 `wiki fmt` normalizes dates, frontmatter order, and 4-digit IDs (renumbering

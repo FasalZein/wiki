@@ -84,14 +84,14 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
     subverbs: {
       retitle: {
         summary: "Rename a doc's title and re-slug its filename (stays in its category).",
-        usage: "wiki doc retitle <DOC-NNNN> --project <name> --title <new title>",
-        flags: { "--project": "project name (required)", "--title": "new title (required)" },
+        usage: "wiki doc retitle <DOC-NNNN> --project <name> --title <new title> [--json]",
+        flags: { "--project": "project name (required)", "--title": "new title (required)", "--json": "emit {id,path} to stdout" },
         example: 'wiki doc retitle DOC-0001 --project myproj --title "Clearer title"',
       },
       recategorize: {
         summary: "Move a doc into another locked category subfolder.",
-        usage: "wiki doc recategorize <DOC-NNNN> --project <name> --category <category>",
-        flags: { "--project": "project name (required)", "--category": "architecture|research|runbooks|specs|notes|legacy" },
+        usage: "wiki doc recategorize <DOC-NNNN> --project <name> --category <category> [--json]",
+        flags: { "--project": "project name (required)", "--category": "architecture|research|runbooks|specs|notes|legacy", "--json": "emit {id,path} to stdout" },
         example: "wiki doc recategorize DOC-0001 --project myproj --category runbooks",
       },
     },
@@ -104,13 +104,21 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
   },
   search: {
     summary: "Search artifacts by keyword. Vault-wide with no --project.",
-    usage: "wiki search <query> [--project <name>] [--type <type>] [--include-research]",
-    flags: { "--project": "narrow to one project (optional; default: all projects)", "--type": "filter by artifact type", "--include-research": "include research collection" },
+    usage: "wiki search <query> [--project <name>] [--type <type>] [--include-research] [--explain] [--no-refresh] [--json]",
+    flags: {
+      "--project": "narrow to one project (optional; default: all projects)",
+      "--type": "filter by artifact type",
+      "--include-research": "include research collection",
+      "--explain": "include qmd's match explanation",
+      "--no-refresh": "skip the pre-query incremental embed",
+      "--json": "emit a JSON array of {path,score,snippet} hits ([] when empty)",
+    },
     example: 'wiki search "rate limiting"',
   },
   validate: {
     summary: "Validate a single artifact file against its template schema and required body sections.",
-    usage: "wiki validate <file>",
+    usage: "wiki validate <file> [--json]",
+    flags: { "--json": "emit {ok,type,errors:[{field,reason,expected}]} to stdout" },
     example: "wiki validate projects/myproj/adrs/ADR-0001-foo.md",
   },
   "next-id": {

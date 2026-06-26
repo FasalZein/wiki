@@ -7,6 +7,7 @@ import {
 import { DOC_CATEGORIES, isDocCategory, type DocCategory } from "../../artifacts/registry";
 import { assertProjectStructure, ProjectConfigError } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
+import { emitJson, jsonEnabled } from "../output";
 import { parseCommand, stringValue } from "../parse";
 import { unknownMessage } from "../usage";
 import type { CliResult } from "../dispatch";
@@ -54,7 +55,8 @@ async function relocate(project: string, id: string, change: { title?: string; c
   try {
     await assertProjectStructure(projPath);
     const artifact = await relocateArtifact({ type: "doc", vaultRoot, project, id, ...change });
-    console.log(artifact.id);
+    if (jsonEnabled()) emitJson({ id: artifact.id, path: artifact.path });
+    else console.log(artifact.id);
     console.error(`updated ${artifact.id}`);
     return { code: 0 };
   } catch (error) {

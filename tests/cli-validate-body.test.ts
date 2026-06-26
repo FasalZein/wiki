@@ -89,6 +89,49 @@ describe("validate body-section check (SLICE-0087)", () => {
   });
 });
 
+describe("validate --json shape (SLICE-0088)", () => {
+  test("validate --json on a clean artifact emits {ok:true,type,errors:[]}", async () => {
+    const f = await fixture();
+    const path = join(f.projectPath, "slices", "SLICE-0001-x.md");
+    await writeFile(path, COMPLETE_SLICE);
+
+    const result = await runWiki(["validate", path, "--json"], f);
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({ ok: true, type: "slice", errors: [] });
+  });
+
+  test("validate --json on an invalid enum emits {ok:false,errors:[{field,reason,expected}]}", async () => {
+    const f = await fixture();
+    const path = join(f.projectPath, "slices", "SLICE-0001-x.md");
+    await writeFile(path, COMPLETE_SLICE.replace("status: planned", "status: nope"));
+
+    const result = await runWiki(["validate", path, "--json"], f);
+
+    expect(result.exitCode).toBe(1);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.type).toBe("slice");
+    const statusError = parsed.errors.find((e: { field: string }) => e.field === "status");
+    expect(statusError.reason).toContain("enum");
+    expect(statusError.expected).toContain("one of:");
+  });
+
+  test("validate --json reports a missing body section as a body error", async () => {
+    const f = await fixture();
+    const path = join(f.projectPath, "slices", "SLICE-0001-x.md");
+    await writeFile(path, MISSING_SECTION_SLICE);
+
+    const result = await runWiki(["validate", path, "--json"], f);
+
+    expect(result.exitCode).toBe(1);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.ok).toBe(false);
+    const bodyError = parsed.errors.find((e: { field: string }) => e.field === "body");
+    expect(bodyError.expected.toLowerCase()).toContain("what to build");
+  });
+});
+
 type Fixture = { vaultRoot: string; projectPath: string; env: Record<string, string> };
 
 async function fixture(): Promise<Fixture> {

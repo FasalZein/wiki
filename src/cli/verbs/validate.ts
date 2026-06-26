@@ -7,6 +7,7 @@ import { loadTemplate, normalizeInlineMaps, resolveTemplatePath, type TemplateTy
 import { validate } from "../../schema/validate";
 import { FOLDER_TO_TYPE } from "../../artifacts/registry";
 import { getVaultRoot } from "../../config/vault";
+import { emitJson, jsonEnabled } from "../output";
 import type { CliResult } from "../dispatch";
 
 export async function handleValidate(args: string[]): Promise<CliResult> {
@@ -44,19 +45,27 @@ export async function handleValidate(args: string[]): Promise<CliResult> {
   const fieldNames = new Set(schema.fields.map((field) => field.name));
   const drift = bodySectionDrift(templateBody, fieldNames, parsed.content);
 
-  if (result.ok && drift.missing.length === 0 && drift.unknown.length === 0) {
-    console.error(`valid ${type}: ${basename(filePath)}`);
+  // SLICE-0088: a uniform {field,reason,expected} error list across schema and
+  // body checks, so --json emits {ok,type,errors:[...]} and human mode prints
+  // the same set with the expected detail appended.
+  const errors: Array<{ field: string; reason: string; expected?: string }> = [
+    ...(result.ok ? [] : result.errors),
+    ...drift.missing.map((heading) => ({ field: "body", reason: "missing required section", expected: `## ${heading}` })),
+    ...drift.unknown.map((heading) => ({ field: "body", reason: `unknown section (not in the ${type} template)`, expected: `## ${heading}` })),
+  ];
+
+  if (errors.length === 0) {
+    if (jsonEnabled()) emitJson({ ok: true, type, errors: [] });
+    else console.error(`valid ${type}: ${basename(filePath)}`);
     return { code: 0 };
   }
 
-  for (const error of result.ok ? [] : result.errors) {
-    console.error(`${error.field}: ${error.reason}${error.expected ? ` (expected: ${error.expected})` : ""}`);
-  }
-  for (const heading of drift.missing) {
-    console.error(`body: missing required section "## ${heading}"`);
-  }
-  for (const heading of drift.unknown) {
-    console.error(`body: unknown section "## ${heading}" (not in the ${type} template)`);
+  if (jsonEnabled()) {
+    emitJson({ ok: false, type, errors });
+  } else {
+    for (const error of errors) {
+      console.error(`${error.field}: ${error.reason}${error.expected ? ` (expected: ${error.expected})` : ""}`);
+    }
   }
   return { code: 1 };
 }

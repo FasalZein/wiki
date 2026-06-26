@@ -17,6 +17,7 @@ import type { TemplateType } from "../../schema/load";
 import { classifyIntent } from "../../search/intent";
 import { buildStructuredQuery } from "../../search/query-builder";
 import { booleanValue, parseCommand, stringValue } from "../parse";
+import { emitJsonArray, jsonEnabled } from "../output";
 import type { CliResult } from "../dispatch";
 
 const allowedTypes: readonly TemplateType[] = Object.keys(ARTIFACTS) as TemplateType[];
@@ -185,6 +186,17 @@ function uriPath(path: string): string {
 }
 
 function writeResults(results: QmdResult[]): void {
+  // SLICE-0088: --json emits the structured array (coordinates with PRD-0014
+  // item 16's richer per-artifact shape); human mode stays the tab-separated
+  // lines. An empty result set is a valid [] in json mode, blank otherwise.
+  if (jsonEnabled()) {
+    emitJsonArray(results.map((result) => ({
+      path: result.path,
+      score: result.score,
+      snippet: result.snippet.replaceAll(/\s*\n\s*/g, " ").trim(),
+    })));
+    return;
+  }
   if (results.length === 0) {
     return;
   }
