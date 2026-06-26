@@ -278,17 +278,36 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
   },
   hooks: {
     summary: "Install per-runtime hooks that remind the agent to persist a skill's output to the vault.",
-    usage: "wiki hooks <install|run>",
+    usage: "wiki hooks <install|uninstall|list|status|run>",
     example: "wiki hooks install --runtime claude-code --global",
     subverbs: {
       install: {
-        summary: "Write the skill→artifact hook into a runtime's native config (merges, never clobbers).",
+        summary: "Write the skill→artifact hook plus a session-end persist reminder into a runtime's native config (merges, never clobbers).",
         usage: "wiki hooks install --runtime <claude-code|codex|pi> [--global]",
         flags: {
           "--runtime": "claude-code, codex, or pi",
           "--global": "write to the user-level config (~/...) instead of the current repo",
         },
         example: "wiki hooks install --runtime claude-code --global",
+      },
+      uninstall: {
+        summary: "Splice out only the wiki hook entries (command === 'wiki hooks run'), leaving unrelated hooks/keys intact.",
+        usage: "wiki hooks uninstall --runtime <claude-code|codex|pi> [--global]",
+        flags: {
+          "--runtime": "claude-code, codex, or pi",
+          "--global": "target the user-level config (~/...) instead of the current repo",
+        },
+        example: "wiki hooks uninstall --runtime claude-code --global",
+      },
+      list: {
+        summary: "List each runtime/scope and whether the wiki hook is wired.",
+        usage: "wiki hooks list",
+        example: "wiki hooks list",
+      },
+      status: {
+        summary: "Report which runtimes/scopes have the wiki hook wired.",
+        usage: "wiki hooks status",
+        example: "wiki hooks status",
       },
       run: {
         summary: "Hook callback: reads a runtime's hook payload on stdin, emits guidance on stdout. Invoked by the installed config, not by hand.",

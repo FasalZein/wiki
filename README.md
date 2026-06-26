@@ -107,12 +107,14 @@ writes:
 - `handoff` → authors `handoff`
 <!-- skill-map:end -->
 
-**5. (Optional) Auto-persist skill output.** Wire a native hook so that when a
+**5. (Optional) Auto-persist skill output.** Wire native hooks so that when a
 skill that authors an artifact runs, the agent is reminded to save its result to
-the vault:
+the vault, plus a stateless session-end reminder:
 
 ```sh
 wiki hooks install --runtime claude-code --global   # or codex / pi
+wiki hooks status                                   # show which runtimes are wired
+wiki hooks uninstall --runtime claude-code --global # remove only the wiki entries
 ```
 
 **6. Verify:**

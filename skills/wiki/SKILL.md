@@ -87,6 +87,10 @@ One validated `wiki` call per intent — never hand-edit frontmatter:
 into the runtime's config. When you invoke a skill that authors an artifact (the
 `skill` field in `wiki.json` maps it to a kind), the hook reminds you to persist its
 output via `wiki create <kind>` — so a skill's result lands in the vault, not just chat.
+Install also writes a stateless Stop/SessionEnd entry: a blanket session-end persist
+reminder that cannot detect whether you actually saved (no session state), so it reminds
+unconditionally. `wiki hooks uninstall --runtime <r> [--global]` splices out only the
+wiki entries; `wiki hooks list`/`status` report which runtimes/scopes are wired.
 It captures; closing an artifact stays an explicit `wiki set <id> status closed`.
 
 Breaking a PRD into slices? Load `to-slices`. Otherwise the CLI is self-describing —

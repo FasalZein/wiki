@@ -12,23 +12,49 @@ import type { CliResult } from "../dispatch";
 const HOOK_COMMAND = "wiki hooks run";
 
 /**
+ * Stateless session-end reminder. Fired on Stop/SessionEnd with no session state,
+ * so it cannot know whether anything was authored or persisted — it reminds
+ * unconditionally and the agent ignores it when there's nothing to save.
+ */
+const STOP_REMINDER =
+  "Session ending. If you authored a PRD, slice, decision, doc, or handoff this session, " +
+  "persist it to the vault now — don't leave it only in chat:\n  wiki create <kind> --project <name> --body -";
+
+/**
  * Per-runtime install target. All three runtimes accept the same JSON `hooks`
- * schema and the same stdin/stdout contract; only the file and the event/matcher
- * differ, because each surfaces a skill invocation through a different signal:
+ * schema and the same stdin/stdout contract; only the file and the events differ,
+ * because each surfaces a skill invocation through a different signal:
  *  - Claude Code: a dedicated `Skill` tool      → PreToolUse, matcher "Skill"
  *  - Codex / pi:  no skill tool — a slash-command in the prompt → UserPromptSubmit
+ *
+ * `stop` is a second, stateless entry fired at session end: a blanket reminder to
+ * persist any authored artifact. It cannot detect whether persistence happened —
+ * it has no session state — so it reminds unconditionally.
  */
-const RUNTIMES: Record<string, { event: string; matcher?: string; global: string; project: string }> = {
-  "claude-code": { event: "PreToolUse", matcher: "Skill", global: ".claude/settings.json", project: ".claude/settings.json" },
-  codex: { event: "UserPromptSubmit", global: ".codex/hooks.json", project: ".codex/hooks.json" },
-  pi: { event: "UserPromptSubmit", global: ".pi/agent/settings.json", project: ".pi/settings.json" },
+interface RuntimeSpec {
+  event: string;
+  matcher?: string;
+  stop: string;
+  global: string;
+  project: string;
+}
+
+const RUNTIMES: Record<string, RuntimeSpec> = {
+  "claude-code": { event: "PreToolUse", matcher: "Skill", stop: "Stop", global: ".claude/settings.json", project: ".claude/settings.json" },
+  codex: { event: "UserPromptSubmit", stop: "SessionEnd", global: ".codex/hooks.json", project: ".codex/hooks.json" },
+  pi: { event: "UserPromptSubmit", stop: "SessionEnd", global: ".pi/agent/settings.json", project: ".pi/settings.json" },
 };
+
+/** Events that fire at session end — the run callback emits a blanket persist reminder for these. */
+const STOP_EVENTS = new Set(["Stop", "SessionEnd"]);
 
 export async function handleHooks(args: string[]): Promise<CliResult> {
   const [subverb, ...rest] = args;
   if (subverb === "run") return hooksRun();
   if (subverb === "install") return hooksInstall(rest);
-  console.error(unknownMessage("hooks subverb", subverb ?? "", ["run", "install"]));
+  if (subverb === "uninstall") return hooksUninstall(rest);
+  if (subverb === "list" || subverb === "status") return hooksReport();
+  console.error(unknownMessage("hooks subverb", subverb ?? "", ["run", "install", "uninstall", "list", "status"]));
   return { code: 1 };
 }
 
@@ -74,13 +100,17 @@ async function hooksRun(): Promise<CliResult> {
   } catch {
     // no/invalid payload — nothing to act on
   }
-  const skill = extractSkill(input);
-  const guidance = skill === null ? null : await hookGuidance(skill, input.cwd ?? process.cwd());
+  const event = input.hook_event_name ?? "PreToolUse";
+  const guidance = STOP_EVENTS.has(event)
+    ? STOP_REMINDER
+    : await (async () => {
+        const skill = extractSkill(input);
+        return skill === null ? null : hookGuidance(skill, input.cwd ?? process.cwd());
+      })();
   if (guidance === null) {
     process.stdout.write("{}");
     return { code: 0 };
   }
-  const event = input.hook_event_name ?? "PreToolUse";
   const hookSpecificOutput: Record<string, string> = { hookEventName: event, additionalContext: guidance };
   if (event === "PreToolUse") hookSpecificOutput.permissionDecision = "allow";
   process.stdout.write(JSON.stringify({ hookSpecificOutput }));
@@ -103,8 +133,11 @@ export async function hookGuidance(skill: string, cwd: string): Promise<string |
   );
 }
 
-/** Merge the hook entry into a runtime's native config file (create/merge, never clobber). */
-async function hooksInstall(args: string[]): Promise<CliResult> {
+/** A hook entry as it lives in any runtime's native `hooks` config. */
+type HookEntry = { matcher?: string; hooks?: { type?: string; command?: string }[] };
+
+/** Resolve --runtime + --global into a concrete spec and config path, or an error result. */
+function resolveTarget(args: string[]): { spec: RuntimeSpec; runtime: string; file: string } | { code: number } {
   const parsed = parseCommand(args, ["runtime"], [], ["global"]);
   const runtime = stringValue(parsed.values, "runtime");
   if (runtime === undefined || !(runtime in RUNTIMES)) {
@@ -112,33 +145,109 @@ async function hooksInstall(args: string[]): Promise<CliResult> {
     return { code: 1 };
   }
   const spec = RUNTIMES[runtime]!;
-  const file = booleanValue(parsed.values, "global")
-    ? join(homedir(), spec.global)
-    : join(process.cwd(), spec.project);
+  const file = booleanValue(parsed.values, "global") ? join(homedir(), spec.global) : join(process.cwd(), spec.project);
+  return { spec, runtime, file };
+}
+
+async function readConfig(file: string): Promise<{ hooks?: Record<string, HookEntry[]> } & Record<string, unknown>> {
+  try {
+    return JSON.parse(await readFile(file, "utf8"));
+  } catch {
+    return {}; // absent or empty — start fresh
+  }
+}
+
+/** True when an event's list already wires HOOK_COMMAND. */
+function isWired(list: HookEntry[] | undefined): boolean {
+  return list?.some((entry) => entry.hooks?.some((h) => h.command === HOOK_COMMAND)) ?? false;
+}
+
+/** Merge the skill + stop hook entries into a runtime's native config (create/merge, never clobber). */
+async function hooksInstall(args: string[]): Promise<CliResult> {
+  const target = resolveTarget(args);
+  if (!("spec" in target)) return target;
+  const { spec, runtime, file } = target;
 
   // Read-merge-write so existing hooks/settings survive (data-loss boundary).
-  let config: { hooks?: Record<string, unknown[]> } = {};
-  try {
-    config = JSON.parse(await readFile(file, "utf8"));
-  } catch {
-    // absent or empty — start fresh
-  }
+  const config = await readConfig(file);
   config.hooks ??= {};
-  const list = (config.hooks[spec.event] ??= []) as { matcher?: string; hooks?: { type?: string; command?: string }[] }[];
 
-  if (list.some((entry) => entry.hooks?.some((h) => h.command === HOOK_COMMAND))) {
-    console.error(`already installed: ${spec.event} hook in ${file}`);
+  // Two entries: the skill-invocation hook and the stateless session-end reminder.
+  const targets: { event: string; matcher?: string }[] = [
+    { event: spec.event, matcher: spec.matcher },
+    { event: spec.stop },
+  ];
+  let added = false;
+  for (const t of targets) {
+    const list = (config.hooks[t.event] ??= []);
+    if (isWired(list)) continue;
+    list.push({
+      ...(t.matcher === undefined ? {} : { matcher: t.matcher }),
+      hooks: [{ type: "command", command: HOOK_COMMAND }],
+    });
+    added = true;
+  }
+
+  if (!added) {
+    console.error(`already installed: ${spec.event}/${spec.stop} hooks in ${file}`);
     return { code: 0 };
   }
-
-  list.push({
-    ...(spec.matcher === undefined ? {} : { matcher: spec.matcher }),
-    hooks: [{ type: "command", command: HOOK_COMMAND }],
-  });
 
   await mkdir(dirname(file), { recursive: true });
   await writeFile(file, JSON.stringify(config, null, 2) + "\n");
   console.log(file);
   if (runtime === "pi") console.error("pi needs the hooks package: pi install npm:@hsingjui/pi-hooks");
+  return { code: 0 };
+}
+
+/** Splice out only the entries this CLI installed (command === HOOK_COMMAND), leaving everything else intact. */
+async function hooksUninstall(args: string[]): Promise<CliResult> {
+  const target = resolveTarget(args);
+  if (!("spec" in target)) return target;
+  const { spec, file } = target;
+
+  const config = await readConfig(file);
+  if (config.hooks === undefined) {
+    console.error(`nothing to uninstall in ${file}`);
+    return { code: 0 };
+  }
+
+  let removed = 0;
+  for (const event of [spec.event, spec.stop]) {
+    const list = config.hooks[event];
+    if (list === undefined) continue;
+    for (const entry of list) {
+      const before = entry.hooks?.length ?? 0;
+      if (entry.hooks) entry.hooks = entry.hooks.filter((h) => h.command !== HOOK_COMMAND);
+      removed += before - (entry.hooks?.length ?? 0);
+    }
+    // drop entries left with no hooks (so a wiki-only entry vanishes; a shared one keeps its siblings)
+    config.hooks[event] = list.filter((entry) => (entry.hooks?.length ?? 0) > 0);
+    if (config.hooks[event]!.length === 0) delete config.hooks[event];
+  }
+
+  if (removed === 0) {
+    console.error(`no wiki hook found in ${file}`);
+    return { code: 0 };
+  }
+  await writeFile(file, JSON.stringify(config, null, 2) + "\n");
+  console.log(file);
+  return { code: 0 };
+}
+
+/** Report which runtimes/scopes have the wiki hook wired (shared by `list` and `status`). */
+async function hooksReport(): Promise<CliResult> {
+  for (const [runtime, spec] of Object.entries(RUNTIMES)) {
+    for (const [scope, rel] of [
+      ["global", spec.global],
+      ["project", spec.project],
+    ] as const) {
+      const file = scope === "global" ? join(homedir(), rel) : join(process.cwd(), rel);
+      const config = await readConfig(file);
+      const events = [spec.event, spec.stop].filter((e) => isWired(config.hooks?.[e]));
+      const state = events.length > 0 ? `wired (${events.join(", ")})` : "not wired";
+      console.log(`${runtime} ${scope}: ${state}  ${file}`);
+    }
+  }
   return { code: 0 };
 }
