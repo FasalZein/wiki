@@ -116,20 +116,45 @@ export async function setFields(input: SetFieldsInput, structure: Structure): Pr
 }
 
 /**
- * Mark an existing artifact as superseded by another (P0.1). Always records
- * `superseded_by`; only flips `status` to "superseded" when the type's schema
- * actually has that enum value (slices gained it in P0.1; docs have neither and
- * fail cleanly). Shared by `create --supersedes` and the `wiki supersede` verb
- * so the conditional lives in exactly one place. Routes through setFields, so
- * the write is validated.
+ * Mark an existing artifact as superseded by another (P0.1, PRD-0020). Always
+ * records `superseded_by`; only flips `status` to "superseded" when the type's
+ * schema actually has that enum value (slices gained it in P0.1; docs have
+ * neither and fall through unmarked). Shared by `create --supersedes` and the
+ * `wiki supersede` verb so the conditional lives in exactly one place.
+ *
+ * PRD-0020: the TARGET write is NARROWED — it merges only the two tombstone
+ * fields onto the target's EXISTING frontmatter, re-stamps `updated`, and writes
+ * the target back WITHOUT re-validating the whole target against today's schema.
+ * A target authored under an older schema (missing a now-required field) can
+ * still be superseded; supersede marks a tombstone, it does not repair it, so
+ * the missing/other fields and the body pass through verbatim. The NEW
+ * (superseding) artifact stays fully validated by createArtifact — the
+ * relaxation is target-only.
  */
 export async function supersedeArtifact(input: ReadArtifactInput & { by: string }, structure: Structure): Promise<Artifact> {
+  const existing = await readArtifact(input, structure);
   const schema = await loadTemplate(input.type);
   const statusField = schema.fields.find((field) => field.name === "status");
   const hasSupersededStatus = statusField?.constraints.values?.includes("superseded") ?? false;
-  const fields: Record<string, unknown> = { superseded_by: input.by };
+  // Guard the ONE thing the narrowed write still owns: `superseded_by` must be a
+  // real field on the target's schema. Types without it (e.g. docs) can't be
+  // superseded — fail cleanly, named to the target, instead of writing a stray
+  // frontmatter key. We deliberately do NOT run the full validate(schema, ...)
+  // here: that is what rejected a schema-stale target with a misleading error.
+  if (!schema.fields.some((field) => field.name === "superseded_by")) {
+    throw new ArtifactValidationError([
+      { field: "superseded_by", reason: `${input.type} ${input.id} cannot be superseded (no superseded_by field)` },
+    ]);
+  }
+  const fields: NormalizedRecord = {
+    ...existing.fields,
+    superseded_by: input.by,
+    updated: new Date().toISOString().slice(0, 10),
+  };
   if (hasSupersededStatus) fields.status = "superseded";
-  return setFields({ type: input.type, vaultRoot: input.vaultRoot, project: input.project, id: input.id, fields }, structure);
+  const content = matter.stringify(existing.body, fields);
+  await writeArtifact(existing.path, content);
+  return { ...existing, fields };
 }
 
 /** Delete an artifact file by absolute path (rollback for a half-applied create). */
