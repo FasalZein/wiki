@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import matter from "gray-matter";
 
 const tempPaths: string[] = [];
 
@@ -53,6 +54,60 @@ describe("supersede tolerates a schema-stale target (PRD-0020)", () => {
     const target = await readSlice(f, old);
     expect(target).toContain("status: superseded");
     expect(target).toContain(`superseded_by: ${newId}`);
+  });
+
+  test("preserves the target's other fields and body verbatim, re-stamps updated, and does not backfill the missing field", async () => {
+    const f = await fixture();
+    const old = await seedSlice(f);
+
+    // Author extra fields + a non-trivial body + a stale `updated`, then drop the
+    // now-required `summary` to simulate a target written under an older schema.
+    const name = await sliceFileName(f, old);
+    const path = join(f.projectPath, "slices", name);
+    const seeded = matter(await readFile(path, "utf8"));
+    const customBody = "# Custom heading\n\nA non-trivial body paragraph.\n\n- bullet one\n- bullet two\n";
+    const authored = {
+      ...seeded.data,
+      group: "My Section",
+      user_stories: ["US-1", "US-2"],
+      updated: "2020-01-01",
+    };
+    delete (authored as Record<string, unknown>).summary;
+    await writeFile(path, matter.stringify(customBody, authored));
+
+    const beforeData = matter(await readFile(path, "utf8")).data;
+
+    const result = await runWiki([
+      "create", "slice",
+      "--title", "Replacement slice for field-preservation",
+      "--summary", "Replacement slice supersedes the stale one.",
+      "--project", "wiki-v2",
+      "--parent-prd", "PRD-0001",
+      "--acceptance", "does the thing",
+      "--supersedes", old,
+    ], f);
+
+    expect(result.exitCode).toBe(0);
+    const newId = result.stdout.trim();
+
+    const after = matter(await readFile(path, "utf8"));
+    const today = new Date().toISOString().slice(0, 10);
+
+    // Supersede fields set as expected.
+    expect(after.data.status).toBe("superseded");
+    expect(after.data.superseded_by).toBe(newId);
+    // `updated` re-stamped to today (was 2020-01-01).
+    expect(after.data.updated).toBe(today);
+
+    // Every OTHER field preserved exactly as authored.
+    for (const key of Object.keys(beforeData)) {
+      if (key === "status" || key === "superseded_by" || key === "updated") continue;
+      expect(after.data[key]).toEqual(beforeData[key]);
+    }
+    // The missing required field is NOT silently backfilled or invented.
+    expect(after.data.summary).toBeUndefined();
+    // Body passes through verbatim.
+    expect(after.content.trimStart()).toBe(customBody.trimStart());
   });
 
   test("a genuinely invalid NEW artifact still fails (relaxation is target-only)", async () => {
