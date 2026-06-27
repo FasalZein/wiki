@@ -110,6 +110,59 @@ describe("supersede tolerates a schema-stale target (PRD-0020)", () => {
     expect(after.content.trimStart()).toBe(customBody.trimStart());
   });
 
+  test("a missing --supersedes target fails naming the target, with no orphan new artifact", async () => {
+    const f = await fixture();
+    await seedSlice(f); // seeds the parent PRD + one real slice
+    const slicesBefore = await readdir(join(f.projectPath, "slices"));
+
+    const result = await runWiki([
+      "create", "slice",
+      "--title", "Replacement for a missing target",
+      "--summary", "Replacement slice supersedes a missing target.",
+      "--project", "wiki-v2",
+      "--parent-prd", "PRD-0001",
+      "--acceptance", "does the thing",
+      "--supersedes", "SLICE-9999",
+    ], f);
+
+    expect(result.exitCode).not.toBe(0);
+    // Error names the TARGET id and the real reason, not a bare new-artifact error.
+    expect(result.stderr).toContain("SLICE-9999");
+    expect(result.stderr).not.toContain("summary: required");
+    // Rollback intact: no new slice file was left behind.
+    const slicesAfter = await readdir(join(f.projectPath, "slices"));
+    expect(slicesAfter.sort()).toEqual(slicesBefore.sort());
+  });
+
+  test("a wrong-kind --supersedes target fails naming the target and leaves it byte-identical", async () => {
+    const f = await fixture();
+    await seedSlice(f); // also seeds PRD-0001
+    const prdName = (await readdir(join(f.projectPath, "prds"))).find((n) => n.startsWith("PRD-0001"))!;
+    const prdPath = join(f.projectPath, "prds", prdName);
+    const prdBefore = await readFile(prdPath, "utf8");
+    const slicesBefore = await readdir(join(f.projectPath, "slices"));
+
+    // Superseding a slice with a PRD id: the supersede target is read as a slice,
+    // so PRD-0001 is "not found" for that kind — named, not a new-artifact error.
+    const result = await runWiki([
+      "create", "slice",
+      "--title", "Replacement pointing at a PRD id",
+      "--summary", "Replacement slice supersedes a wrong-kind id.",
+      "--project", "wiki-v2",
+      "--parent-prd", "PRD-0001",
+      "--acceptance", "does the thing",
+      "--supersedes", "PRD-0001",
+    ], f);
+
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain("PRD-0001");
+    expect(result.stderr).not.toContain("summary: required");
+    // The real PRD-0001 is untouched (not marked superseded, byte-identical).
+    expect(await readFile(prdPath, "utf8")).toBe(prdBefore);
+    // No new slice orphaned.
+    expect((await readdir(join(f.projectPath, "slices"))).sort()).toEqual(slicesBefore.sort());
+  });
+
   test("a genuinely invalid NEW artifact still fails (relaxation is target-only)", async () => {
     const f = await fixture();
     const old = await seedSlice(f);
