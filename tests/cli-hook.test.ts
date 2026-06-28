@@ -1,21 +1,28 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import matter from "gray-matter";
 
 import { hookGuidance } from "../src/cli/verbs/hooks";
 
 const tempPaths: string[] = [];
 const repoRoot = import.meta.dir.replace(/\/tests$/, "");
 
-/** Spawn the CLI, feeding `stdin` and overriding HOME (for install targets). */
+/** Spawn the CLI, feeding `stdin` and overriding HOME / vault root. Defaults the
+ *  vault to a throwaway temp dir so no test ever writes the real $HOME/Knowledge. */
 async function runWiki(
   args: string[],
-  opts: { stdin?: string; home?: string; cwd?: string } = {},
+  opts: { stdin?: string; home?: string; cwd?: string; vaultRoot?: string } = {},
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  let vaultRoot = opts.vaultRoot;
+  if (vaultRoot === undefined) {
+    vaultRoot = await mkdtemp(join(tmpdir(), "wiki-novault-"));
+    tempPaths.push(vaultRoot);
+  }
   const proc = Bun.spawn(["bun", join(repoRoot, "src", "cli.ts"), ...args], {
     cwd: opts.cwd ?? repoRoot,
-    env: { ...process.env, ...(opts.home === undefined ? {} : { HOME: opts.home }) },
+    env: { ...process.env, KNOWLEDGE_VAULT_ROOT: vaultRoot, ...(opts.home === undefined ? {} : { HOME: opts.home }) },
     stdin: opts.stdin === undefined ? undefined : "pipe",
     stdout: "pipe",
     stderr: "pipe",
@@ -90,54 +97,120 @@ describe("wiki hooks run (callback)", () => {
   });
 });
 
-describe("wiki hooks run (write-signal capture detection, ADR-0038)", () => {
+describe("wiki hooks run (write-signal capture, ADR-0038)", () => {
+  /** A minimal vault with one project's folder skeleton, so capture can file. */
+  async function fixtureVault(project: string): Promise<string> {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "wiki-vault-"));
+    tempPaths.push(vaultRoot);
+    const projectPath = join(vaultRoot, "projects", project);
+    for (const dir of ["prds", "slices", "adrs", "handoffs", "docs"]) {
+      await mkdir(join(projectPath, dir), { recursive: true });
+    }
+    await writeFile(join(projectPath, "_project.md"), `---\n---\n# ${project}\n`);
+    return vaultRoot;
+  }
+
   async function tmpDir(): Promise<string> {
     const dir = await mkdtemp(join(tmpdir(), "wiki-write-"));
     tempPaths.push(dir);
     return dir;
   }
 
-  test("a PostToolUse write of an artifact whose frontmatter id names a known kind yields a capture decision naming the kind", async () => {
-    const dir = await tmpDir();
-    const file = join(dir, "PRD-0099-thing.md");
-    await writeFile(file, "---\nid: PRD-0099\ntitle: Thing\n---\n# Thing\n");
-    const { stdout } = await runWiki(["hooks", "run"], {
-      stdin: JSON.stringify({ hook_event_name: "PostToolUse", tool_name: "write", tool_input: { file_path: file } }),
-    });
-    const out = JSON.parse(stdout);
-    expect(out.hookSpecificOutput.hookEventName).toBe("PostToolUse");
-    expect(out.hookSpecificOutput.additionalContext).toContain("prd");
-  });
+  async function lsKind(vaultRoot: string, project: string, folder: string): Promise<string[]> {
+    return (await readdir(join(vaultRoot, "projects", project, folder)).catch(() => [] as string[])).filter((f) =>
+      f.endsWith(".md"),
+    );
+  }
 
-  test("a PostToolUse write of an artifact whose frontmatter template names a known kind is detected", async () => {
+  test("a PostToolUse write of a known-kind artifact files it into the vault under that kind", async () => {
+    const vaultRoot = await fixtureVault("wiki-v2");
     const dir = await tmpDir();
     const file = join(dir, "draft.md");
-    await writeFile(file, "---\ntemplate: slice\ntitle: Draft\n---\n# Draft\n");
+    await writeFile(file, "---\ntemplate: slice\nproject: wiki-v2\ntitle: Draft Slice\n---\n# Draft Slice\n\nbody\n");
     const { stdout } = await runWiki(["hooks", "run"], {
+      vaultRoot,
       stdin: JSON.stringify({ hook_event_name: "PostToolUse", tool_input: { path: file } }),
     });
     const out = JSON.parse(stdout);
+    expect(out.hookSpecificOutput.hookEventName).toBe("PostToolUse");
     expect(out.hookSpecificOutput.additionalContext).toContain("slice");
+    const filed = await lsKind(vaultRoot, "wiki-v2", "slices");
+    expect(filed).toHaveLength(1);
+    expect(filed[0]).toMatch(/^SLICE-\d{4}-draft-slice\.md$/);
   });
 
-  test("a PostToolUse write to an unrelated file yields no capture decision", async () => {
+  test("capture is idempotent: re-firing on the same draft does not double-create", async () => {
+    const vaultRoot = await fixtureVault("wiki-v2");
+    const dir = await tmpDir();
+    const file = join(dir, "draft.md");
+    await writeFile(file, "---\ntemplate: prd\nproject: wiki-v2\ntitle: Idempotent PRD\n---\n# Idempotent PRD\n");
+    const payload = JSON.stringify({ hook_event_name: "PostToolUse", tool_input: { file_path: file } });
+    await runWiki(["hooks", "run"], { vaultRoot, stdin: payload });
+    await runWiki(["hooks", "run"], { vaultRoot, stdin: payload });
+    const filed = await lsKind(vaultRoot, "wiki-v2", "prds");
+    expect(filed).toHaveLength(1);
+  });
+
+  test("a PostToolUse write to an unrelated file yields no capture and files nothing", async () => {
+    const vaultRoot = await fixtureVault("wiki-v2");
     const dir = await tmpDir();
     const file = join(dir, "index.ts");
     await writeFile(file, "export const x = 1;\n");
     const { stdout } = await runWiki(["hooks", "run"], {
+      vaultRoot,
       stdin: JSON.stringify({ hook_event_name: "PostToolUse", tool_input: { file_path: file } }),
     });
     expect(stdout).toBe("{}");
+    expect(await lsKind(vaultRoot, "wiki-v2", "slices")).toHaveLength(0);
   });
 
-  test("a PostToolUse write of a markdown file whose frontmatter names no recognizable kind yields no capture decision", async () => {
+  test("an artifact-shaped write whose frontmatter names no kind warns and is NOT captured", async () => {
+    const vaultRoot = await fixtureVault("wiki-v2");
     const dir = await tmpDir();
     const file = join(dir, "notes.md");
     await writeFile(file, "---\nid: XYZ-001\ntitle: Notes\n---\n# Notes\n");
-    const { stdout } = await runWiki(["hooks", "run"], {
+    const { stdout, stderr } = await runWiki(["hooks", "run"], {
+      vaultRoot,
       stdin: JSON.stringify({ hook_event_name: "PostToolUse", tool_input: { file_path: file } }),
     });
     expect(stdout).toBe("{}");
+    expect(stderr).toContain("authored but not captured");
+    expect(stderr).toContain("notes.md");
+  });
+
+  test("a known-kind artifact with no resolvable project warns and is NOT captured", async () => {
+    const vaultRoot = await fixtureVault("wiki-v2");
+    const dir = await tmpDir();
+    const file = join(dir, "PRD-0099-thing.md");
+    await writeFile(file, "---\nid: PRD-0099\ntitle: Thing\n---\n# Thing\n");
+    const { stdout, stderr } = await runWiki(["hooks", "run"], {
+      vaultRoot,
+      cwd: dir, // unlinked cwd: no project frontmatter, no pointer block
+      stdin: JSON.stringify({ hook_event_name: "PostToolUse", tool_input: { file_path: file } }),
+    });
+    expect(stdout).toBe("{}");
+    expect(stderr).toContain("authored but not captured");
+    expect(stderr).toContain("no project");
+  });
+
+  test("a known-kind artifact resolves its project from the linked repo when frontmatter omits it", async () => {
+    const vaultRoot = await fixtureVault("wiki-v2");
+    const repo = await tmpDir();
+    await writeFile(join(repo, "AGENTS.md"), "<!-- wiki:begin v2 project=wiki-v2 -->\n<!-- wiki:end -->\n");
+    const file = join(repo, "PRD-0099-thing.md");
+    await writeFile(file, "---\nid: PRD-0099\ntitle: Thing\n---\n# Thing\n");
+    const { stdout } = await runWiki(["hooks", "run"], {
+      vaultRoot,
+      cwd: repo,
+      stdin: JSON.stringify({ hook_event_name: "PostToolUse", tool_input: { file_path: file }, cwd: repo }),
+    });
+    const out = JSON.parse(stdout);
+    expect(out.hookSpecificOutput.additionalContext).toContain("prd");
+    const filed = await lsKind(vaultRoot, "wiki-v2", "prds");
+    expect(filed).toHaveLength(1);
+    // the captured artifact's frontmatter carries the resolved project
+    const captured = await readFile(join(vaultRoot, "projects", "wiki-v2", "prds", filed[0]!), "utf8");
+    expect(matter(captured).data.project).toBe("wiki-v2");
   });
 });
 

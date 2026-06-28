@@ -3,7 +3,12 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
-import { DEFAULT_STRUCTURE } from "../../artifacts/registry";
+import { DEFAULT_STRUCTURE, loadStructure } from "../../artifacts/registry";
+import { artifactDirectory } from "../../artifacts/paths";
+import { nextId } from "../../artifacts/id";
+import { buildIdIndex } from "../../artifacts/id-index";
+import { slugifyTitle } from "../../artifacts/store";
+import { getVaultRoot } from "../../config/vault";
 import type { TemplateType } from "../../schema/load";
 import { readLinkedProject } from "../repo-link";
 import { unknownMessage } from "../usage";
@@ -75,28 +80,24 @@ interface HookInput {
 const WRITE_EVENT = "PostToolUse";
 
 /**
- * The kind a just-written file declares in its OWN frontmatter, resolved via the
- * existing registry (ADR-0038). The bridge payload carries no injected-skill
- * identity, so capture keys off the written file: a `template:` field naming a
- * kind, or an `id:` whose prefix resolves to one (e.g. PRD-0099 → prd). Null when
- * the path is absent/unreadable, the file has no frontmatter, or nothing it
- * declares maps to a registered kind — the caller never guesses.
+ * Inspecting a PostToolUse write yields one of three outcomes: `captured` (the
+ * written file is an authoring artifact and the hook filed it into the vault
+ * itself — `context` is injected so the model need not run `wiki create`),
+ * `warn` (it looks like an artifact but cannot be captured — surfaced on stderr,
+ * never a silent drop and never a wrong-kind write), or null (an unrelated write).
  */
-async function writtenArtifactKind(input: HookInput): Promise<TemplateType | null> {
-  const path = input.tool_input?.file_path ?? input.tool_input?.path;
-  if (path === undefined) return null;
-  let content: string;
-  try {
-    content = await readFile(path, "utf8");
-  } catch {
-    return null; // path not readable — nothing to capture
-  }
-  let data: Record<string, unknown>;
-  try {
-    data = matter(content).data;
-  } catch {
-    return null; // not parseable frontmatter
-  }
+type CaptureOutcome =
+  | { outcome: "captured"; context: string }
+  | { outcome: "warn"; warning: string }
+  | null;
+
+/**
+ * The kind a written file declares in its OWN frontmatter, resolved via the
+ * registry (ADR-0038): a `template:` field naming a kind, or an `id:` whose
+ * prefix resolves to one (e.g. PRD-0099 → prd). Null when nothing it declares
+ * maps to a registered kind — the caller never guesses.
+ */
+function resolveKind(data: Record<string, unknown>): TemplateType | null {
   const template = typeof data.template === "string" ? data.template : undefined;
   if (template !== undefined && DEFAULT_STRUCTURE.kinds[template] !== undefined) return template;
   const id = typeof data.id === "string" ? data.id : undefined;
@@ -105,6 +106,116 @@ async function writtenArtifactKind(input: HookInput): Promise<TemplateType | nul
     if (kind !== undefined) return kind;
   }
   return null;
+}
+
+/**
+ * Inspect a PostToolUse write and, when the written file is an authoring
+ * artifact, file it into the env-resolved vault itself (ADR-0038 in-child
+ * capture). The bridge payload carries no injected-skill identity, so the kind
+ * comes from the written file's own frontmatter. A markdown write whose
+ * frontmatter carries an `id`/`template` but no recognizable kind is
+ * artifact-shaped-but-uncapturable: warn. Anything else (no path, unreadable,
+ * no artifact frontmatter) is null.
+ */
+async function captureWrittenArtifact(input: HookInput): Promise<CaptureOutcome> {
+  const path = input.tool_input?.file_path ?? input.tool_input?.path;
+  if (path === undefined) return null;
+  let content: string;
+  try {
+    content = await readFile(path, "utf8");
+  } catch {
+    return null; // not readable — nothing to capture
+  }
+  let data: Record<string, unknown>;
+  let body: string;
+  try {
+    const parsed = matter(content);
+    data = parsed.data;
+    body = parsed.content;
+  } catch {
+    return null; // not parseable frontmatter
+  }
+  const declaredId = typeof data.id === "string" ? data.id : undefined;
+  const declaredTemplate = typeof data.template === "string" ? data.template : undefined;
+  // Not artifact-shaped (no id/template frontmatter) — an ordinary write, stay silent.
+  if (declaredId === undefined && declaredTemplate === undefined) return null;
+
+  const kind = resolveKind(data);
+  if (kind === null) {
+    const declared = declaredTemplate !== undefined ? `template '${declaredTemplate}'` : `id '${declaredId}'`;
+    return {
+      outcome: "warn",
+      warning:
+        `authored but not captured: ${basename(path)} declares ${declared}, which maps to no ` +
+        `registered wiki kind — file it manually with 'wiki create <kind>'.`,
+    };
+  }
+  return fileArtifact({ path, data, body, kind, declaredId, cwd: input.cwd ?? process.cwd() });
+}
+
+/**
+ * File a detected artifact into the vault via the registry path: resolve the
+ * vault + project, mint the next id, write the artifact verbatim under its kind's
+ * folder, and stamp the source draft with the assigned id. Idempotent — a draft
+ * whose declared id is already indexed in the vault is reported `captured`
+ * without a second write. Kind-agnostic: it files whatever kind the frontmatter
+ * declares, no hard-coded kind list beyond the registry. Warns (never throws)
+ * when the vault/project cannot be resolved.
+ */
+async function fileArtifact(args: {
+  path: string;
+  data: Record<string, unknown>;
+  body: string;
+  kind: TemplateType;
+  declaredId: string | undefined;
+  cwd: string;
+}): Promise<CaptureOutcome> {
+  const { path, data, body, kind, declaredId, cwd } = args;
+  let vaultRoot: string;
+  try {
+    vaultRoot = await getVaultRoot();
+  } catch (error) {
+    return { outcome: "warn", warning: `authored but not captured: ${basename(path)} — ${(error as Error).message}` };
+  }
+  const project =
+    typeof data.project === "string" && data.project.length > 0 ? data.project : (await readLinkedProject(cwd)) ?? undefined;
+  if (project === undefined) {
+    return {
+      outcome: "warn",
+      warning: `authored but not captured: ${basename(path)} — no project (set frontmatter 'project' or link the repo).`,
+    };
+  }
+  const structure = await loadStructure(vaultRoot);
+  if (structure.kinds[kind] === undefined) {
+    return { outcome: "warn", warning: `authored but not captured: ${basename(path)} — vault defines no '${kind}' kind.` };
+  }
+
+  // Idempotent: a declared id already indexed in the vault means this draft is
+  // already filed — report captured without a duplicate write.
+  if (declaredId !== undefined && (await buildIdIndex(vaultRoot, project, structure)).has(declaredId)) {
+    return { outcome: "captured", context: captureContext(kind, declaredId, true) };
+  }
+
+  const directory = artifactDirectory(kind, vaultRoot, project, structure);
+  await mkdir(directory, { recursive: true }); // nextId reads this dir; create it first
+  const id = await nextId(kind, vaultRoot, project, structure);
+  const title = typeof data.title === "string" && data.title.length > 0 ? data.title : id;
+  const today = new Date().toISOString().slice(0, 10);
+  const aliases = Array.isArray(data.aliases) ? [...new Set([id, ...data.aliases.map(String)])] : [id];
+  const fields = { ...data, id, project, aliases, created: data.created ?? today, updated: today };
+  const filePath = join(directory, `${id}-${slugifyTitle(title)}.md`);
+  await writeFile(filePath, matter.stringify(body, fields), { flag: "wx" });
+
+  // Stamp the source draft with the assigned id so a re-fire is idempotent.
+  await writeFile(path, matter.stringify(body, { ...data, id, project }));
+  return { outcome: "captured", context: captureContext(kind, id, false) };
+}
+
+/** Context injected after a capture so the model knows the artifact is filed. */
+function captureContext(kind: TemplateType, id: string, existed: boolean): string {
+  return existed
+    ? `A wiki '${kind}' artifact (${id}) is already filed in the vault — no action needed.`
+    : `Captured a wiki '${kind}' artifact into the vault as ${id} — no need to run 'wiki create'.`;
 }
 
 /**
@@ -151,17 +262,26 @@ async function hooksRun(): Promise<CliResult> {
     // no/invalid payload — nothing to act on
   }
   const event = input.hook_event_name ?? "PreToolUse";
+  if (event === WRITE_EVENT) {
+    const capture = await captureWrittenArtifact(input);
+    if (capture === null) {
+      process.stdout.write("{}");
+      return { code: 0 };
+    }
+    if (capture.outcome === "warn") {
+      console.error(capture.warning); // surfaced, never a silent drop
+      process.stdout.write("{}");
+      return { code: 0 };
+    }
+    process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: capture.context } }));
+    return { code: 0 };
+  }
   const guidance = STOP_EVENTS.has(event)
     ? STOP_REMINDER
-    : event === WRITE_EVENT
-      ? await (async () => {
-          const kind = await writtenArtifactKind(input);
-          return kind === null ? null : captureGuidance(kind);
-        })()
-      : await (async () => {
-          const skill = extractSkill(input);
-          return skill === null ? null : hookGuidance(skill, input.cwd ?? process.cwd());
-        })();
+    : await (async () => {
+        const skill = extractSkill(input);
+        return skill === null ? null : hookGuidance(skill, input.cwd ?? process.cwd());
+      })();
   if (guidance === null) {
     process.stdout.write("{}");
     return { code: 0 };
@@ -185,19 +305,6 @@ export async function hookGuidance(skill: string, cwd: string): Promise<string |
   return (
     `The ${skill} skill authors a wiki '${kind}' artifact. When it finishes, persist the ` +
     `result to the vault — don't leave it only in chat:\n  wiki create ${kind} ${projectFlag} --body -`
-  );
-}
-
-/**
- * Guidance to inject when a PostToolUse write produces an artifact of a known
- * kind: name the kind so the agent (or, once CAPTURE lands, the hook itself)
- * persists it to the vault. ADR-0038: kind comes from the written file, not from
- * any injected-skill identity the payload does not carry.
- */
-function captureGuidance(kind: TemplateType): string {
-  return (
-    `A wiki '${kind}' artifact was just authored. Persist it to the vault — ` +
-    `don't leave it only on disk:\n  wiki create ${kind} --project <name> --body -`
   );
 }
 
