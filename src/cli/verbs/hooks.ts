@@ -1,5 +1,5 @@
 import matter from "gray-matter";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
@@ -385,6 +385,18 @@ function packageSource(entry: unknown): string {
 }
 
 /**
+ * True when a package spec names the EXACT scoped bridge `@hsingjui/pi-hooks`.
+ * The `npm:`/`git:` prefix is stripped, then the id must equal the scoped name
+ * or end in `/@hsingjui/pi-hooks` (a registry path). An unscoped `pi-hooks` or a
+ * forked `pi-hooks` is a lookalike — same name, different contract — and is
+ * rejected. The single rule reused by the install warning, status, and doctor.
+ */
+function isPiBridge(spec: string): boolean {
+  const id = spec.replace(/^(?:npm:|git:)/, "");
+  return id === PI_BRIDGE_PACKAGE || id.endsWith(`/${PI_BRIDGE_PACKAGE}`);
+}
+
+/**
  * pi can't see skill invocations on its own — it needs the @hsingjui/pi-hooks
  * bridge enabled in its global packages[] to forward hook events. If that exact
  * scoped package is absent, warn loudly and disambiguate it from the lookalikes,
@@ -395,10 +407,7 @@ async function warnPiBridge(): Promise<void> {
   const packages = Array.isArray((settings as { packages?: unknown }).packages)
     ? ((settings as { packages: unknown[] }).packages)
     : [];
-  const enabled = packages.some((entry) => {
-    const id = packageSource(entry).replace(/^(?:npm:|git:)/, "");
-    return id === PI_BRIDGE_PACKAGE || id.endsWith(`/${PI_BRIDGE_PACKAGE}`);
-  });
+  const enabled = packages.some((entry) => isPiBridge(packageSource(entry)));
   if (enabled) return;
   console.error(
     `pi bridge missing: enable ${PI_BRIDGE_PACKAGE} in pi's packages[] (pi install npm:${PI_BRIDGE_PACKAGE}) — ` +
@@ -443,6 +452,52 @@ async function hooksUninstall(args: string[]): Promise<CliResult> {
   return { code: 0 };
 }
 
+/**
+ * Per-subagent bridge reachability. Each pi subagent definition
+ * (`~/.pi/agent/agents/<name>.md`) declares its enabled extensions in an
+ * `extensions:` frontmatter field; a subagent's persist hook can only fire when
+ * that allowlist carries the EXACT `@hsingjui/pi-hooks` bridge. We inspect those
+ * files (read-only — never edited here) and report, per agent, whether the bridge
+ * is reachable. A lookalike does not satisfy it (reuses `isPiBridge`).
+ */
+type AgentReach = { name: string; reachable: boolean };
+
+/** The extensions an agent declares, from a comma-separated string or a list. */
+function agentExtensions(data: Record<string, unknown>): string[] {
+  const ext = data.extensions;
+  if (typeof ext === "string") return ext.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+  if (Array.isArray(ext)) return ext.map((e) => String(e).trim()).filter((s) => s.length > 0);
+  return [];
+}
+
+/** Inspect each subagent definition's allowlist for the exact bridge (read-only). */
+async function agentReachability(home: string): Promise<AgentReach[]> {
+  const dir = join(home, ".pi", "agent", "agents");
+  let names: string[];
+  try {
+    names = (await readdir(dir)).filter((n) => n.endsWith(".md")).sort();
+  } catch {
+    return []; // no agents directory — no subagent tier to report
+  }
+  const out: AgentReach[] = [];
+  for (const file of names) {
+    let data: Record<string, unknown>;
+    try {
+      data = matter(await readFile(join(dir, file), "utf8")).data;
+    } catch {
+      continue; // unparseable agent file — skip
+    }
+    const name = typeof data.name === "string" ? data.name : basename(file, ".md");
+    out.push({ name, reachable: agentExtensions(data).some(isPiBridge) });
+  }
+  return out;
+}
+
+/** Subagents whose allowlist cannot reach the bridge — read by `doctor --setup`. */
+export async function unreachableSubagents(home: string = homedir()): Promise<string[]> {
+  return (await agentReachability(home)).filter((a) => !a.reachable).map((a) => a.name);
+}
+
 /** Report which runtimes/scopes have the wiki hook wired (shared by `list` and `status`). */
 async function hooksReport(): Promise<CliResult> {
   for (const [runtime, spec] of Object.entries(RUNTIMES)) {
@@ -456,6 +511,15 @@ async function hooksReport(): Promise<CliResult> {
       const state = events.length > 0 ? `wired (${events.join(", ")})` : "not wired";
       console.log(`${runtime} ${scope}: ${state}  ${file}`);
     }
+  }
+  // Per-subagent reachability: a subagent's hook fires only if its allowlist
+  // carries the exact bridge. Naming the ones that can't fire is the honest
+  // signal a single global "wired" hides.
+  for (const agent of await agentReachability(homedir())) {
+    const state = agent.reachable
+      ? `reachable (${PI_BRIDGE_PACKAGE} in allowlist)`
+      : `cannot fire (${PI_BRIDGE_PACKAGE} missing from allowlist)`;
+    console.log(`subagent ${agent.name}: ${state}`);
   }
   return { code: 0 };
 }

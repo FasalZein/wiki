@@ -96,4 +96,37 @@ describe("doctor --setup distribution health", () => {
     expect(result.clean).toBe(false);
     expect(result.issues.map((i) => i.type)).toContain("unwired-hook");
   });
+
+  test("reports subagents whose allowlist cannot reach the bridge, naming them", async () => {
+    const { binaryPath, srcDir } = await freshBinary();
+    const bundle = join(await tmp("wiki-bundle-"), "SKILL.md");
+    await writeFile(bundle, "skill");
+    const result = await evaluateSetup({
+      binaryPath,
+      srcDir,
+      skillBundlePath: bundle,
+      hookWired: true,
+      unreachableSubagents: ["worker", "scout"],
+    });
+    expect(result.clean).toBe(false);
+    const unreachable = result.issues.find((i) => i.type === "unreachable-subagent");
+    expect(unreachable).toBeDefined();
+    expect(unreachable!.message).toContain("worker");
+    expect(unreachable!.message).toContain("scout");
+  });
+
+  test("clean when every subagent allowlist reaches the bridge", async () => {
+    const { binaryPath, srcDir } = await freshBinary();
+    const bundle = join(await tmp("wiki-bundle-"), "SKILL.md");
+    await writeFile(bundle, "skill");
+    const result = await evaluateSetup({
+      binaryPath,
+      srcDir,
+      skillBundlePath: bundle,
+      hookWired: true,
+      unreachableSubagents: [],
+    });
+    expect(result.clean).toBe(true);
+    expect(result.issues.map((i) => i.type)).not.toContain("unreachable-subagent");
+  });
 });

@@ -5,7 +5,7 @@ import { exists } from "../util";
 
 /** One distribution-health finding from `wiki doctor --setup`. */
 export type SetupIssue = {
-  type: "stale-binary" | "missing-bundle" | "unwired-hook";
+  type: "stale-binary" | "missing-bundle" | "unwired-hook" | "unreachable-subagent";
   message: string;
 };
 
@@ -24,6 +24,8 @@ export interface SetupFacts {
   skillBundlePath: string;
   /** Whether the persist-reminder hook is wired in any runtime/scope. */
   hookWired: boolean;
+  /** Subagents whose allowlist lacks the exact bridge, so their hook cannot fire. Empty when all reach it. */
+  unreachableSubagents?: string[];
 }
 
 /** Newest mtime (ms) under a directory tree, or 0 if it can't be read. */
@@ -85,6 +87,19 @@ export async function evaluateSetup(facts: SetupFacts): Promise<SetupResult> {
     issues.push({
       type: "unwired-hook",
       message: "persist hook not wired in any runtime — run: wiki hooks install --runtime <claude-code|codex|pi> --global",
+    });
+  }
+
+  // A wired parent hook says nothing about the subagent tier: each subagent's
+  // hook fires only if its own allowlist carries the exact bridge. Name the ones
+  // that can't, so a healthy global doesn't mask a silent subagent gap.
+  const unreachable = facts.unreachableSubagents ?? [];
+  if (unreachable.length > 0) {
+    issues.push({
+      type: "unreachable-subagent",
+      message:
+        `subagent persist hook cannot fire for: ${unreachable.join(", ")} — add @hsingjui/pi-hooks to each ` +
+        `agent's extensions allowlist (~/.pi/agent/agents/<name>.md) so artifacts they author reach the vault.`,
     });
   }
 

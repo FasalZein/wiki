@@ -341,4 +341,34 @@ describe("wiki hooks list / status", () => {
     expect(list.stdout).toContain("claude-code");
     expect(list.stdout).toContain("wired");
   });
+
+  test("reports per-subagent bridge reachability, naming the agents whose allowlist lacks the exact bridge", async () => {
+    const home = await mkdtemp(join(tmpdir(), "wiki-home-"));
+    tempPaths.push(home);
+    const agentsDir = join(home, ".pi", "agent", "agents");
+    await mkdir(agentsDir, { recursive: true });
+    // exact scoped bridge present → reachable
+    await writeFile(
+      join(agentsDir, "alpha.md"),
+      "---\nname: alpha\nextensions: git:github.com/edxeth/pi-better-skills, npm:@hsingjui/pi-hooks\n---\nbody\n",
+    );
+    // no bridge at all → cannot fire
+    await writeFile(
+      join(agentsDir, "beta.md"),
+      "---\nname: beta\nextensions: git:github.com/edxeth/pi-better-skills\n---\nbody\n",
+    );
+    // an unscoped / forked lookalike does NOT satisfy the check → cannot fire
+    await writeFile(
+      join(agentsDir, "gamma.md"),
+      "---\nname: gamma\nextensions: git:github.com/prateekmedia/pi-hooks\n---\nbody\n",
+    );
+
+    const status = await runWiki(["hooks", "status"], { home });
+    expect(status.exitCode).toBe(0);
+    expect(status.stdout).toContain("subagent alpha: reachable");
+    expect(status.stdout).toMatch(/subagent beta: cannot fire/);
+    expect(status.stdout).toMatch(/subagent gamma: cannot fire/);
+    // the parent/global wired state is still reported truthfully alongside the subagent tier
+    expect(status.stdout).toContain("pi global:");
+  });
 });
