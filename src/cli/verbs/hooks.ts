@@ -1,8 +1,10 @@
+import matter from "gray-matter";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
 import { DEFAULT_STRUCTURE } from "../../artifacts/registry";
+import type { TemplateType } from "../../schema/load";
 import { readLinkedProject } from "../repo-link";
 import { unknownMessage } from "../usage";
 import { booleanValue, parseCommand, stringValue } from "../parse";
@@ -65,8 +67,44 @@ export async function handleHooks(args: string[]): Promise<CliResult> {
 interface HookInput {
   cwd?: string;
   hook_event_name?: string;
-  tool_input?: { skill_name?: string; path?: string };
+  tool_input?: { skill_name?: string; path?: string; file_path?: string };
   prompt?: string;
+}
+
+/** Events that follow a tool call — the run callback inspects artifact writes for these. */
+const WRITE_EVENT = "PostToolUse";
+
+/**
+ * The kind a just-written file declares in its OWN frontmatter, resolved via the
+ * existing registry (ADR-0038). The bridge payload carries no injected-skill
+ * identity, so capture keys off the written file: a `template:` field naming a
+ * kind, or an `id:` whose prefix resolves to one (e.g. PRD-0099 → prd). Null when
+ * the path is absent/unreadable, the file has no frontmatter, or nothing it
+ * declares maps to a registered kind — the caller never guesses.
+ */
+async function writtenArtifactKind(input: HookInput): Promise<TemplateType | null> {
+  const path = input.tool_input?.file_path ?? input.tool_input?.path;
+  if (path === undefined) return null;
+  let content: string;
+  try {
+    content = await readFile(path, "utf8");
+  } catch {
+    return null; // path not readable — nothing to capture
+  }
+  let data: Record<string, unknown>;
+  try {
+    data = matter(content).data;
+  } catch {
+    return null; // not parseable frontmatter
+  }
+  const template = typeof data.template === "string" ? data.template : undefined;
+  if (template !== undefined && DEFAULT_STRUCTURE.kinds[template] !== undefined) return template;
+  const id = typeof data.id === "string" ? data.id : undefined;
+  if (id !== undefined) {
+    const kind = DEFAULT_STRUCTURE.typeForId(id);
+    if (kind !== undefined) return kind;
+  }
+  return null;
 }
 
 /**
@@ -115,10 +153,15 @@ async function hooksRun(): Promise<CliResult> {
   const event = input.hook_event_name ?? "PreToolUse";
   const guidance = STOP_EVENTS.has(event)
     ? STOP_REMINDER
-    : await (async () => {
-        const skill = extractSkill(input);
-        return skill === null ? null : hookGuidance(skill, input.cwd ?? process.cwd());
-      })();
+    : event === WRITE_EVENT
+      ? await (async () => {
+          const kind = await writtenArtifactKind(input);
+          return kind === null ? null : captureGuidance(kind);
+        })()
+      : await (async () => {
+          const skill = extractSkill(input);
+          return skill === null ? null : hookGuidance(skill, input.cwd ?? process.cwd());
+        })();
   if (guidance === null) {
     process.stdout.write("{}");
     return { code: 0 };
@@ -142,6 +185,19 @@ export async function hookGuidance(skill: string, cwd: string): Promise<string |
   return (
     `The ${skill} skill authors a wiki '${kind}' artifact. When it finishes, persist the ` +
     `result to the vault — don't leave it only in chat:\n  wiki create ${kind} ${projectFlag} --body -`
+  );
+}
+
+/**
+ * Guidance to inject when a PostToolUse write produces an artifact of a known
+ * kind: name the kind so the agent (or, once CAPTURE lands, the hook itself)
+ * persists it to the vault. ADR-0038: kind comes from the written file, not from
+ * any injected-skill identity the payload does not carry.
+ */
+function captureGuidance(kind: TemplateType): string {
+  return (
+    `A wiki '${kind}' artifact was just authored. Persist it to the vault — ` +
+    `don't leave it only on disk:\n  wiki create ${kind} --project <name> --body -`
   );
 }
 

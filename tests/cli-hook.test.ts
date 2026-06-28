@@ -90,6 +90,57 @@ describe("wiki hooks run (callback)", () => {
   });
 });
 
+describe("wiki hooks run (write-signal capture detection, ADR-0038)", () => {
+  async function tmpDir(): Promise<string> {
+    const dir = await mkdtemp(join(tmpdir(), "wiki-write-"));
+    tempPaths.push(dir);
+    return dir;
+  }
+
+  test("a PostToolUse write of an artifact whose frontmatter id names a known kind yields a capture decision naming the kind", async () => {
+    const dir = await tmpDir();
+    const file = join(dir, "PRD-0099-thing.md");
+    await writeFile(file, "---\nid: PRD-0099\ntitle: Thing\n---\n# Thing\n");
+    const { stdout } = await runWiki(["hooks", "run"], {
+      stdin: JSON.stringify({ hook_event_name: "PostToolUse", tool_name: "write", tool_input: { file_path: file } }),
+    });
+    const out = JSON.parse(stdout);
+    expect(out.hookSpecificOutput.hookEventName).toBe("PostToolUse");
+    expect(out.hookSpecificOutput.additionalContext).toContain("prd");
+  });
+
+  test("a PostToolUse write of an artifact whose frontmatter template names a known kind is detected", async () => {
+    const dir = await tmpDir();
+    const file = join(dir, "draft.md");
+    await writeFile(file, "---\ntemplate: slice\ntitle: Draft\n---\n# Draft\n");
+    const { stdout } = await runWiki(["hooks", "run"], {
+      stdin: JSON.stringify({ hook_event_name: "PostToolUse", tool_input: { path: file } }),
+    });
+    const out = JSON.parse(stdout);
+    expect(out.hookSpecificOutput.additionalContext).toContain("slice");
+  });
+
+  test("a PostToolUse write to an unrelated file yields no capture decision", async () => {
+    const dir = await tmpDir();
+    const file = join(dir, "index.ts");
+    await writeFile(file, "export const x = 1;\n");
+    const { stdout } = await runWiki(["hooks", "run"], {
+      stdin: JSON.stringify({ hook_event_name: "PostToolUse", tool_input: { file_path: file } }),
+    });
+    expect(stdout).toBe("{}");
+  });
+
+  test("a PostToolUse write of a markdown file whose frontmatter names no recognizable kind yields no capture decision", async () => {
+    const dir = await tmpDir();
+    const file = join(dir, "notes.md");
+    await writeFile(file, "---\nid: XYZ-001\ntitle: Notes\n---\n# Notes\n");
+    const { stdout } = await runWiki(["hooks", "run"], {
+      stdin: JSON.stringify({ hook_event_name: "PostToolUse", tool_input: { file_path: file } }),
+    });
+    expect(stdout).toBe("{}");
+  });
+});
+
 describe("wiki hooks install", () => {
   test("writes the runtime config and preserves unrelated keys, deduping on re-run", async () => {
     const home = await mkdtemp(join(tmpdir(), "wiki-home-"));
