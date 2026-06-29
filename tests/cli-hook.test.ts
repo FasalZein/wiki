@@ -56,6 +56,9 @@ describe("hookGuidance (skill → artifact persistence)", () => {
   test("a registered skill yields a create reminder for its kind and the linked project", async () => {
     const out = await hookGuidance("to-slices", await repoDir("wiki-v2"));
     expect(out).toContain("wiki create slice --project wiki-v2 --body -");
+    // names the stamp-template authoring step, not only `wiki create` (SLICE-0125)
+    expect(out).toContain("template: slice");
+    expect(out).toContain("project: wiki-v2");
   });
 
   test("an unregistered skill yields no guidance (no injection)", async () => {
@@ -94,6 +97,8 @@ describe("wiki hooks run (callback)", () => {
     const out = JSON.parse(stdout);
     expect(out.hookSpecificOutput.hookEventName).toBe("Stop");
     expect(out.hookSpecificOutput.additionalContext).toContain("wiki create");
+    // the reminder names the stamp-template step too (SLICE-0125), not only `wiki create`
+    expect(out.hookSpecificOutput.additionalContext).toContain("template: <kind>");
   });
 });
 

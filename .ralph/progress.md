@@ -423,3 +423,74 @@ Next-iteration notes: SLICE-0125 (skill->kind routing + draft-stamp authoring
 contract, blocked by SLICE-0120 which passes) is the next lowest unfinished item.
 SLICE-0126 (blocked by SLICE-0121, passes) is also ready; SLICE-0127 needs both
 SLICE-0120 and SLICE-0126. Pick the lowest-numbered false item — SLICE-0125.
+
+## SLICE-0125 SKILL->KIND ROUTING + DRAFT-STAMP AUTHORING CONTRACT (PASS)
+
+Selected as the lowest-numbered unfinished item; its blocker SLICE-0120 (capture
+G1) already passes, so it is unblocked. SLICE-0126/0127 remain blocked by
+0121/(0120+0126) per the dependency edges, and 0119..0124 already pass.
+
+Decision rationale: the routing primitive (kindForSkill) and the capture branches
+(template:/id: resolution, warn-on-unknown, null-on-bare, idempotent) already
+exist from earlier slices. This item's real deliverables per the plan were the
+three contract-pinning pieces: (1) a test pinning the wiki.json `skill`->kind
+mapping (default + a custom config via loadStructure), (2) the stamp-`template:`
+(and `project:`) authoring contract documented in the bundled skill, and (3) the
+write/session-end hook guidance strings updated to name the stamp-template step,
+not only `wiki create`, asserted in tests/cli-hook.test.ts. Plus the end-to-end
+test that a stamped draft is captured into the configured kind on a TEMP vault.
+
+Implementation:
+- src/cli/verbs/hooks.ts: STOP_REMINDER now offers two paths — `wiki create
+  <kind> --project <name> --body -` OR "stamp the draft's frontmatter with
+  `template: <kind>` and `project: <name>` so the write hook captures it on save".
+  hookGuidance(skill, cwd) likewise appends the stamp-template alternative naming
+  the resolved kind and the linked project (or `<name>` when unlinked, mirroring
+  the existing projectFlag fallback). No behavior change beyond the guidance text;
+  the capture path and event routing are untouched.
+- skills/wiki/SKILL.md: added a "Stamp-template authoring contract" paragraph to
+  the auto-persist section. Documents that the PostToolUse hook decides on
+  frontmatter alone (it sees every write), so `template: <kind>` + `project:
+  <name>` auto-files a draft; an id:-stamped draft whose prefix resolves to a kind
+  is also captured; re-save is idempotent; a bare draft is left alone; an
+  id/template naming no registered kind warns (never silently dropped); project:
+  may be omitted when the repo is linked.
+
+Conservative assumption recorded: the guidance text is treated as the stable
+contract surface — tests assert the substrings "template: slice" / "project:
+wiki-v2" (hookGuidance) and "template: <kind>" (STOP_REMINDER), so a future
+reword that keeps the stamp-template step still passes while dropping it fails.
+The custom-vault e2e uses a `bug` kind (prefix BUG, folder bugs) with a `skill`
+field — reversible fixture choice mirroring the SLICE-0120 contract test.
+
+Tests (no existing test weakened or deleted):
+- tests/skill-kind-stamp-contract.test.ts (new): (1) every default skill-bearing
+  kind round-trips through DEFAULT_STRUCTURE.kindForSkill (to-prd->prd,
+  to-slices->slice, grill-with-docs->decision, handoff->handoff) and an unmapped
+  skill returns undefined (no guess); (2) a custom wiki.json `skill` field maps
+  via loadStructure (file-a-bug->bug), and a default skill is undefined in the
+  custom tree; (3) e2e: a draft stamped `template: bug` + `project: proj` is
+  captured into projects/proj/bugs/ as BUG-0001-crash-on-save.md on a TEMP vault.
+- tests/cli-hook.test.ts: extended the existing hookGuidance and Stop-reminder
+  cases to assert the new stamp-template wording (fails if the guidance regresses
+  to `wiki create` only).
+
+Files changed:
+- src/cli/verbs/hooks.ts (STOP_REMINDER + hookGuidance stamp-template wording)
+- skills/wiki/SKILL.md (stamp-template authoring contract paragraph)
+- tests/skill-kind-stamp-contract.test.ts (new: mapping pin + e2e)
+- tests/cli-hook.test.ts (assert the new guidance wording)
+- .ralph/items.json (SLICE-0125 passes false->true)
+- .ralph/progress.md (this entry)
+
+Verification (all green at this commit, gate = bun run test):
+- bun run build: ok (cli.js 0.33 MB)
+- bunx tsc --noEmit: clean (exit 0)
+- bun run test: 433 pass, 0 fail, 1399 expect() calls, 59 files
+
+Next-iteration notes: SLICE-0126 (incremental keyword index update inside
+mintAndWrite, blocked by SLICE-0121 which passes) is the next lowest unfinished
+item — SHARED-SEAM RULE: the qmd update goes inside mintAndWrite in store.ts, not
+at call sites, and amends PRD-0018's read-only search by giving the WRITE path the
+keyword update (update those pinned search tests explicitly, do not delete).
+SLICE-0127 still needs both SLICE-0120 (pass) and SLICE-0126 (not yet).

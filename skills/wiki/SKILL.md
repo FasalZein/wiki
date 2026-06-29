@@ -107,5 +107,17 @@ and pi the hook only sees a `/skill:name` slash-command in the prompt, not a bar
 mention — Claude Code instead fires a dedicated `Skill` tool event.
 It captures; closing an artifact stays an explicit `wiki set <id> status closed`.
 
+**Stamp-template authoring contract.** The write hook (PostToolUse) captures on
+*frontmatter alone* — it sees every file write, so it decides from what the draft
+declares, not from a skill identity. To have a draft auto-filed into the vault on
+save, stamp its frontmatter with `template: <kind>` (a kind in `wiki.json`, e.g.
+`template: slice`) and `project: <name>`; the hook then mints an id and files it
+under that kind. A draft already carrying an `id:` whose prefix resolves to a kind
+(e.g. `id: PRD-0007`) is also captured, and re-saving a stamped draft is idempotent
+(filed once). A draft with neither `template:` nor `id:` is left alone (an ordinary
+write, never captured); an `id:`/`template:` that names no registered kind is
+surfaced as a warning, never silently dropped. `project:` may be omitted when the
+repo is linked — the hook resolves it from the `wiki:begin` pointer block.
+
 Breaking a PRD into slices? Load `to-slices`. Otherwise the CLI is self-describing —
 `wiki <verb> --help`.

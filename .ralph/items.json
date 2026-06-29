@@ -101,7 +101,7 @@
         "Add an end-to-end test: a draft stamped per the contract is captured into the configured kind on a TEMP vault.",
         "Run all three gates green and commit."
       ],
-      "passes": false,
+      "passes": true,
       "regression_notes": ""
     },
     {
