@@ -42,6 +42,21 @@ describe("parseCollectionNames", () => {
   test("returns empty for output with no collections", () => {
     expect(parseCollectionNames("Collections (0):\n")).toEqual([]);
   });
+
+  // Hardening (SLICE-0124): names are read from the stable `qmd://<name>/` URI,
+  // not the leading human-readable column. A qmd version that reformats the
+  // list line (extra indent, a bullet prefix, different spacing) must still
+  // parse, or an existing collection would masquerade as 'never synced'.
+  test("parses names from the qmd:// URI even when the line format changes", () => {
+    const reformatted = [
+      "Collections (2):",
+      "",
+      "  - bayland-portfolio-v1   (qmd://bayland-portfolio-v1/)  [1044 files]",
+      "\t* rift -> qmd://rift/ (39 files, updated 28m ago)",
+      "",
+    ].join("\n");
+    expect(parseCollectionNames(reformatted)).toEqual(["bayland-portfolio-v1", "rift"]);
+  });
 });
 
 describe("QmdError.summary", () => {

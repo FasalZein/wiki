@@ -1,7 +1,7 @@
 {
   "name": "wiki",
-  "version": "0.0.0",
-  "description": "Knowledge + delivery system over a locked Obsidian vault. Single CLI is the only writer.",
+  "version": "0.1.0",
+  "description": "Config-driven artifact store and semantic recall tool over a plain-Markdown vault. The CLI is the only writer.",
   "type": "module",
   "bin": {
     "wiki": "./dist/cli.js"

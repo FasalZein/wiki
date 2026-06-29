@@ -355,3 +355,71 @@ Next-iteration notes: SLICE-0124 (docs/metadata/qmd parse cleanup, no blockers)
 is the next lowest unfinished item. SLICE-0125 (blocked by 0120, satisfied) and
 SLICE-0126 (blocked by 0121, satisfied) are also ready; SLICE-0127 needs 0120 +
 0126. Pick the lowest-numbered false item.
+
+## SLICE-0124 DOCS, METADATA, AND QMD COLLECTION-LIST PARSE CLEANUP (PASS)
+
+Selected as the lowest-numbered unfinished item; no blockers (SLICE-0119..0123
+all pass).
+
+Decision rationale: three independent cleanups (G12/G13 + distribution metadata)
+with no behavior coupling. The package.json description still pitched a "locked
+Obsidian vault" workflow that PRD-0019 dissolved; the README still called doc
+buckets "locked categories" you must never extend, contradicting the config-driven
+tree; and listCollections parsed names from the leading human-readable column of
+`qmd collection list`, so a qmd version that reindents or reprefixes that line
+would yield zero names and make an already-synced collection look "never synced"
+(false "needs sync"/skipped-update path).
+
+Implementation:
+- package.json: version 0.0.0 -> 0.1.0; description rewritten to "Config-driven
+  artifact store and semantic recall tool over a plain-Markdown vault. The CLI is
+  the only writer." (drops the stale 'locked Obsidian vault' framing).
+- README.md: the "Docs are nested by locked category ... Never invent a folder"
+  bullet replaced with the config-driven model — each branch section declares its
+  buckets in wiki.json; the six bundled buckets are the default, not a hard lock;
+  `wiki schema doc` lists current buckets. Did NOT touch the [research] block
+  (SLICE-0119 owns it) — verified no [research] text remains from that item.
+- src/integrations/qmd.ts: parseCollectionNames now reads the name out of the
+  stable `qmd://<name>/` URI token (regex /qmd:\/\/([^/\s)]+)\//g) instead of the
+  fragile `^name (qmd://` leading-column match. Anchoring on the URI keeps the
+  substring-false-positive guard (the original reason for exact parsing) AND
+  survives an output-format change (extra indent, bullet prefix, different
+  spacing). Updated the module header + function comment to describe the URI-token
+  contract.
+
+Conservative assumptions recorded:
+- Chose the "version-robust parse" alternative the step allows over a `--json`
+  collection-list form: the real qmd's `collection list --json` support is
+  unverified here, and keying on the `qmd://` URI (which qmd emits in every list
+  format observed in the fixtures) hardens against reformat without depending on
+  an unconfirmed flag. No external qmd binary was run; the existing shell-fake
+  fixtures already emit the `name (qmd://name/)` shape and still parse.
+- Version bumped to 0.1.0 (first non-zero minor) rather than guessing a higher
+  number; reversible.
+
+Tests (new case, no existing test weakened or deleted):
+- tests/qmd-collections.test.ts: added "parses names from the qmd:// URI even
+  when the line format changes" — a reformatted list (leading "  - ", a "\t* ...
+  -> qmd://rift/" arrow form, trailing "[N files]") still yields exactly
+  ["bayland-portfolio-v1", "rift"]. This fails if the parser regresses to the
+  leading-column-only match. The original three parseCollectionNames cases and
+  the QmdError.summary cases are unchanged and still green (the URI parse is a
+  strict superset for the canonical "name (qmd://name/)" shape).
+
+Files changed:
+- package.json (description + version)
+- README.md (config-driven bucket model bullet)
+- src/integrations/qmd.ts (URI-token collection-name parse + comments)
+- tests/qmd-collections.test.ts (new reformat-robust case)
+- .ralph/items.json (SLICE-0124 passes false->true)
+- .ralph/progress.md (this entry)
+
+Verification (all green at this commit, gate = bun run test):
+- bun run build: ok (cli.js 0.33 MB, 100 modules)
+- bunx tsc --noEmit: clean (exit 0)
+- bun run test: 430 pass, 0 fail, 1385 expect() calls, 58 files
+
+Next-iteration notes: SLICE-0125 (skill->kind routing + draft-stamp authoring
+contract, blocked by SLICE-0120 which passes) is the next lowest unfinished item.
+SLICE-0126 (blocked by SLICE-0121, passes) is also ready; SLICE-0127 needs both
+SLICE-0120 and SLICE-0126. Pick the lowest-numbered false item — SLICE-0125.

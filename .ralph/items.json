@@ -88,7 +88,7 @@
         "Harden qmd collection-list parsing (src/integrations/qmd.ts): prefer a `--json` collection-list form (or a version-robust parse) so a qmd output-format change does not masquerade as 'never synced'. Pin with a test.",
         "Run all three gates green and commit."
       ],
-      "passes": false,
+      "passes": true,
       "regression_notes": ""
     },
     {

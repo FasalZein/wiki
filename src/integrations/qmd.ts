@@ -6,7 +6,9 @@
  * _project.md qmd_command, then default `qmd`.
  *
  * Collection existence parses exact names out of `qmd collection list` output.
- * This depends on that human-readable output shape ("name (qmd://name/)").
+ * Names are read from the stable `qmd://<name>/` URI token each entry carries,
+ * not the human-readable leading column, so a spacing/indent/prefix change in
+ * qmd's list format does not masquerade as 'collection never synced'.
  */
 
 import { isRecord } from "../util";
@@ -29,11 +31,13 @@ export class QmdError extends Error {
   }
 }
 
-// Each collection prints as "name (qmd://name/)". Parse exact names so the
-// membership check can't false-positive on a name that is a substring of
+// Each collection prints with a `qmd://<name>/` URI. Read the name out of that
+// stable URI token (not the leading human-readable column, which can change
+// spacing/indent across qmd versions). Anchoring on `qmd://` also keeps the
+// membership check from false-positiving on a name that is a substring of
 // another (e.g. "bayland" vs "bayland-portfolio-v1").
 export function parseCollectionNames(output: string): string[] {
-  return [...output.matchAll(/^(\S+) \(qmd:\/\//gm)].map((match) => match[1] ?? "").filter((name) => name.length > 0);
+  return [...output.matchAll(/qmd:\/\/([^/\s)]+)\//g)].map((match) => match[1] ?? "").filter((name) => name.length > 0);
 }
 
 export async function listCollections(qmdCommand: string): Promise<string[]> {
