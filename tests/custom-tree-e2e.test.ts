@@ -137,6 +137,25 @@ describe("SLICE-0118: custom tree end-to-end", () => {
     expect(await readFile(compPath, "utf8")).toContain("id: ADR-0001");
   });
 
+  test("a bare `wiki create <branch-section>` with no --category defaults to the first declared bucket (this tree has no `notes`)", async () => {
+    const vault = await makeVault("p");
+
+    // The custom doc section declares buckets [bugs, runbooks] and NO `notes`.
+    // A bare create must file into a DECLARED bucket (first one: bugs), never an
+    // undeclared `notes/` folder that doctor would then flag.
+    const doc = await run([
+      "create", "doc",
+      "--project", "p",
+      "--title", "Bare doc with no category",
+      "--summary", "A bare doc create with no explicit bucket.",
+    ]);
+    expect(doc.code).toBe(0);
+    const docPath = join(vault, "projects", "p", "knowledge", "bugs", "DOC-0001-bare-doc-with-no-category.md");
+    expect(await readFile(docPath, "utf8")).toContain("id: DOC-0001");
+    // No undeclared notes/ folder was created, so doctor stays clean.
+    expect((await runDoctor(vault)).clean).toBe(true);
+  });
+
   test("doctor passes structural validation against the custom tree, and nextId honors the per-section id-space", async () => {
     const vault = await makeVault("p");
     await run(["create", "bugs", "--project", "p", "--title", "First bug here", "--summary", "First bug summary here."]);

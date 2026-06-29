@@ -111,7 +111,7 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
       "--since": "only artifacts modified at/after this date (e.g. 2026-06-01); implies --recent ordering",
       "--include-research": "include research collection",
       "--explain": "include qmd's match explanation",
-      "--no-refresh": "skip the pre-query incremental embed",
+      "--no-refresh": "accepted for back-compat; search is read-only and never refreshes (no-op)",
       "--json": "emit a JSON array of {id,kind,title,path,score,snippet} hits ([] when empty)",
     },
     example: 'wiki search "rate limiting"',

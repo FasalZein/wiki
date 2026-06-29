@@ -175,8 +175,8 @@ async function createGeneric(kind: TemplateType, args: string[], presetCategory?
   // The bucket subfolder. SLICE-0112: a bucket/leaf name passed as the create-name
   // resolves to a section + subfolder (presetCategory). Otherwise --category names
   // a bucket of this section, validated against the loaded tree. SLICE-0117: with the
-  // doc `type` enum gone, a bare `wiki create doc` with no bucket defaults to `notes`
-  // (the catch-all) so it files into a declared bucket, not loose in docs/.
+  // doc `type` enum gone, a bare create on a BRANCH section files into a default
+  // bucket so it lands in a declared folder, not loose in the section dir.
   const section = structure.sections.find((s) => s.name === kind);
   const bucketNames = section?.buckets.map((b) => b.name) ?? [];
   const explicitCategory = stringValue(parsed.values, "category");
@@ -185,9 +185,14 @@ async function createGeneric(kind: TemplateType, args: string[], presetCategory?
     console.error(`category must be one of: ${bucketNames.join(", ")}`);
     return { code: 1 };
   }
-  const category = presetCategory
-    ?? explicitCategory
-    ?? (kind === "doc" ? "notes" : undefined);
+  // Section-shape-driven default (no kind name hardcoded): a branch section with no
+  // preset/explicit bucket defaults to its `notes` bucket if declared, else its first
+  // declared bucket — always a real bucket of THIS vault's tree. A leaf section files
+  // directly into the section folder (no subfolder), so its default stays undefined.
+  const defaultBucket = section?.tree === "branch"
+    ? (bucketNames.includes("notes") ? "notes" : bucketNames[0])
+    : undefined;
+  const category = presetCategory ?? explicitCategory ?? defaultBucket;
 
   // Dedup query: title plus every authored body section the user supplied, in
   // template order — a uniform signal across kinds (no per-kind composition).
