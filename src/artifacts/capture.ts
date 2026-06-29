@@ -1,14 +1,16 @@
 import matter from "gray-matter";
 import { readFile, writeFile } from "node:fs/promises";
-import { basename } from "node:path";
+import { basename, relative } from "node:path";
 
 import { getVaultRoot } from "../config/vault";
 import { readLinkedProject } from "../cli/repo-link";
+import { loadProjectConfig, ProjectConfigError } from "../config/project";
 import type { TemplateType } from "../schema/load";
 import { loadStructure, type Structure } from "./registry";
 import { buildIdIndex } from "./id-index";
 import { mintAndWrite, slugifyTitle } from "./store";
-import { artifactDirectory } from "./paths";
+import { artifactDirectory, projectPath } from "./paths";
+import { DedupBlockedError, QmdError, runDedupGate } from "./dedup";
 
 /**
  * Filing a written file into the vault yields one of three outcomes: `captured`
@@ -20,7 +22,7 @@ import { artifactDirectory } from "./paths";
  * such fault becomes a `warn`, so the hook seam keeps its stdout contract.
  */
 export type CaptureOutcome =
-  | { outcome: "captured"; context: string }
+  | { outcome: "captured"; context: string; note?: string }
   | { outcome: "warn"; warning: string }
   | null;
 
@@ -144,16 +146,86 @@ async function fileArtifact(args: {
 
   const directory = artifactDirectory(kind, vaultRoot, project, structure);
   const today = new Date().toISOString().slice(0, 10);
-  const artifact = await mintAndWrite({ type: kind, vaultRoot, project, structure }, (id) => {
-    const title = typeof data.title === "string" && data.title.length > 0 ? data.title : id;
-    const aliases = Array.isArray(data.aliases) ? [...new Set([id, ...data.aliases.map(String)])] : [id];
-    const fields = { ...data, id, project, aliases, created: data.created ?? today, updated: today };
-    return { path: `${directory}/${id}-${slugifyTitle(title)}.md`, content: matter.stringify(body, fields), fields };
-  });
+  // SLICE-0127: run the dedup gate inside the same per-project lock as the write
+  // (via mintAndWrite's beforeAllocate), so the critical section is dedup
+  // refresh+query -> allocate -> write -> qmd update. Capture NEVER blocks or
+  // prompts (it is a non-interactive hook): a strong match files the artifact
+  // anyway and records an advisory note the caller surfaces to stderr.
+  let dedupNote: string | undefined;
+  const artifact = await mintAndWrite(
+    {
+      type: kind,
+      vaultRoot,
+      project,
+      structure,
+      beforeAllocate: async () => {
+        dedupNote = await captureDedupNote({ kind, project, vaultRoot, structure, data, body });
+      },
+    },
+    (id) => {
+      const title = typeof data.title === "string" && data.title.length > 0 ? data.title : id;
+      const aliases = Array.isArray(data.aliases) ? [...new Set([id, ...data.aliases.map(String)])] : [id];
+      const fields = { ...data, id, project, aliases, created: data.created ?? today, updated: today };
+      return { path: `${directory}/${id}-${slugifyTitle(title)}.md`, content: matter.stringify(body, fields), fields };
+    },
+  );
 
   // Stamp the source draft with the assigned id so a re-fire is idempotent.
   await writeFile(path, matter.stringify(body, { ...data, id: artifact.id, project }));
-  return { outcome: "captured", context: captureContext(kind, artifact.id, false) };
+  const captured: CaptureOutcome = { outcome: "captured", context: captureContext(kind, artifact.id, false) };
+  return dedupNote !== undefined ? { ...captured, note: dedupNote } : captured;
+}
+
+/**
+ * SLICE-0127: run the SAME advisory dedup gate `wiki create` uses (runDedupGate)
+ * for the capture path, returning an advisory note on a STRONG match or undefined
+ * otherwise. Capture must never block, prompt, or drop, so this only ever returns
+ * a string to surface — it never throws past here: a weak match, no match, dedup
+ * disabled for the kind, an unconfigured project, or any qmd fault all yield
+ * undefined (file silently). Runs inside the per-project lock (beforeAllocate), so
+ * its qmd refresh+query is part of the one locked critical section.
+ */
+async function captureDedupNote(args: {
+  kind: TemplateType;
+  project: string;
+  vaultRoot: string;
+  structure: Structure;
+  data: Record<string, unknown>;
+  body: string;
+}): Promise<string | undefined> {
+  const { kind, project, vaultRoot, structure, data, body } = args;
+  if (!structure.specFor(kind).dedup) return undefined;
+  const projPath = projectPath(vaultRoot, project);
+  let config;
+  try {
+    config = await loadProjectConfig(projPath);
+  } catch (error) {
+    if (error instanceof ProjectConfigError) return undefined; // unconfigured project — skip dedup
+    throw error;
+  }
+  // Same query shape create uses: title plus the authored body, a uniform signal.
+  const title = typeof data.title === "string" ? data.title : "";
+  const query = [title, body].filter((v) => v.length > 0).join(" ");
+  try {
+    await runDedupGate({ type: kind, project, projectPath: projPath, config, query, override: { kind: "none" } });
+    return undefined; // no match
+  } catch (error) {
+    if (error instanceof DedupBlockedError) {
+      const strong = error.matches.find((match) => match.strength === "strong");
+      if (strong === undefined) return undefined; // only a weak match — stay silent, file it
+      return `possible duplicate of [[${dedupMatchId(strong.path)}]] — review`;
+    }
+    if (error instanceof QmdError) return undefined; // qmd missing / never synced — best-effort
+    throw error;
+  }
+}
+
+/** The artifact id a dedup match points at — the filename's id-slug stem, e.g.
+ *  `PRD-0007` from `.../prds/PRD-0007-core-cli.md`. Falls back to the basename. */
+function dedupMatchId(path: string): string {
+  const stem = basename(path).replace(/\.md$/, "");
+  const match = stem.match(/^([A-Z]+-\d+)/);
+  return match?.[1] ?? stem;
 }
 
 /** Advisory injected after a capture so the author knows the artifact is filed. */

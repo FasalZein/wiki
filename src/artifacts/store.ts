@@ -223,12 +223,18 @@ type RenderedArtifact = { path: string; content: string; fields: NormalizedRecor
  * with no manual `wiki sync`. Vector `embed` stays owned by `wiki sync`; the write
  * path never embeds. The update is best-effort — a qmd fault (binary missing, not
  * yet synced) must not fail the write, since `wiki sync` is the durable reindex.
+ *
+ * SLICE-0127: `beforeAllocate` runs once INSIDE the lock, before the first id is
+ * allocated — the capture path uses it to run the dedup refresh+query so the whole
+ * critical section is dedup refresh+query -> allocate -> write -> qmd update, all
+ * under the one per-project lock (no unlocked qmd touch).
  */
 export async function mintAndWrite(
-  target: { type: TemplateType; vaultRoot: string; project: string; structure: Structure },
+  target: { type: TemplateType; vaultRoot: string; project: string; structure: Structure; beforeAllocate?: () => Promise<void> },
   render: (id: string) => RenderedArtifact,
 ): Promise<Artifact> {
   return withProjectLock(target.vaultRoot, target.project, async () => {
+    if (target.beforeAllocate !== undefined) await target.beforeAllocate();
     const MAX_ATTEMPTS = 8;
     for (let attempt = 0; ; attempt++) {
       const id = await nextId(target.type, target.vaultRoot, target.project, target.structure);

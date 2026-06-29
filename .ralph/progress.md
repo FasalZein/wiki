@@ -608,3 +608,98 @@ with the locked order dedup refresh+query -> allocate -> write -> qmd update. No
 the qmd update is already inside mintAndWrite (SLICE-0126); SLICE-0127 must ensure
 the dedup query also runs under the same lock so the "no unlocked qmd touch"
 ordering holds. Use a TEMP vault; the no-op-qmd preload now protects the real index.
+
+## SLICE-0127 CAPTURE RUNS THE DEDUP GATE AND WARNS-AND-FILES ON A MATCH (PASS)
+
+Selected as the lowest-numbered unfinished item; its blockers SLICE-0120 (capture
+G1) and SLICE-0126 (incremental update inside mintAndWrite) both pass, so it is
+unblocked. It is the final unfinished item.
+
+Decision rationale: `wiki create` runs an advisory dedup gate (runDedupGate in
+src/artifacts/dedup.ts), but the in-child capture path filed artifacts with no
+dedup check at all (G6, ADR-0042). The fix routes capture through the SAME
+runDedupGate seam create uses, INSIDE the per-project lock, so the locked critical
+section is dedup refresh+query -> allocate -> write -> qmd update with no unlocked
+qmd touch. Capture is a non-interactive hook, so it must NEVER block, prompt, or
+drop: a strong match files the artifact anyway and records a "possible duplicate of
+[[X]] — review" advisory the hook surfaces to stderr. `wiki create`'s existing
+advisory/strict dedup behavior is untouched.
+
+Shared-seam note: SLICE-0126 already placed the per-project lock + write-path qmd
+update inside mintAndWrite (store.ts). SLICE-0127 needed the dedup query to run
+under that SAME lock (the item's "no unlocked qmd touch" rule), so mintAndWrite
+gained an optional `beforeAllocate` callback that runs once inside withProjectLock
+before the first nextId. Capture passes a beforeAllocate that runs the dedup gate;
+create does not pass one, so create's flow (its dedup runs earlier, outside, as
+before) is unchanged. This keeps the dedup wiring on the capture side without
+editing each call site and without moving create's dedup.
+
+Implementation:
+- src/artifacts/store.ts: mintAndWrite's target gained an optional
+  `beforeAllocate?: () => Promise<void>` run once inside the lock before the
+  allocate->write loop. Docstring updated to name the SLICE-0127 ordering (dedup
+  refresh+query -> allocate -> write -> qmd update, all under the one lock).
+- src/artifacts/capture.ts: fileArtifact now calls mintAndWrite with a
+  beforeAllocate that invokes the new captureDedupNote and records its result in a
+  `dedupNote` closure var; on success the captured outcome carries `note` when set.
+  captureDedupNote runs runDedupGate (skipped when the kind's spec.dedup is false
+  or the project is unconfigured — ProjectConfigError), and on a DedupBlockedError
+  returns the advisory note ONLY for a STRONG match (a weak match stays silent and
+  files). A QmdError (binary missing / never synced) returns undefined — best-effort,
+  never blocks the file. The query mirrors create's shape (title + authored body).
+  dedupMatchId extracts the matched artifact id (e.g. BUG-0007) from the match path.
+  CaptureOutcome's `captured` variant gained an optional `note?: string`.
+- src/cli/verbs/hooks.ts: the write-event handler now prints capture.note to
+  stderr (when present) before emitting the captured additionalContext on stdout —
+  the artifact is still filed; the note is advisory.
+
+Conservative assumptions recorded:
+- Note is emitted only on a STRONG match (score >= dedup_threshold_strong, default
+  0.85). A weak match stays advisory-silent on the capture path, matching create's
+  rule that weak matches always proceed; surfacing every weak match on capture
+  would spam the hook. Reversible (lower the threshold gate if needed).
+- The dedup note phrasing is "possible duplicate of [[<id>]] — review" (the item's
+  required string). dedupMatchId falls back to the match filename stem if it does
+  not start with an ID-NNNN prefix.
+- beforeAllocate runs the dedup gate even on the idempotent (already-filed) path? No
+  — the idempotent short-circuit (declaredId already in the index) returns before
+  mintAndWrite is reached, so a re-fire never re-runs dedup. Intended: a re-save of
+  an already-filed draft is not a new artifact.
+
+External-dependency substitute (this item): the real `qmd` binary is replaced by a
+fake-qmd shell script (the established cli-dedup.test.ts pattern) that logs its argv
+to STATE_FILE, registers collections, no-ops `update`, and returns RESULTS_FILE JSON
+for `query`. This fully satisfies the item's steps — it proves capture issues the
+correct refresh+query+update ordering under one lock and warns-and-files on a strong
+match — but it does NOT verify the real qmd's scoring; real-qmd dedup scoring remains
+qmd's own contract, unexercised here. No real qmd was run; the real $HOME/Knowledge
+vault was never touched (TEMP vault + per-test QMD_COMMAND override).
+
+Tests (new, TEMP vault only): tests/capture-dedup.test.ts —
+  1. a strong match (score 0.9) FILES the artifact (bugs/ has 1 file) AND the
+     captured outcome carries note "possible duplicate of [[BUG-0007]] — review"
+     (never dropped). The core G6 regression guard.
+  2. ordering: with no match, the qmd argv log shows the dedup `update -c proj`
+     precedes the dedup `query`, and the write-path keyword `update` (SLICE-0126)
+     is the LAST qmd touch (after the query) — dedup refresh+query -> write -> qmd
+     update under one lock; `embed` is never called on the capture path.
+  3. a weak match (0.75, >= weak 0.7, < strong 0.85) files silently with no note.
+Verified the guard is real: commenting out the `dedupNote = await captureDedupNote`
+wiring fails tests 1 and 2 (2 fail / 1 pass), passes again with it restored.
+No existing test weakened or deleted.
+
+Files changed:
+- src/artifacts/store.ts (mintAndWrite beforeAllocate hook + docstring)
+- src/artifacts/capture.ts (dedup gate via beforeAllocate; captured.note; helpers)
+- src/cli/verbs/hooks.ts (print capture.note to stderr before context)
+- tests/capture-dedup.test.ts (new)
+- .ralph/items.json (SLICE-0127 passes false->true)
+- .ralph/progress.md (this entry)
+
+Verification (all green at this commit, gate = bun run test):
+- bun run build: ok (cli.js 0.33 MB, 100 modules)
+- bunx tsc --noEmit: clean (exit 0)
+- bun run test: 439 pass, 0 fail, 1425 expect() calls, 61 files
+
+Next-iteration notes: all nine PRD-0023 items (SLICE-0119..0127) now pass; the
+bundle is complete. No unfinished item remains.

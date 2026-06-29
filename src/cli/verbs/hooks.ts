@@ -153,6 +153,7 @@ async function hooksRun(): Promise<CliResult> {
       process.stdout.write("{}");
       return { code: 0 };
     }
+    if (capture.note !== undefined) console.error(capture.note); // SLICE-0127: advisory dedup note, filed anyway
     process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: capture.context } }));
     return { code: 0 };
   }

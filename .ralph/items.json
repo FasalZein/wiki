@@ -129,7 +129,7 @@
         "Tests use a TEMP vault; assert a strong-match capture both files and warns, and that nothing is dropped.",
         "Run all three gates green and commit."
       ],
-      "passes": false,
+      "passes": true,
       "regression_notes": ""
     }
   ]
