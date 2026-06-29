@@ -126,3 +126,69 @@ Next-iteration notes: SLICE-0121 (per-project allocation lock, no blockers) is t
 next lowest unfinished item. Its shared-seam rule puts the lock INSIDE mintAndWrite
 in src/artifacts/store.ts. SLICE-0122/0123/0124 are also unblocked; pick the lowest
 false item.
+
+## SLICE-0121 PER-PROJECT ALLOCATION LOCK (PASS)
+
+Selected as the lowest-numbered unfinished item; no blockers (SLICE-0119/0120
+already pass).
+
+Decision rationale: the duplicate-id race (G3, ADR-0041) is real and the existing
+`wx`-exclusive-create + bounded-retry in mintAndWrite did NOT cover it. That guard
+only catches a same-PATH collision; two concurrent creates with DIFFERENT titles
+each compute the same nextId, render distinct file paths, and both succeed — two
+artifacts silently share one id. Verified empirically: with the lock removed, 4 of
+the 5 new tests fail (duplicate ids minted), confirming the guard was insufficient
+and the new test is a true regression guard.
+
+Per the SHARED-SEAM RULE the lock goes INSIDE mintAndWrite (src/artifacts/store.ts),
+the one seam both create and capture call, so capture is covered without editing
+capture.ts.
+
+Implementation:
+- src/artifacts/lock.ts (new): withProjectLock(vaultRoot, project, fn) serializes a
+  project's allocate->write critical section with a short-lived exclusive lockfile
+  at <vault>/.wiki/locks/<project>.lock, created with the `wx` flag (atomic single
+  winner). STALE_MS=10s reclaim-by-mtime so a crashed holder cannot wedge the vault;
+  ACQUIRE_TIMEOUT_MS=15s bound so a stuck peer surfaces as an error not a hang;
+  POLL_MS=10 backoff. The lock is released in a finally on BOTH success and error
+  paths. assertSafeSegment guards the project name (defense-in-depth; projectPath
+  already guards upstream). The lock dir lives OUTSIDE projects/ so it is never
+  scanned by the id index or any artifact walk.
+- src/artifacts/store.ts: mintAndWrite now wraps its whole allocate->write loop in
+  withProjectLock(target.vaultRoot, target.project, ...). The `wx` create + bounded
+  retry is KEPT as a cheap second guard for a same-path collision. Updated the stale
+  'No lockfile' docstring to describe the lock and the race it closes.
+
+Conservative assumptions recorded:
+- Lock placement <vault>/.wiki/locks/<project>.lock (reversible; not in projects/,
+  so no walk/index reads it). The plan allowed "<vault>/.wiki/ (or project dir)".
+- STALE_MS=10s / ACQUIRE_TIMEOUT_MS=15s are generous vs the sub-ms critical section;
+  tunable constants, not a contract.
+
+Tests (new, TEMP vault only): tests/allocation-lock.test.ts —
+  1. two concurrent DIFFERENT-title creates in one project get distinct ids
+     {PRD-0001, PRD-0002} (the core race the lock closes).
+  2. 8 concurrent creates all get distinct ids (no duplicates).
+  3. creates in DIFFERENT projects each start at PRD-0001 (no contention — separate
+     lockfiles).
+  4. a stale lockfile (mtime -60s via `touch -t`) is reclaimed, create succeeds, no
+     lingering lockfile (no deadlock).
+  5. the lockfile lives under .wiki/locks and is never mixed into projects/<p>/.
+No existing test weakened or deleted.
+
+Files changed:
+- src/artifacts/lock.ts (new)
+- src/artifacts/store.ts (wrap mintAndWrite critical section + docstring)
+- tests/allocation-lock.test.ts (new)
+- .ralph/items.json (SLICE-0121 passes false->true)
+- .ralph/progress.md (this entry)
+
+Verification (all green at this commit):
+- bun run build: ok (cli.js 0.32 MB, 100 modules)
+- bunx tsc --noEmit: clean (exit 0)
+- bun run test: 424 pass, 0 fail, 1356 expect() calls, 57 files
+
+Next-iteration notes: SLICE-0122 (doctor --fix duplicate ids + spine drift, no
+blockers) is the next lowest unfinished item. SLICE-0123/0124 are also unblocked.
+SLICE-0126 (incremental qmd update) is now UNBLOCKED since its blocker SLICE-0121
+passes — same mintAndWrite seam — but pick the lowest-numbered ready item.

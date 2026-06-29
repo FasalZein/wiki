@@ -50,7 +50,7 @@
         "Tests use a TEMP vault only.",
         "Run all three gates green and commit."
       ],
-      "passes": false,
+      "passes": true,
       "regression_notes": ""
     },
     {

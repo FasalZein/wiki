@@ -8,6 +8,7 @@ import { validate } from "../schema/validate";
 import type { NormalizedRecord, Schema, ValidationError } from "../schema/types";
 import { type Structure } from "./registry";
 import { nextId } from "./id";
+import { withProjectLock } from "./lock";
 import { buildIdIndex } from "./id-index";
 import { artifactDirectory, assertSafeSegment, projectPath } from "./paths";
 import { isFileNotFound } from "../util";
@@ -205,29 +206,35 @@ type RenderedArtifact = { path: string; content: string; fields: NormalizedRecor
 /**
  * The canonical "allocate the next id and write the file exactly once" seam,
  * shared by {@link createArtifact} and the hook's in-child capture. The render
- * callback turns a freshly minted id into its target path + content; this loop
- * owns the one thing both callers must get right: the nextId read-then-write is
- * a TOCTOU race under parallel writers, so an exclusive create (`wx`) plus a
- * bounded retry recomputes the id on collision rather than clobbering or
- * throwing. No lockfile.
+ * callback turns a freshly minted id into its target path + content.
+ *
+ * SLICE-0121: the nextId read-then-write is a duplicate-id race under parallel
+ * writers — two creates with DIFFERENT titles each compute the same id, write
+ * distinct paths, and both succeed (the `wx` flag only catches a same-PATH
+ * clash). A per-project lockfile serializes the whole allocate->write section so
+ * the second writer sees the first file and mints the next id. The exclusive
+ * `wx` create + bounded retry stays as a cheap second guard for a same-path
+ * collision. Different projects use different lockfiles, so they never contend.
  */
 export async function mintAndWrite(
   target: { type: TemplateType; vaultRoot: string; project: string; structure: Structure },
   render: (id: string) => RenderedArtifact,
 ): Promise<Artifact> {
-  const MAX_ATTEMPTS = 8;
-  for (let attempt = 0; ; attempt++) {
-    const id = await nextId(target.type, target.vaultRoot, target.project, target.structure);
-    const { path, content, fields } = render(id);
-    try {
-      await mkdir(dirname(path), { recursive: true }); // Bun.write auto-mkdirs; node writeFile does not
-      await writeFile(path, content, { flag: "wx" }); // fails if path already exists
-    } catch (error) {
-      if (isFileExists(error) && attempt < MAX_ATTEMPTS) continue; // collision — recompute nextId
-      throw error;
+  return withProjectLock(target.vaultRoot, target.project, async () => {
+    const MAX_ATTEMPTS = 8;
+    for (let attempt = 0; ; attempt++) {
+      const id = await nextId(target.type, target.vaultRoot, target.project, target.structure);
+      const { path, content, fields } = render(id);
+      try {
+        await mkdir(dirname(path), { recursive: true }); // Bun.write auto-mkdirs; node writeFile does not
+        await writeFile(path, content, { flag: "wx" }); // fails if path already exists
+      } catch (error) {
+        if (isFileExists(error) && attempt < MAX_ATTEMPTS) continue; // collision — recompute nextId
+        throw error;
+      }
+      return { id, path, fields, body: content };
     }
-    return { id, path, fields, body: content };
-  }
+  });
 }
 
 /**
