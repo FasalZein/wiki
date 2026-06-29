@@ -9,6 +9,7 @@ import { anyHookWired, unreachableSubagents } from "./hooks";
 import { initVault } from "../../bootstrap/init";
 import { parseCommand } from "../parse";
 import { unknownMessage } from "../usage";
+import { emitJson, jsonEnabled } from "../output";
 import type { CliResult } from "../dispatch";
 
 export async function handleVault(args: string[]): Promise<CliResult> {
@@ -33,6 +34,11 @@ async function vaultInit(args: string[]): Promise<CliResult> {
 
   const vaultPath = resolve(rawPath);
   const result = await initVault(vaultPath);
+
+  if (jsonEnabled()) {
+    emitJson({ path: vaultPath, created: result.created, skipped: result.skipped });
+    return { code: 0 };
+  }
 
   if (result.created.length > 0) {
     console.log("created:");
@@ -60,6 +66,11 @@ async function vaultDoctor(args: string[]): Promise<CliResult> {
 
   const result = await runDoctor(vaultPath);
 
+  if (jsonEnabled()) {
+    emitJson({ vault: vaultPath, clean: result.clean, issues: result.issues });
+    return { code: result.clean ? 0 : 1 };
+  }
+
   if (result.clean) {
     console.log("vault is clean — no drift detected");
     return { code: 0 };
@@ -85,26 +96,35 @@ async function vaultDoctor(args: string[]): Promise<CliResult> {
 async function vaultDoctorFix(vaultPath: string): Promise<CliResult> {
   const structure = await loadStructure(vaultPath);
   let changed = 0;
+  const renumbered: { from: string; to: string }[] = [];
+  const json = jsonEnabled();
   for (const project of await listVaultProjects(vaultPath)) {
     const repair = await repairDuplicateIds(vaultPath, project, structure);
     changed += repair.reassigned;
-    for (const label of repair.labels) console.log(`fixed ${label}`);
+    if (!json) for (const label of repair.labels) console.log(`fixed ${label}`);
 
     const fmt = await applyFmtFixes(vaultPath, projectPath(vaultPath, project), true, structure);
     changed += fmt.total;
-    for (const label of fmt.labels) console.log(`fixed ${label}`);
-    if (fmt.renumberMap.size > 0) {
-      for (const [oldId, newId] of fmt.renumberMap) console.log(`  renumbered ${oldId} -> ${newId}`);
-    }
-    if (fmt.manual.length > 0) {
-      console.log(`${project}: needs manual attention:`);
-      for (const finding of fmt.manual) console.log(`  ${finding}`);
+    for (const [oldId, newId] of fmt.renumberMap) renumbered.push({ from: oldId, to: newId });
+    if (!json) {
+      for (const label of fmt.labels) console.log(`fixed ${label}`);
+      if (fmt.renumberMap.size > 0) {
+        for (const [oldId, newId] of fmt.renumberMap) console.log(`  renumbered ${oldId} -> ${newId}`);
+      }
+      if (fmt.manual.length > 0) {
+        console.log(`${project}: needs manual attention:`);
+        for (const finding of fmt.manual) console.log(`  ${finding}`);
+      }
     }
   }
 
-  if (changed > 0) console.log(`applied ${changed} fix(es)`);
+  if (!json && changed > 0) console.log(`applied ${changed} fix(es)`);
 
   const result = await runDoctor(vaultPath);
+  if (json) {
+    emitJson({ vault: vaultPath, fixed: changed, renumbered, clean: result.clean, remaining: result.issues });
+    return { code: result.clean ? 0 : 1 };
+  }
   if (result.clean) {
     console.log("vault is clean — no drift detected");
     return { code: 0 };
@@ -132,6 +152,11 @@ async function setupDoctor(): Promise<CliResult> {
     hookWired: await anyHookWired(),
     unreachableSubagents: await unreachableSubagents(),
   });
+
+  if (jsonEnabled()) {
+    emitJson({ clean: result.clean, issues: result.issues, captureReach: result.captureReach });
+    return { code: result.clean ? 0 : 1 };
+  }
 
   if (result.clean) {
     console.log("setup is healthy — binary fresh, skill bundle present, hook wired");

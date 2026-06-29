@@ -10,6 +10,7 @@ import { ensureCollection } from "../../integrations/qmd";
 import { stampRepo } from "../repo-link";
 import type { CliResult } from "../dispatch";
 import { parseCommand, stringValue } from "../parse";
+import { emitJson, jsonEnabled } from "../output";
 import { unknownMessage } from "../usage";
 
 export async function handleProject(args: string[]): Promise<CliResult> {
@@ -30,6 +31,10 @@ export async function handleProject(args: string[]): Promise<CliResult> {
 async function listProjectsCommand(): Promise<CliResult> {
   const vaultRoot = await getVaultRoot();
   const projects = await listProjects(vaultRoot);
+  if (jsonEnabled()) {
+    emitJson({ projects });
+    return { code: 0 };
+  }
   if (projects.length === 0) {
     console.log("No projects yet. Create one with: wiki project create <name>");
     return { code: 0 };
@@ -86,7 +91,8 @@ async function createProject(args: string[]): Promise<CliResult> {
 
   console.error(`created project ${name} (repo: ${repo})`);
   console.error(`edit projects/${name}/_project.md to change repo; then: wiki project link --project ${name}`);
-  console.log(projPath);
+  if (jsonEnabled()) emitJson({ project: name, path: projPath, repo });
+  else console.log(projPath);
   return { code: 0 };
 }
 
@@ -129,6 +135,7 @@ async function linkProject(args: string[]): Promise<CliResult> {
   }
 
   console.error(`linked repo ${repoDir} to project ${projectName}`);
-  console.log(repoDir);
+  if (jsonEnabled()) emitJson({ project: projectName, repo: repoDir });
+  else console.log(repoDir);
   return { code: 0 };
 }

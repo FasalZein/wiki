@@ -37,6 +37,17 @@ describe("sync CLI", () => {
     );
   });
 
+  test("sync --json emits a structured result on stdout (no human prose)", async () => {
+    const fixture = await createSyncFixture("wiki-v2");
+
+    const result = await runWiki(["sync", "--project", "wiki-v2", "--json"], fixture);
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({ project: "wiki-v2", synced: ["wiki-v2"] });
+    // human "synced collection" prose must not leak when --json is on.
+    expect(result.stderr).not.toContain("synced collection");
+  });
+
   test("sync rejects the removed --include-research flag", async () => {
     // SLICE-0119: research is now a doc/research bucket, not a separate qmd
     // collection, so --include-research no longer exists. strict parseArgs rejects
