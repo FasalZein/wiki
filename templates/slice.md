@@ -13,10 +13,10 @@ schema:
   type:            { type: enum,      required: true, values: [HITL, AFK], default: AFK, description: "HITL = needs human interaction; AFK = agent-completable" }
   blocked_by:      { type: link_list, target: slice, default: [] }
   user_stories:    { type: list,      default: [], description: "References to PRD user-story IDs covered by this slice" }
-  acceptance:      { type: list,      required: true, default: [], description: "Checkboxes; one per criterion. SLICE-006 state machine enforces non-empty before transitioning out of planned." }
-  red_log_ref:     { type: file_ref,  description: "CLI-state path to captured failing-test output; set by `wiki slice red`" }
-  green_log_ref:   { type: file_ref,  description: "CLI-state path to captured passing-test output; set by `wiki slice green`" }
-  review_verdict:  { type: enum,      values: [pass, pass-with-notes, reject], description: "Set by `wiki slice close` via review-phase skill" }
+  acceptance:      { type: list,      required: true, default: [], description: "Checkboxes; one per criterion." }
+  red_log_ref:     { type: file_ref,  description: "CLI-state path to captured failing-test output (set via `wiki set`)" }
+  green_log_ref:   { type: file_ref,  description: "CLI-state path to captured passing-test output (set via `wiki set`)" }
+  review_verdict:  { type: enum,      values: [pass, pass-with-notes, reject], description: "Review outcome (set via `wiki set`)" }
   tdd_exempt:      { type: boolean,   default: false }
   tdd_exempt_reason: { type: string,  min: 20, description: "Required when tdd_exempt=true; explains why this slice ships without new tests" }
   supersedes:      { type: link,      target: slice }

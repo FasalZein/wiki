@@ -18,9 +18,11 @@ export function validate(
     }
     if (
       field.type === "enum" &&
-      typeof value === "string" &&
+      value !== undefined &&
       field.constraints.values !== undefined &&
-      !field.constraints.values.includes(value)
+      // A Date on an enum passes matchesType (date|enum share a clause) but can never
+      // be a valid enum value — reject any non-string here, never wave it through.
+      (typeof value !== "string" || !field.constraints.values.includes(value))
     ) {
       errors.push({
         field: field.name,
@@ -29,19 +31,33 @@ export function validate(
       });
     }
     if ((field.type === "list" || field.type === "link_list") && Array.isArray(value)) {
-      const min = field.constraints.min;
+      const { min, max } = field.constraints;
       if (min !== undefined && value.length < min) {
         errors.push({ field: field.name, reason: "below minimum count", expected: `at least ${min} item` });
       }
+      if (max !== undefined && value.length > max) {
+        errors.push({ field: field.name, reason: "above maximum count", expected: `at most ${max} item` });
+      }
     }
     if (isStringLike(field) && typeof value === "string") {
-      const min = field.constraints.min;
+      const { min, max, pattern } = field.constraints;
       if (min !== undefined && value.length < min) {
         errors.push({ field: field.name, reason: "below minimum length", expected: `at least ${min} characters` });
       }
-      const pattern = field.constraints.pattern;
+      if (max !== undefined && value.length > max) {
+        errors.push({ field: field.name, reason: "above maximum length", expected: `at most ${max} characters` });
+      }
       if (pattern !== undefined && !new RegExp(`^${pattern}$`).test(value)) {
         errors.push({ field: field.name, reason: "pattern mismatch", expected: pattern });
+      }
+    }
+    if (field.type === "integer" && typeof value === "number") {
+      const { min, max } = field.constraints;
+      if (min !== undefined && value < min) {
+        errors.push({ field: field.name, reason: "below minimum", expected: `at least ${min}` });
+      }
+      if (max !== undefined && value > max) {
+        errors.push({ field: field.name, reason: "above maximum", expected: `at most ${max}` });
       }
     }
   }

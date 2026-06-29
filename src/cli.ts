@@ -1,9 +1,10 @@
 #!/usr/bin/env bun
 import { dispatch } from "./cli/dispatch";
 import { ParseError } from "./cli/parse";
+import pkg from "../package.json";
 
 if (Bun.argv[2] === "--version") {
-  console.log("wiki 0.0.0 (pre-implementation)");
+  console.log(`wiki ${pkg.version}`);
   process.exit(0);
 }
 

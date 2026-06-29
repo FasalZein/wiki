@@ -46,6 +46,7 @@ describe("template schemas", () => {
     const input = {
       id: "HANDOFF-0001",
       project: "wiki-v2",
+      title: "Session handoff title",
       summary: "Handoff summary for the session.",
       session_date: "2026-05-25",
       phase: "slice",
@@ -171,6 +172,60 @@ describe("template schemas", () => {
     expect(validate(schema, { note: null })).toEqual({
       ok: false,
       errors: [{ field: "note", reason: "required", expected: "string" }],
+    });
+  });
+
+  test("enforces max length on string-like fields", () => {
+    const schema: Schema = {
+      template: "synthetic",
+      version: 1,
+      fields: [{ name: "title", type: "string", required: true, constraints: { min: 5, max: 10 } }],
+    };
+    expect(validate(schema, { title: "way too long to fit" })).toEqual({
+      ok: false,
+      errors: [{ field: "title", reason: "above maximum length", expected: "at most 10 characters" }],
+    });
+    expect(validate(schema, { title: "just ok" }).ok).toBe(true);
+  });
+
+  test("enforces max count on list and link_list fields", () => {
+    const schema: Schema = {
+      template: "synthetic",
+      version: 1,
+      fields: [{ name: "tags", type: "list", required: false, constraints: { max: 2 } }],
+    };
+    expect(validate(schema, { tags: ["a", "b", "c"] })).toEqual({
+      ok: false,
+      errors: [{ field: "tags", reason: "above maximum count", expected: "at most 2 item" }],
+    });
+  });
+
+  test("enforces integer min/max range", () => {
+    const schema: Schema = {
+      template: "synthetic",
+      version: 1,
+      fields: [{ name: "n", type: "integer", required: true, constraints: { min: 1, max: 5 } }],
+    };
+    expect(validate(schema, { n: 9 })).toEqual({
+      ok: false,
+      errors: [{ field: "n", reason: "above maximum", expected: "at most 5" }],
+    });
+    expect(validate(schema, { n: 0 })).toEqual({
+      ok: false,
+      errors: [{ field: "n", reason: "below minimum", expected: "at least 1" }],
+    });
+    expect(validate(schema, { n: 3 }).ok).toBe(true);
+  });
+
+  test("rejects a non-string (Date) value on an enum field", () => {
+    const schema: Schema = {
+      template: "synthetic",
+      version: 1,
+      fields: [{ name: "status", type: "enum", required: true, constraints: { values: ["open", "closed"] } }],
+    };
+    expect(validate(schema, { status: new Date() })).toEqual({
+      ok: false,
+      errors: [{ field: "status", reason: "invalid enum value", expected: "one of: open, closed" }],
     });
   });
 });
