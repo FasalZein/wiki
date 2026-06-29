@@ -2,7 +2,7 @@ import { dirname, join, resolve } from "node:path";
 
 import { runDoctor } from "../../bootstrap/doctor";
 import { evaluateSetup } from "../../bootstrap/setup-doctor";
-import { anyHookWired } from "./hooks";
+import { anyHookWired, unreachableSubagents } from "./hooks";
 import { initVault } from "../../bootstrap/init";
 import { parseCommand } from "../parse";
 import { unknownMessage } from "../usage";
@@ -82,6 +82,7 @@ async function setupDoctor(): Promise<CliResult> {
     srcDir: join(repoRoot, "src"),
     skillBundlePath: join(repoRoot, "skills", "wiki", "SKILL.md"),
     hookWired: await anyHookWired(),
+    unreachableSubagents: await unreachableSubagents(),
   });
 
   if (result.clean) {

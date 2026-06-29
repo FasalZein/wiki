@@ -1,7 +1,9 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import matter from "gray-matter";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
+import { captureArtifact, type CaptureOutcome } from "../../artifacts/capture";
 import { DEFAULT_STRUCTURE } from "../../artifacts/registry";
 import { readLinkedProject } from "../repo-link";
 import { unknownMessage } from "../usage";
@@ -25,27 +27,49 @@ const STOP_REMINDER =
 
 /**
  * Per-runtime install target. All three runtimes accept the same JSON `hooks`
- * schema and the same stdin/stdout contract; only the file and the events differ,
- * because each surfaces a skill invocation through a different signal:
- *  - Claude Code: a dedicated `Skill` tool      → PreToolUse, matcher "Skill"
- *  - Codex / pi:  no skill tool — a slash-command in the prompt → UserPromptSubmit
- *
- * `stop` is a second, stateless entry fired at session end: a blanket reminder to
- * persist any authored artifact. It cannot detect whether persistence happened —
- * it has no session state — so it reminds unconditionally.
+ * schema and the same stdin/stdout contract; only the file and the events
+ * differ. Each runtime wires the same three event roles, surfaced through
+ * whatever signal that runtime provides:
+ *  - skill invocation: Claude Code's dedicated `Skill` tool (PreToolUse, matcher
+ *    "Skill"); Codex / pi have no skill tool, so a slash-command in the prompt
+ *    (UserPromptSubmit).
+ *  - artifact write: a file-write tool (PostToolUse, matched to the runtime's
+ *    write/edit tool names) — the in-child capture trigger (ADR-0038).
+ *  - session end: a stateless blanket persist reminder (Stop / SessionEnd). It
+ *    has no session state, so it reminds unconditionally.
  */
-interface RuntimeSpec {
+interface HookTarget {
   event: string;
+  /** Tool-name regex the runtime tests against; absent means "every event". */
   matcher?: string;
-  stop: string;
+}
+
+interface RuntimeSpec {
+  events: HookTarget[];
   global: string;
   project: string;
 }
 
+/** Write-tool name matchers, anchored so they don't match e.g. `rewrite`. */
+const CLAUDE_WRITE = "^(?:Write|Edit|MultiEdit)$";
+const POSIX_WRITE = "^(?:write|edit)$";
+
 const RUNTIMES: Record<string, RuntimeSpec> = {
-  "claude-code": { event: "PreToolUse", matcher: "Skill", stop: "Stop", global: ".claude/settings.json", project: ".claude/settings.json" },
-  codex: { event: "UserPromptSubmit", stop: "SessionEnd", global: ".codex/hooks.json", project: ".codex/hooks.json" },
-  pi: { event: "UserPromptSubmit", stop: "SessionEnd", global: ".pi/agent/settings.json", project: ".pi/settings.json" },
+  "claude-code": {
+    events: [{ event: "PreToolUse", matcher: "Skill" }, { event: "PostToolUse", matcher: CLAUDE_WRITE }, { event: "Stop" }],
+    global: ".claude/settings.json",
+    project: ".claude/settings.json",
+  },
+  codex: {
+    events: [{ event: "UserPromptSubmit" }, { event: "PostToolUse", matcher: POSIX_WRITE }, { event: "SessionEnd" }],
+    global: ".codex/hooks.json",
+    project: ".codex/hooks.json",
+  },
+  pi: {
+    events: [{ event: "UserPromptSubmit" }, { event: "PostToolUse", matcher: POSIX_WRITE }, { event: "SessionEnd" }],
+    global: ".pi/agent/settings.json",
+    project: ".pi/settings.json",
+  },
 };
 
 /** Events that fire at session end — the run callback emits a blanket persist reminder for these. */
@@ -65,9 +89,12 @@ export async function handleHooks(args: string[]): Promise<CliResult> {
 interface HookInput {
   cwd?: string;
   hook_event_name?: string;
-  tool_input?: { skill_name?: string; path?: string };
+  tool_input?: { skill_name?: string; path?: string; file_path?: string };
   prompt?: string;
 }
+
+/** Events that follow a tool call — the run callback inspects artifact writes for these. */
+const WRITE_EVENT = "PostToolUse";
 
 /**
  * The skill being invoked, drawn from whichever signal the runtime provides:
@@ -113,6 +140,21 @@ async function hooksRun(): Promise<CliResult> {
     // no/invalid payload — nothing to act on
   }
   const event = input.hook_event_name ?? "PreToolUse";
+  if (event === WRITE_EVENT) {
+    const path = input.tool_input?.file_path ?? input.tool_input?.path;
+    const capture = path === undefined ? null : await captureArtifact({ path, cwd: input.cwd ?? process.cwd() });
+    if (capture === null) {
+      process.stdout.write("{}");
+      return { code: 0 };
+    }
+    if (capture.outcome === "warn") {
+      console.error(capture.warning); // surfaced, never a silent drop
+      process.stdout.write("{}");
+      return { code: 0 };
+    }
+    process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: capture.context } }));
+    return { code: 0 };
+  }
   const guidance = STOP_EVENTS.has(event)
     ? STOP_REMINDER
     : await (async () => {
@@ -174,7 +216,7 @@ function isWired(list: HookEntry[] | undefined): boolean {
   return list?.some((entry) => entry.hooks?.some((h) => h.command === HOOK_COMMAND)) ?? false;
 }
 
-/** Merge the skill + stop hook entries into a runtime's native config (create/merge, never clobber). */
+/** Merge this runtime's hook entries into its native config (create/merge, never clobber). */
 async function hooksInstall(args: string[]): Promise<CliResult> {
   const target = resolveTarget(args);
   if (!("spec" in target)) return target;
@@ -184,13 +226,8 @@ async function hooksInstall(args: string[]): Promise<CliResult> {
   const config = await readConfig(file);
   config.hooks ??= {};
 
-  // Two entries: the skill-invocation hook and the stateless session-end reminder.
-  const targets: { event: string; matcher?: string }[] = [
-    { event: spec.event, matcher: spec.matcher },
-    { event: spec.stop },
-  ];
   let added = false;
-  for (const t of targets) {
+  for (const t of spec.events) {
     const list = (config.hooks[t.event] ??= []);
     if (isWired(list)) continue;
     list.push({
@@ -201,7 +238,7 @@ async function hooksInstall(args: string[]): Promise<CliResult> {
   }
 
   if (!added) {
-    console.error(`already installed: ${spec.event}/${spec.stop} hooks in ${file}`);
+    console.error(`already installed: ${spec.events.map((t) => t.event).join("/")} hooks in ${file}`);
     return { code: 0 };
   }
 
@@ -222,6 +259,18 @@ function packageSource(entry: unknown): string {
 }
 
 /**
+ * True when a package spec names the EXACT scoped bridge `@hsingjui/pi-hooks`.
+ * The `npm:`/`git:` prefix is stripped, then the id must equal the scoped name
+ * or end in `/@hsingjui/pi-hooks` (a registry path). An unscoped `pi-hooks` or a
+ * forked `pi-hooks` is a lookalike — same name, different contract — and is
+ * rejected. The single rule reused by the install warning, status, and doctor.
+ */
+function isPiBridge(spec: string): boolean {
+  const id = spec.replace(/^(?:npm:|git:)/, "");
+  return id === PI_BRIDGE_PACKAGE || id.endsWith(`/${PI_BRIDGE_PACKAGE}`);
+}
+
+/**
  * pi can't see skill invocations on its own — it needs the @hsingjui/pi-hooks
  * bridge enabled in its global packages[] to forward hook events. If that exact
  * scoped package is absent, warn loudly and disambiguate it from the lookalikes,
@@ -232,10 +281,7 @@ async function warnPiBridge(): Promise<void> {
   const packages = Array.isArray((settings as { packages?: unknown }).packages)
     ? ((settings as { packages: unknown[] }).packages)
     : [];
-  const enabled = packages.some((entry) => {
-    const id = packageSource(entry).replace(/^(?:npm:|git:)/, "");
-    return id === PI_BRIDGE_PACKAGE || id.endsWith(`/${PI_BRIDGE_PACKAGE}`);
-  });
+  const enabled = packages.some((entry) => isPiBridge(packageSource(entry)));
   if (enabled) return;
   console.error(
     `pi bridge missing: enable ${PI_BRIDGE_PACKAGE} in pi's packages[] (pi install npm:${PI_BRIDGE_PACKAGE}) — ` +
@@ -258,7 +304,7 @@ async function hooksUninstall(args: string[]): Promise<CliResult> {
   }
 
   let removed = 0;
-  for (const event of [spec.event, spec.stop]) {
+  for (const { event } of spec.events) {
     const list = config.hooks[event];
     if (list === undefined) continue;
     for (const entry of list) {
@@ -280,6 +326,57 @@ async function hooksUninstall(args: string[]): Promise<CliResult> {
   return { code: 0 };
 }
 
+/**
+ * Per-subagent bridge reachability. Each pi subagent definition
+ * (`~/.pi/agent/agents/<name>.md`) declares its enabled extensions in an
+ * `extensions:` frontmatter field, which is a RESTRICTIVE allowlist: a subagent
+ * loads only the extensions it lists (every shipped agent re-lists its full set,
+ * which only makes sense if listing is required), so its persist hook can fire
+ * only when that allowlist carries the EXACT `@hsingjui/pi-hooks` bridge. We
+ * inspect those files (read-only — never edited here) and report, per agent,
+ * whether the bridge is reachable. A lookalike does not satisfy it (reuses
+ * `isPiBridge`). An agent explicitly `enabled: false` is skipped — it never runs,
+ * so it is not a gap.
+ */
+type AgentReach = { name: string; reachable: boolean };
+
+/** The extensions an agent declares, from a comma-separated string or a list. */
+function agentExtensions(data: Record<string, unknown>): string[] {
+  const ext = data.extensions;
+  if (typeof ext === "string") return ext.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+  if (Array.isArray(ext)) return ext.map((e) => String(e).trim()).filter((s) => s.length > 0);
+  return [];
+}
+
+/** Inspect each enabled subagent definition's allowlist for the exact bridge (read-only). */
+async function agentReachability(home: string): Promise<AgentReach[]> {
+  const dir = join(home, ".pi", "agent", "agents");
+  let names: string[];
+  try {
+    names = (await readdir(dir)).filter((n) => n.endsWith(".md")).sort();
+  } catch {
+    return []; // no agents directory — no subagent tier to report
+  }
+  const out: AgentReach[] = [];
+  for (const file of names) {
+    let data: Record<string, unknown>;
+    try {
+      data = matter(await readFile(join(dir, file), "utf8")).data;
+    } catch {
+      continue; // unparseable agent file — skip
+    }
+    if (data.enabled === false) continue; // disabled agent never runs — not a reachability gap
+    const name = typeof data.name === "string" ? data.name : basename(file, ".md");
+    out.push({ name, reachable: agentExtensions(data).some(isPiBridge) });
+  }
+  return out;
+}
+
+/** Subagents whose allowlist cannot reach the bridge — read by `doctor --setup`. */
+export async function unreachableSubagents(home: string = homedir()): Promise<string[]> {
+  return (await agentReachability(home)).filter((a) => !a.reachable).map((a) => a.name);
+}
+
 /** Report which runtimes/scopes have the wiki hook wired (shared by `list` and `status`). */
 async function hooksReport(): Promise<CliResult> {
   for (const [runtime, spec] of Object.entries(RUNTIMES)) {
@@ -289,10 +386,19 @@ async function hooksReport(): Promise<CliResult> {
     ] as const) {
       const file = scope === "global" ? join(homedir(), rel) : join(process.cwd(), rel);
       const config = await readConfig(file);
-      const events = [spec.event, spec.stop].filter((e) => isWired(config.hooks?.[e]));
+      const events = spec.events.map((t) => t.event).filter((e) => isWired(config.hooks?.[e]));
       const state = events.length > 0 ? `wired (${events.join(", ")})` : "not wired";
       console.log(`${runtime} ${scope}: ${state}  ${file}`);
     }
+  }
+  // Per-subagent reachability: a subagent's hook fires only if its allowlist
+  // carries the exact bridge. Naming the ones that can't fire is the honest
+  // signal a single global "wired" hides.
+  for (const agent of await agentReachability(homedir())) {
+    const state = agent.reachable
+      ? `reachable (${PI_BRIDGE_PACKAGE} in allowlist)`
+      : `cannot fire (${PI_BRIDGE_PACKAGE} missing from allowlist)`;
+    console.log(`subagent ${agent.name}: ${state}`);
   }
   return { code: 0 };
 }
@@ -302,7 +408,7 @@ export async function anyHookWired(cwd: string = process.cwd()): Promise<boolean
   for (const spec of Object.values(RUNTIMES)) {
     for (const file of [join(homedir(), spec.global), join(cwd, spec.project)]) {
       const config = await readConfig(file);
-      if ([spec.event, spec.stop].some((e) => isWired(config.hooks?.[e]))) return true;
+      if (spec.events.some((t) => isWired(config.hooks?.[t.event]))) return true;
     }
   }
   return false;
