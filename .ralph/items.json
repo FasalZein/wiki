@@ -71,7 +71,7 @@
         "Migrate store.ts create path off DocCategory/isDocCategory to the section/bucket model so no dangling doc-category type remains for the deletion slice.",
         "Add tests: create <bucket> files to the right folder with the right template and a section-prefixed id; unknown bucket errors; --category behavior is subsumed. Run all gates green and commit."
       ],
-      "passes": false,
+      "passes": true,
       "regression_notes": ""
     },
     {

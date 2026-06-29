@@ -18,8 +18,9 @@ export type CreateArtifactInput = {
   vaultRoot: string;
   project: string;
   fields: Record<string, unknown>;
-  /** Optional category subfolder for docs, e.g. docs/research/. Must be a locked category. */
-  category?: DocCategory;
+  /** Bucket subfolder relative to the section folder, e.g. "research" for docs/research/.
+   *  A bucket/leaf name resolves to its section + subfolder in the create verb (SLICE-0112). */
+  category?: string;
   /** Authored body markdown; parsed by H2 headings into template sections (ADR-0031). */
   body?: string;
   /** Per-vault structure (folders/prefixes), resolved once per verb and threaded. */
@@ -320,7 +321,7 @@ async function writeArtifact(path: string, content: string): Promise<void> {
 function artifactPath(type: TemplateType, vaultRoot: string, project: string, id: string, title: string, structure: Structure, category?: string): string {
   const directory = artifactDirectory(type, vaultRoot, project, structure);
   const fileName = `${id}-${slugifyTitle(title)}.md`;
-  if (type === "doc" && category !== undefined && category.length > 0) {
+  if (category !== undefined && category.length > 0) {
     return join(directory, category, fileName);
   }
   return join(directory, fileName);

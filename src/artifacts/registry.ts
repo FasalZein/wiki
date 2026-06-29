@@ -73,6 +73,8 @@ export interface Structure {
   artifactTypeForVaultPath(rel: string): TemplateType | undefined;
   /** Map an authoring skill to the kind it produces (only kinds with a `skill`). */
   kindForSkill(skill: string): TemplateType | undefined;
+  /** Resolve a create-name (a leaf or a branch bucket) to its section + bucket. */
+  bucketFor(name: string): { section: SectionSpec; bucket: BucketSpec } | undefined;
 }
 
 /**
@@ -215,6 +217,12 @@ function buildStructure(
   );
   const folders = [...new Set(entries.map(([, spec]) => spec.folder))];
   const sections = buildSections(kinds, bucketsByKind);
+  const bucketToSection = new Map<string, { section: SectionSpec; bucket: BucketSpec }>();
+  for (const section of sections) {
+    for (const bucket of section.buckets) {
+      bucketToSection.set(bucket.name, { section, bucket });
+    }
+  }
   return {
     kinds,
     folders,
@@ -240,6 +248,9 @@ function buildStructure(
     },
     kindForSkill(skill) {
       return skillToKind.get(skill);
+    },
+    bucketFor(name) {
+      return bucketToSection.get(name);
     },
   };
 }

@@ -239,3 +239,86 @@ bucket/leaf name to its section (prefix + id-space) and template, file into the
 bucket folder with a section-prefixed id, error on unknown name, and migrate
 src/cli/verbs/create.ts + src/artifacts/store.ts off DocCategory/isDocCategory so
 no dangling doc-category type remains for the SLICE-0117 deletion.
+
+## SLICE-0112 CREATE BY BUCKET/LEAF NAME (PASS)
+
+Selected as the lowest-numbered unfinished item; its blockers SLICE-0110 and
+SLICE-0111 are both passes:true.
+
+Decision rationale: `wiki create <name>` now resolves <name> to a bucket/leaf in
+the section tree (not just a section kind), files into the bucket folder with a
+section-prefixed id, and the create path no longer touches DocCategory — the
+first of the four migrations the SLICE-0117 deletion needs.
+
+Implementation:
+- src/artifacts/registry.ts: added a `bucketFor(name)` lookup to the Structure
+  seam (precomputed bucket-name -> {section, bucket} map in buildStructure, built
+  off the already-validated unique bucket names). No behavior change to existing
+  methods; purely additive.
+- src/cli/verbs/create.ts (the migration off DocCategory): handleCreate resolves
+  the create-name against the bundled DEFAULT tree synchronously (so an unknown
+  name still fails before any vault load — the `create bogus` contract runs with
+  no vault configured): a section kind (e.g. `doc`) goes straight to createGeneric;
+  a branch bucket name (e.g. `architecture`) resolves to its section + a preset
+  category subfolder; a leaf name files into the section folder with no preset.
+  createGeneric now loads the per-vault Structure up front and validates an
+  explicit --category against THAT section's declared bucket names (replacing the
+  isDocCategory/DOC_CATEGORIES enum check). The legacy `wiki create doc --type X`
+  default bucket map (runbook->runbooks, research->research, else->notes) is
+  inlined locally as `defaultDocBucket` and gated to kind==="doc"; it is back-compat
+  for the doc `type` enum that SLICE-0117 removes. Dropped the
+  defaultCategoryForDocType / DOC_CATEGORIES / isDocCategory / DocCategory imports
+  entirely from create.ts. Threaded vaultRoot + structure through CreateRequest so
+  createWithSupersede no longer re-loads them.
+- src/artifacts/store.ts: CreateArtifactInput.category is now `string` (a bucket
+  subfolder) instead of `DocCategory`; artifactPath files into the subfolder for
+  ANY kind when category is set (dropped the `type === "doc"` guard). The relocate
+  path (RelocateArtifactInput.category, isDocCategory in relocateArtifact) still
+  imports DocCategory — that migration is SLICE-0115, so store.ts keeps the import
+  for now. No dangling doc-category type remains on the CREATE path.
+
+Consumers NOT touched this slice (still on the old machinery until their own
+slice): src/cli/verbs/doc.ts recategorize (SLICE-0115), src/bootstrap/doctor.ts
+(SLICE-0113), and store.ts relocate (SLICE-0115). registry.ts still exports
+DOC_CATEGORIES/isDocCategory/defaultCategoryForDocType/DocCategory (deleted in
+SLICE-0117 after all consumers migrate).
+
+Conservative assumptions recorded:
+- A branch section other than `doc` with no explicit --category and no preset
+  bucket files straight into the section folder (category undefined). No default
+  tree has such a section, and doctor (SLICE-0113) will flag a loose file in a
+  branch section, so this is a reversible, safe default rather than inventing a
+  fallback bucket.
+- bucket.template overrides are honored by the registry data model but the create
+  path keeps filing under the section template (type === section name); under the
+  default tree every bucket's template equals its section, so this is byte-identical.
+  A genuine per-bucket template override is out of scope until a slice demands it.
+
+Tests (tests/create-by-bucket.test.ts, new — 5 cases): create <branch-bucket>
+(`architecture`) files into docs/architecture/ with a DOC id and the doc template;
+create <leaf-name> (`prd`) files into prds/ with a PRD id; an unknown name errors
+"unknown artifact type" and lists the kinds; --category is subsumed (names a
+bucket of the section and files there); an unknown --category bucket errors against
+the loaded tree. No existing test was weakened; the pinned cli-doc.test.ts and
+cli-create-path-echo.test.ts contracts (create doc --category / --type default)
+still pass unchanged because the hybrid path preserves them.
+
+Files changed:
+- src/artifacts/registry.ts (bucketFor lookup)
+- src/artifacts/store.ts (create category -> string; generic subfolder path)
+- src/cli/verbs/create.ts (resolve by bucket/leaf name; migrate off DocCategory)
+- tests/create-by-bucket.test.ts (new)
+- .ralph/items.json (SLICE-0112 passes false->true)
+- .ralph/progress.md (this entry)
+
+Verification (all green at this commit):
+- bun run build: ok (cli.js 0.32 MB, bundled 99 modules)
+- bunx tsc --noEmit: clean
+- bun run test: 395 pass, 0 fail, 1272 expect() calls, 50 files
+
+Next-iteration notes: SLICE-0113 (doctor structure-only) is unblocked (blocker
+0110 passes). SLICE-0114 and SLICE-0115 are now also unblocked (both needed 0112).
+Lowest-numbered next is SLICE-0113: reframe doctor's structural check in
+src/bootstrap/doctor.ts to validate folders against the config tree (declared
+section/bucket; no loose files in a branch section) instead of the hardcoded
+DOC_CATEGORIES lock, READ-only (do not delete DOC_CATEGORIES — that is 0117).

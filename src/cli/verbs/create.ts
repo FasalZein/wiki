@@ -21,7 +21,7 @@ import {
 } from "../../artifacts/store";
 import { authoredSections } from "../../artifacts/body";
 import { projectPath } from "../../artifacts/paths";
-import { DEFAULT_STRUCTURE, defaultCategoryForDocType, DOC_CATEGORIES, isDocCategory, loadStructure, type DocCategory, type Structure } from "../../artifacts/registry";
+import { DEFAULT_STRUCTURE, loadStructure, type Structure } from "../../artifacts/registry";
 import { assertProjectStructure, loadProjectConfig, ProjectConfigError } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import { loadTemplate, normalizeInlineMaps, resolveTemplatePath, type TemplateType } from "../../schema/load";
@@ -32,12 +32,24 @@ import { resolveProject } from "../resolve-project";
 import { unknownMessage } from "../usage";
 
 export async function handleCreate(args: string[]): Promise<CliResult> {
-  const [kind, ...rest] = args;
-  if (kind === undefined || DEFAULT_STRUCTURE.kinds[kind] === undefined) {
-    console.error(unknownMessage("artifact type", kind ?? "", Object.keys(DEFAULT_STRUCTURE.kinds)));
-    return { code: 1 };
+  const [name, ...rest] = args;
+  // SLICE-0112: the create-name is a section kind (e.g. `doc`) OR a bucket/leaf
+  // name in the tree (e.g. `architecture`, which files into the doc section's
+  // docs/architecture/ with a DOC id). Resolve it synchronously against the
+  // bundled default tree so an unknown name fails before any vault load (the
+  // `create bogus` contract runs with no vault configured).
+  if (name !== undefined && DEFAULT_STRUCTURE.kinds[name] !== undefined) {
+    return createGeneric(name as TemplateType, rest);
   }
-  return createGeneric(kind, rest);
+  const resolved = name === undefined ? undefined : DEFAULT_STRUCTURE.bucketFor(name);
+  if (resolved !== undefined) {
+    // A branch bucket carries an explicit subfolder; a leaf bucket (name === its
+    // section) files straight into the section folder, so no preset category.
+    const presetCategory = resolved.section.tree === "branch" ? resolved.bucket.name : undefined;
+    return createGeneric(resolved.section.name, rest, presetCategory);
+  }
+  console.error(unknownMessage("artifact type", name ?? "", Object.keys(DEFAULT_STRUCTURE.kinds)));
+  return { code: 1 };
 }
 
 /** Snake-case schema/placeholder name -> kebab CLI flag (e.g. parent_prd -> parent-prd). */
@@ -72,7 +84,7 @@ const NON_FLAG_FIELDS: ReadonlySet<string> = new Set([
  * pass through as `fields`; schema fields are validated, placeholders fall through
  * untouched and fill their `{{...}}` section.
  */
-async function createGeneric(kind: TemplateType, args: string[]): Promise<CliResult> {
+async function createGeneric(kind: TemplateType, args: string[], presetCategory?: string): Promise<CliResult> {
   const schema = await loadTemplate(kind);
   const template = await Bun.file(resolveTemplatePath(`${kind}.md`)).text();
   const schemaNames = new Set(schema.fields.map((field) => field.name));
@@ -117,6 +129,9 @@ async function createGeneric(kind: TemplateType, args: string[]): Promise<CliRes
   if (missing) return missing;
   if (project === undefined) return { code: 1 };
 
+  const vaultRoot = await getVaultRoot();
+  const structure = await loadStructure(vaultRoot);
+
   const fields: Record<string, unknown> = {};
   for (const spec of flagSpecs) {
     if (spec.kind === "list") {
@@ -130,15 +145,22 @@ async function createGeneric(kind: TemplateType, args: string[]): Promise<CliRes
     }
   }
 
-  // Category is a doc subfolder, not a schema field: validate it, and for doc
-  // default it from --type. Ignored by kinds that don't nest (only doc does).
+  // The bucket subfolder. SLICE-0112: a bucket/leaf name passed as the create-name
+  // resolves to a section + subfolder (presetCategory). Otherwise --category names
+  // a bucket of this section, validated against the loaded tree (no DocCategory
+  // enum). For `doc` only, an omitted bucket falls back to the legacy --type map
+  // so `wiki create doc --type runbook` still files into docs/runbooks/.
+  const section = structure.sections.find((s) => s.name === kind);
+  const bucketNames = section?.buckets.map((b) => b.name) ?? [];
   const explicitCategory = stringValue(parsed.values, "category");
-  if (explicitCategory !== undefined && !isDocCategory(explicitCategory)) {
+  if (explicitCategory !== undefined && !bucketNames.includes(explicitCategory)) {
     console.error(`unknown category: ${explicitCategory}`);
-    console.error(`category must be one of: ${DOC_CATEGORIES.join(", ")}`);
+    console.error(`category must be one of: ${bucketNames.join(", ")}`);
     return { code: 1 };
   }
-  const category = explicitCategory ?? (kind === "doc" ? defaultCategoryForDocType(stringValue(parsed.values, "type")) : undefined);
+  const category = presetCategory
+    ?? explicitCategory
+    ?? (kind === "doc" ? defaultDocBucket(stringValue(parsed.values, "type")) : undefined);
 
   // Dedup query: title plus every authored body section the user supplied, in
   // template order — a uniform signal across kinds (no per-kind composition).
@@ -155,7 +177,24 @@ async function createGeneric(kind: TemplateType, args: string[]): Promise<CliRes
     rawValues: parsed.values,
     category,
     body,
+    vaultRoot,
+    structure,
   });
+}
+
+/** Legacy back-compat for `wiki create doc --type <t>` with no explicit bucket:
+ *  map the doc `type` enum to its default bucket. Unmapped types fall to `notes`
+ *  (the catch-all), not `specs`. Superseded by `wiki create <bucket>` (SLICE-0112);
+ *  the doc `type` enum itself is removed in SLICE-0117. */
+function defaultDocBucket(docType: string | undefined): string {
+  switch (docType) {
+    case "runbook":
+      return "runbooks";
+    case "research":
+      return "research";
+    default:
+      return "notes";
+  }
 }
 
 type CreateRequest = {
@@ -164,17 +203,17 @@ type CreateRequest = {
   dedupQuery: string;
   fields: Record<string, unknown>;
   rawValues: Record<string, string | string[] | boolean | undefined>;
-  category?: DocCategory;
+  category?: string;
   body?: string;
+  vaultRoot: string;
+  structure: Structure;
 };
 
 async function createWithSupersede(req: CreateRequest): Promise<CliResult> {
-  const { type, project, dedupQuery, fields, rawValues, category, body } = req;
+  const { type, project, dedupQuery, fields, rawValues, category, body, vaultRoot, structure } = req;
   const override = parseOverride(rawValues);
   if (typeof override === "string") { console.error(override); return { code: 1 }; }
 
-  const vaultRoot = await getVaultRoot();
-  const structure = await loadStructure(vaultRoot);
   const projPath = projectPath(vaultRoot, project);
   await assertProjectStructure(projPath, structure);
   try {
