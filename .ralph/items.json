@@ -106,7 +106,7 @@
         "Generalize to move-to-bucket: same-section keeps id; cross-section re-mints; migrate off DocCategory/isDocCategory.",
         "Add tests: a same-section move keeps the id and [[id]] still resolves; a cross-section move re-mints. Run all gates green and commit."
       ],
-      "passes": false,
+      "passes": true,
       "regression_notes": ""
     },
     {

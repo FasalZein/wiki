@@ -475,3 +475,96 @@ next is SLICE-0115: generalize relocateArtifact / doc recategorize
 (src/artifacts/store.ts, src/cli/verbs/doc.ts) into a section-agnostic move-to-bucket
 (same-section keeps id, cross-section re-mints), migrating store.ts relocation off
 DocCategory/isDocCategory.
+
+## SLICE-0115 RELOCATION PRESERVES IDENTITY (PASS)
+
+Selected as the lowest-numbered unfinished item; its blockers SLICE-0111 and
+SLICE-0112 are both passes:true.
+
+Decision rationale: generalize the doc-only relocate/recategorize into a
+section-agnostic "move to bucket". A same-section move keeps the artifact id
+(the section owns the id-space, so inbound [[id]] links stay resolvable); a
+cross-section move re-mints the id in the target section's id-space (the settled
+rule; this PRD does no link rewriting). Migrate store.ts relocation off
+DocCategory/isDocCategory so no dangling doc-category type remains on the move
+path for the SLICE-0117 deletion.
+
+Implementation:
+- src/artifacts/store.ts: RelocateArtifactInput.category (DocCategory) is replaced
+  by `bucket?: string` (a create-name resolved through the structure). relocateArtifact
+  now resolves the target via structure.bucketFor(bucket) and branches on section:
+  - unknown bucket -> ArtifactValidationError("unknown bucket: <name>").
+  - cross-section (resolved.section.name !== input.type) -> re-mint via the shared
+    mintAndWrite seam against the TARGET section, rewriting id + aliases on the moved
+    frontmatter (remintAliases swaps the old id for the new and guarantees the new id
+    is present), passing body/other fields through verbatim, then rm the old file. No
+    re-validation (a move repositions, it does not repair), consistent with the
+    existing narrowed-write philosophy.
+  - same-section move or pure retitle -> id preserved; destination is the resolved
+    bucket folder (or the file's current dirname for a pure retitle), re-slugged
+    filename, existing duplicate-destination guard kept.
+  Dropped the DocCategory/isDocCategory imports and the doc-only existingCategory
+  helper + its `relative` import. Added a `projectPath` import (used to build the
+  destination under the resolved bucket.folder). artifactDirectory is still used by
+  the create/read paths, so its import stays.
+- src/cli/verbs/doc.ts: dropped DOC_CATEGORIES/isDocCategory/DocCategory imports.
+  recategorizeDoc now passes { bucket: category }; the relocate() helper validates
+  the requested category against the loaded doc section's declared bucket names
+  (structure.sections.find name==="doc") and emits the same "unknown category" +
+  "category must be one of: ..." messages before any move, so the CLI contract
+  (exit 1, message contains "category") is preserved while the vocabulary is now
+  config-driven rather than the hardcoded DOC_CATEGORIES enum.
+
+Consumers still on the old machinery after this slice: src/artifacts/registry.ts
+(owner) and src/bootstrap/doctor.ts no longer import it; the remaining importer of
+DOC_CATEGORIES/isDocCategory/defaultCategoryForDocType/DocCategory is registry.ts
+itself (the exports), deleted in SLICE-0117. Verified: store.ts and doc.ts now have
+zero references; create.ts (0112) and doctor.ts (0113) were already migrated.
+
+Conservative assumptions recorded:
+- The doc-only ADR-0028 "refuse to relocate a doc sitting in a non-locked folder
+  unless an explicit locked category is given" guard is dropped. It was doc-specific
+  and tied to isDocCategory; the no-loose-files / undeclared-folder invariant is now
+  enforced structurally by doctor against the config tree (SLICE-0113), so the store
+  seam no longer second-guesses the move. A pure retitle keeps the file exactly where
+  it is (dirname of the current path), so a doc in any folder retitles in place. This
+  is reversible and no existing test depended on the refusal.
+- Cross-section re-mint rewrites only id + aliases + title + updated; it does not
+  re-validate against the target template (a cross-section move is rare and may cross
+  schemas). Matches the existing "move, don't repair" stance.
+
+Tests (tests/relocate-section.test.ts, new -- 4 cases) on a custom wiki.json tree
+(branch section `notebook` prefix NOTE with draft/final buckets; leaf section
+`archive` prefix ARCH) against a TEMP vault: a same-section draft->final move keeps
+NOTE-0001 and the id still resolves via readArtifact; a pure retitle (no bucket)
+keeps the file in its current folder with the id preserved; a cross-section
+notebook->archive move re-mints to ARCH-0008 (highest archive id + 1), swaps aliases
+to the new id, removes the old file, and resolves by the new id; an unknown bucket
+throws "unknown bucket". The real $HOME/Knowledge vault is never touched (mkdtemp
+temp vaults only).
+
+Pinned tests still green unchanged: tests/cli-doc.test.ts (doc recategorize moves
+DOC-0001 architecture<->runbooks keeping its id; unknown category exits 1 with the
+category vocabulary) and tests/path-containment.test.ts (relocateArtifact id
+traversal guard; create+read+retitle keeps the id) now exercise the generalized
+path. No test was deleted or weakened.
+
+Files changed:
+- src/artifacts/store.ts (section-agnostic relocate; bucket input; re-mint on
+  cross-section; drop DocCategory/isDocCategory + existingCategory)
+- src/cli/verbs/doc.ts (recategorize -> bucket; validate against loaded doc section)
+- tests/relocate-section.test.ts (new)
+- .ralph/items.json (SLICE-0115 passes false->true)
+- .ralph/progress.md (this entry)
+
+Verification (all green at this commit):
+- bun run build: ok (cli.js 0.32 MB)
+- bunx tsc --noEmit: clean
+- bun run test: 408 pass, 0 fail, 1305 expect() calls, 53 files
+
+Next-iteration notes: SLICE-0116 (capture resolves kind via per-vault tree) is
+unblocked (blockers 0111 + 0112 both pass) and is the lowest-numbered remaining
+item. After this slice store.ts and doc.ts no longer import the doc-category
+machinery; only registry.ts's own exports remain, so SLICE-0117 (capstone deletion)
+now needs only SLICE-0116's blocker chain plus its own already-passing blockers
+(0112/0113/0114/0115) -- but 0116 is lower-numbered and should be taken first.

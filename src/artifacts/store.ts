@@ -1,15 +1,15 @@
 import matter from "gray-matter";
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
-import { dirname, join, relative, sep } from "node:path";
+import { dirname, join, sep } from "node:path";
 
 import { loadTemplate, normalizeInlineMaps, resolveTemplatePath, type TemplateType } from "../schema/load";
 import { BodyParseError, parseBodySections } from "./body";
 import { validate } from "../schema/validate";
 import type { NormalizedRecord, Schema, ValidationError } from "../schema/types";
-import { type DocCategory, isDocCategory, type Structure } from "./registry";
+import { type Structure } from "./registry";
 import { nextId } from "./id";
 import { buildIdIndex } from "./id-index";
-import { artifactDirectory, assertSafeSegment } from "./paths";
+import { artifactDirectory, assertSafeSegment, projectPath } from "./paths";
 import { isFileNotFound } from "../util";
 import { applyDefaults, orderBySchema, renderArtifact } from "./render";
 
@@ -46,8 +46,10 @@ export type SetFieldsInput = ReadArtifactInput & {
 export type RelocateArtifactInput = ReadArtifactInput & {
   /** New title; updates the `title` field and re-slugs the filename. */
   title?: string;
-  /** New doc category subfolder, e.g. "architecture". Docs only. Must be a locked category. */
-  category?: DocCategory;
+  /** Target bucket/leaf name (SLICE-0115). A same-section move keeps the id (inbound
+   *  [[id]] links stay resolvable); a cross-section move RE-MINTS the id in the target
+   *  section's id-space (the settled rule; no link rewriting). Omit for a pure retitle. */
+  bucket?: string;
 };
 
 export type Artifact = {
@@ -229,42 +231,64 @@ export async function mintAndWrite(
 }
 
 /**
- * Move and/or retitle an existing artifact on disk. Updates the `title` field
- * (and re-slugs the filename) when `title` is given, and moves the file into a
- * new doc category subfolder when `category` is given. The id is preserved, so
- * [[ID]] links and id-based reads keep resolving. The old file is removed.
+ * Move and/or retitle an existing artifact on disk — the section-agnostic
+ * "move to bucket" (SLICE-0115, PRD-0019). Updates the `title` field (and
+ * re-slugs the filename) when `title` is given, and files the artifact into the
+ * target bucket's folder when `bucket` is given.
+ *
+ * A SAME-section move keeps the id (the section owns the id-space, so inbound
+ * [[id]] links stay resolvable). A CROSS-section move RE-MINTS the id in the
+ * target section's id-space — the settled rule; cross-section moves are rare and
+ * this PRD does no link rewriting, so inbound [[OLD-ID]] links are not patched.
+ * A pure retitle (no `bucket`) keeps the file in its current folder. The old
+ * file is removed once the destination is written.
  */
 export async function relocateArtifact(input: RelocateArtifactInput, structure: Structure): Promise<Artifact> {
   assertSafeSegment(input.id, "artifact id");
   const existing = await readArtifact(input, structure);
   const nextTitle = input.title ?? (typeof existing.fields.title === "string" ? existing.fields.title : input.id);
 
+  const resolved = input.bucket !== undefined ? structure.bucketFor(input.bucket) : undefined;
+  if (input.bucket !== undefined && resolved === undefined) {
+    throw new ArtifactValidationError([
+      { field: "bucket", reason: `unknown bucket: ${input.bucket}` },
+    ]);
+  }
+
+  // Cross-section move: re-mint the id in the target section's id-space, then drop
+  // the old file. The id/aliases are rewritten on the moved artifact; everything
+  // else passes through (a move repositions, it does not re-validate or repair).
+  if (resolved !== undefined && resolved.section.name !== input.type) {
+    const moved = await mintAndWrite(
+      { type: resolved.section.name, vaultRoot: input.vaultRoot, project: input.project, structure },
+      (id) => {
+        const aliases = remintAliases(existing.fields.aliases, existing.id, id);
+        const fields: NormalizedRecord = {
+          ...existing.fields,
+          id,
+          ...(aliases !== undefined ? { aliases } : {}),
+          title: nextTitle,
+          updated: new Date().toISOString().slice(0, 10),
+        };
+        const path = join(projectPath(input.vaultRoot, input.project), resolved.bucket.folder, `${id}-${slugifyTitle(nextTitle)}.md`);
+        return { path, content: matter.stringify(existing.body, fields), fields };
+      },
+    );
+    await rm(existing.path, { force: true });
+    return moved;
+  }
+
+  // Same-section move or pure retitle: id preserved so [[id]] links keep resolving.
   const fields: NormalizedRecord = { ...existing.fields };
   if (input.title !== undefined) {
     fields.title = input.title;
   }
 
-  const directory = artifactDirectory(input.type, input.vaultRoot, input.project, structure);
   const fileName = `${input.id}-${slugifyTitle(nextTitle)}.md`;
-  // Preserve the doc's current category subfolder unless an explicit move is requested.
-  // If the doc currently sits in a NON-locked (rogue) folder and no explicit target is
-  // given, refuse rather than silently keep it there — enforces ADR-0028 at the store seam
-  // (the caller must pass a locked --category to relocate it out).
-  const currentCategory = input.type === "doc" ? existingCategory(directory, existing.path) : undefined;
-  if (
-    input.type === "doc" &&
-    input.category === undefined &&
-    currentCategory !== undefined &&
-    !isDocCategory(currentCategory)
-  ) {
-    throw new ArtifactValidationError([
-      { field: "category", reason: `doc is in non-locked folder "${currentCategory}"; pass an explicit locked category to relocate it` },
-    ]);
-  }
-  const category = input.type === "doc" ? (input.category ?? currentCategory) : undefined;
-  const destination = category !== undefined && category.length > 0
-    ? join(directory, category, fileName)
-    : join(directory, fileName);
+  const destinationDir = resolved !== undefined
+    ? join(projectPath(input.vaultRoot, input.project), resolved.bucket.folder)
+    : dirname(existing.path);
+  const destination = join(destinationDir, fileName);
 
   if (destination !== existing.path && (await Bun.file(destination).exists())) {
     throw new ArtifactValidationError([
@@ -279,6 +303,14 @@ export async function relocateArtifact(input: RelocateArtifactInput, structure: 
   }
   const parsed = matter(content);
   return { id: input.id, path: destination, fields: parsed.data, body: parsed.content.trimStart() };
+}
+
+/** Re-mint an artifact's `aliases` on a cross-section move: swap the old id for the
+ *  new one, ensuring the new id is present. Returns undefined when there were none. */
+function remintAliases(aliases: unknown, oldId: string, newId: string): string[] | undefined {
+  if (!Array.isArray(aliases)) return undefined;
+  const swapped = aliases.map((alias) => (alias === oldId ? newId : String(alias)));
+  return swapped.includes(newId) ? swapped : [newId, ...swapped];
 }
 
 function assertKnownField(schema: Schema, existing: Artifact, fieldName: string, placeholders: Set<string>): void {
@@ -376,13 +408,6 @@ async function findArtifactFileRecursive(directory: string, id: string): Promise
     }
   }
   return undefined;
-}
-
-function existingCategory(docsDirectory: string, currentPath: string): string | undefined {
-  const rel = relative(docsDirectory, currentPath);
-  const segments = rel.split(/[/\\]/);
-  // docs/<category>/<file>.md -> category is the first segment when nested.
-  return segments.length > 1 ? segments[0] : undefined;
 }
 
 export function slugifyTitle(title: string): string {
