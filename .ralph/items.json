@@ -115,7 +115,7 @@
         "Verify after `wiki create` the new artifact is in the keyword index with no manual `wiki sync`; embed runs only on sync. Use a TEMP vault.",
         "Run all three gates green and commit."
       ],
-      "passes": false,
+      "passes": true,
       "regression_notes": ""
     },
     {

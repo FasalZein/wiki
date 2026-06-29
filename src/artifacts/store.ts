@@ -11,6 +11,8 @@ import { nextId } from "./id";
 import { withProjectLock } from "./lock";
 import { buildIdIndex } from "./id-index";
 import { artifactDirectory, assertSafeSegment, projectPath } from "./paths";
+import { ensureCollection, updateCollection } from "../integrations/qmd";
+import { loadProjectConfig } from "../config/project";
 import { isFileNotFound } from "../util";
 import { applyDefaults, orderBySchema, renderArtifact } from "./render";
 
@@ -215,6 +217,12 @@ type RenderedArtifact = { path: string; content: string; fields: NormalizedRecor
  * the second writer sees the first file and mints the next id. The exclusive
  * `wx` create + bounded retry stays as a cheap second guard for a same-path
  * collision. Different projects use different lockfiles, so they never contend.
+ *
+ * SLICE-0126: after the write, inside the SAME lock, fire a cheap incremental qmd
+ * keyword `update` for the project's collection so the new artifact is searchable
+ * with no manual `wiki sync`. Vector `embed` stays owned by `wiki sync`; the write
+ * path never embeds. The update is best-effort — a qmd fault (binary missing, not
+ * yet synced) must not fail the write, since `wiki sync` is the durable reindex.
  */
 export async function mintAndWrite(
   target: { type: TemplateType; vaultRoot: string; project: string; structure: Structure },
@@ -232,9 +240,33 @@ export async function mintAndWrite(
         if (isFileExists(error) && attempt < MAX_ATTEMPTS) continue; // collision — recompute nextId
         throw error;
       }
+      await refreshKeywordIndex(target.vaultRoot, target.project);
       return { id, path, fields, body: content };
     }
   });
+}
+
+/**
+ * SLICE-0126: fire a cheap incremental qmd keyword `update` for the project's
+ * collection so a freshly written artifact is in the keyword index without a
+ * manual `wiki sync`. Keyword-only: vector `embed` stays owned by `wiki sync`.
+ * Best-effort by design — qmd resolution rides QMD_COMMAND -> _project.md
+ * qmd_command -> `qmd`, and ANY fault (binary missing, project never synced) is
+ * swallowed so the write still succeeds. `wiki sync` remains the durable reindex.
+ */
+async function refreshKeywordIndex(vaultRoot: string, project: string): Promise<void> {
+  try {
+    let qmdCommand = process.env.QMD_COMMAND;
+    if (qmdCommand === undefined) {
+      qmdCommand = (await loadProjectConfig(projectPath(vaultRoot, project))).qmd_command;
+    }
+    const projPath = projectPath(vaultRoot, project);
+    await ensureCollection(qmdCommand, project, projPath); // register on first write
+    await updateCollection(qmdCommand, project, false); // keyword reindex only; no embed
+  } catch {
+    // qmd missing / project unconfigured / never synced — `wiki sync` is the
+    // durable reindex, so a write must never fail on the freshness best-effort.
+  }
 }
 
 /**

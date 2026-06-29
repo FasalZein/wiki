@@ -494,3 +494,117 @@ item — SHARED-SEAM RULE: the qmd update goes inside mintAndWrite in store.ts, 
 at call sites, and amends PRD-0018's read-only search by giving the WRITE path the
 keyword update (update those pinned search tests explicitly, do not delete).
 SLICE-0127 still needs both SLICE-0120 (pass) and SLICE-0126 (not yet).
+
+## SLICE-0126 INCREMENTAL KEYWORD INDEX UPDATE ON EVERY WRITE (PASS)
+
+Selected as the lowest-numbered unfinished item; its blocker SLICE-0121
+(per-project allocation lock) already passes, so it is unblocked. SLICE-0127
+remains blocked by both SLICE-0120 (pass) and SLICE-0126 (now satisfied) — it is
+the next item, not this one.
+
+Decision rationale: a freshly created artifact was invisible to keyword search
+until a manual `wiki sync` (G4, ADR-0041 freshness side). The fix fires a cheap
+incremental qmd keyword `update` for the project's collection on every write,
+placed — per the SHARED-SEAM RULE — INSIDE mintAndWrite in src/artifacts/store.ts,
+the one seam both `create` and `capture` call, so it covers both without editing
+capture.ts. Vector `embed` stays owned solely by `wiki sync`; the write path never
+embeds. `wiki search` stays a pure read (PRD-0018) — the keyword update is now the
+WRITE path's job, which is the documented amendment to PRD-0018.
+
+Implementation:
+- src/artifacts/store.ts: mintAndWrite now calls refreshKeywordIndex(vaultRoot,
+  project) after the `wx` write succeeds, still inside withProjectLock (same lock
+  as SLICE-0121, so the refresh runs serialized, never racing another writer).
+  New refreshKeywordIndex helper resolves the qmd binary QMD_COMMAND ->
+  _project.md qmd_command -> `qmd` (the same precedence sync/search/dedup use),
+  ensureCollection (register on first write), then updateCollection(_, false)
+  (keyword reindex only, no --pull, no embed). The whole helper is wrapped in a
+  try/catch that SWALLOWS any fault: qmd missing, project unconfigured (no
+  _project.md, e.g. the allocation-lock test), or never-synced must NOT fail the
+  write — `wiki sync` is the durable reindex, the write-path update is a
+  best-effort freshness nicety. New imports: ensureCollection, updateCollection
+  (../integrations/qmd), loadProjectConfig (../config/project). No circular import
+  (config/project does not import store).
+
+Test-safety (the load-bearing part): a real `qmd` binary is on PATH and its
+global index (~/.cache/qmd/index.sqlite) holds REAL collections including
+`wiki-v2`. Without a guard, any create-path test that uses project "wiki-v2" (or
+any real collection name) and does not pin its own QMD_COMMAND would have the new
+write-path update RE-INDEX THE REAL VAULT — violating the hard rule that the real
+$HOME/Knowledge vault is never written by tests. Mirroring the temp-vault pattern,
+a test preload now defaults QMD_COMMAND to a no-op fake so no test reaches the
+real index; tests that pin their own QMD_COMMAND still win (the preload only fills
+the gap when it is unset).
+- bunfig.toml (new): [test].preload = ["./tests/preload.ts"].
+- tests/preload.ts (new): sets process.env.QMD_COMMAND to tests/fixtures/
+  noop-qmd.sh when unset. In-process tests (dispatch) read it directly; subprocess
+  tests inherit it via { ...process.env }.
+- tests/fixtures/noop-qmd.sh (new, chmod +x): collection list prints nothing,
+  query echoes [], everything else (update/embed/collection add) is a clean exit —
+  never touches the real index.
+- tests/custom-tree-e2e.test.ts: the makeVault helper used to `delete
+  process.env.QMD_COMMAND` ("dedup is off; no qmd needed") — now stale, because
+  every write hits qmd. Changed to keep the preload's no-op fake (set it if unset)
+  instead of deleting, so the write-path update stays off the real index.
+- tests/cli-vault-wide.test.ts: the two divergence-guard cases (makeVaultWithQmd)
+  deliberately run with NO QMD_COMMAND so search resolves the per-project
+  qmd_command values and the single-binary guard fires. The preload's inherited
+  default broke that, so runWiki now drops the inherited QMD_COMMAND unless the
+  fixture pins its own. No assertion changed.
+
+Conservative assumptions recorded:
+- The keyword update is best-effort and silent on failure (swallowed). Rationale:
+  `wiki sync` is the durable reindex and a write must never fail on a freshness
+  nicety; a missing/never-synced collection is the steady state for a brand-new
+  project's first write. Reversible if a future policy wants to surface the fault.
+- ensureCollection on the write path auto-registers the project collection on
+  first write (so the very first artifact is indexed with no prior sync),
+  consistent with how the dedup gate already registers on create.
+- The substitute for the real qmd binary is the existing fake-qmd shell pattern
+  (logging fake in the new test; no-op fake in the preload). No real qmd
+  integration was exercised or verified; the gate proves the write path issues
+  the correct `update` (and never `embed`) calls, not that the real qmd indexed
+  anything. The real-qmd keyword-index round trip remains unverified by this loop
+  (durable indexing is `wiki sync`'s contract, tested elsewhere).
+
+Tests (new, no existing test weakened or deleted): tests/write-keyword-update.test.ts —
+  1. `create decision` (dedup OFF, so its only qmd touch is the write-path update)
+     registers the collection AND runs `update -c wiki-v2`, and NEVER `embed`,
+     NEVER `--pull`. This is the core G4 regression guard.
+  2. a second create reindexes again (>=2 updates) — incremental, not one-shot.
+  3. search after a seed create, with the log cleared, fires NO update and NO
+     embed — only `collection list` + `query` (PRD-0018 read-only contract, now
+     that the keyword update is the write path's job). This is the explicit
+     amendment-pinning test the item required.
+The existing cli-search.test.ts read-only assertions (search never updates) and
+cli-dedup.test.ts ordering assertions (dedup update before query) stay green
+unchanged — the dedup gate's pre-query update still precedes the write-path
+update, so updateIdx < queryIdx holds.
+
+Files changed:
+- src/artifacts/store.ts (refreshKeywordIndex inside mintAndWrite + imports)
+- bunfig.toml (new: test preload)
+- tests/preload.ts (new: default QMD_COMMAND to the no-op fake)
+- tests/fixtures/noop-qmd.sh (new, executable: no-op qmd)
+- tests/custom-tree-e2e.test.ts (keep no-op fake instead of deleting QMD_COMMAND)
+- tests/cli-vault-wide.test.ts (drop inherited QMD_COMMAND for the divergence cases)
+- tests/write-keyword-update.test.ts (new contract test)
+- .ralph/items.json (SLICE-0126 passes false->true)
+- .ralph/progress.md (this entry)
+
+Verification (all green at this commit, gate = bun run test):
+- bun run build: ok (cli.js 0.33 MB, 100 modules)
+- bunx tsc --noEmit: clean (exit 0)
+- bun run test: 436 pass, 0 fail, 1413 expect() calls, 60 files
+- Confirmed the real qmd index stayed at 28 collections after the run (no test
+  polluted ~/.cache/qmd — the preload guard held).
+
+Next-iteration notes: SLICE-0127 (capture runs the dedup gate and warns-and-files
+on a strong match) is the final unfinished item. Both its blockers now pass
+(SLICE-0120 capture G1, SLICE-0126 incremental update). Per its steps the capture
+path must route through runDedupGate (src/artifacts/dedup.ts) inside the
+per-project lock, file-anyway + warn on a strong match (never block/prompt/drop),
+with the locked order dedup refresh+query -> allocate -> write -> qmd update. Note
+the qmd update is already inside mintAndWrite (SLICE-0126); SLICE-0127 must ensure
+the dedup query also runs under the same lock so the "no unlocked qmd touch"
+ordering holds. Use a TEMP vault; the no-op-qmd preload now protects the real index.

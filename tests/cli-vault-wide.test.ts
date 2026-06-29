@@ -90,9 +90,15 @@ esac
 async function runWiki(args: string[], fixture: Fixture, cwd?: string): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const repoRoot = import.meta.dir.replace(/\/tests$/, "");
   const cliPath = join(repoRoot, "src", "cli.ts");
+  // The test preload defaults QMD_COMMAND to a no-op fake (SLICE-0126). The
+  // divergence-guard cases here must run with NO env override so the per-project
+  // qmd_command values are what gets resolved — drop the inherited default unless
+  // this fixture pins its own QMD_COMMAND.
+  const baseEnv = { ...process.env };
+  if (fixture.env.QMD_COMMAND === undefined) delete baseEnv.QMD_COMMAND;
   const proc = Bun.spawn(["bun", cliPath, ...args], {
     cwd: cwd ?? repoRoot,
-    env: { ...process.env, KNOWLEDGE_VAULT_ROOT: fixture.vaultRoot, ...fixture.env },
+    env: { ...baseEnv, KNOWLEDGE_VAULT_ROOT: fixture.vaultRoot, ...fixture.env },
     stdout: "pipe", stderr: "pipe",
   });
   const [stdout, stderr, exitCode] = await Promise.all([
