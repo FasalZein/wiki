@@ -6,11 +6,13 @@ import { join } from "node:path";
 import { captureArtifact } from "../src/artifacts/capture";
 
 // SLICE-0127: the capture path runs the SAME advisory dedup gate `wiki create`
-// uses (runDedupGate), inside the per-project lock. Capture is a non-interactive
-// hook, so on a STRONG match it FILES the artifact anyway and records an advisory
-// "possible duplicate of [[X]] — review" note (surfaced to stderr by the hook);
-// it never blocks, prompts, or drops — including on a false-positive match. The
-// real $HOME/Knowledge vault is never touched (TEMP vault + a fake qmd binary).
+// uses (runDedupGate). Capture is a non-interactive hook, so on a STRONG match it
+// FILES the artifact anyway and records an advisory "possible duplicate of [[X]] —
+// review" note (surfaced to stderr by the hook); it never blocks, prompts, or
+// drops — including on a false-positive match. The dedup gate and the keyword
+// update run UNLOCKED (only allocate->write is locked, review follow-up P1); the
+// observable qmd order is still dedup update -> dedup query -> write -> keyword
+// update. The real $HOME/Knowledge vault is never touched (TEMP vault + fake qmd).
 
 const tempPaths: string[] = [];
 const savedVault = process.env.KNOWLEDGE_VAULT_ROOT;
@@ -115,7 +117,7 @@ describe("SLICE-0127: capture runs the dedup gate and warns-and-files on a stron
     expect(outcome && outcome.outcome === "captured" ? outcome.note : undefined).toBe("possible duplicate of [[BUG-0007]] — review");
   });
 
-  test("the locked critical section order is dedup refresh+query -> write -> qmd update (one lock)", async () => {
+  test("the qmd order is dedup refresh+query -> write -> keyword update (dedup/update unlocked)", async () => {
     const vault = await makeVault("proj");
     await writeFile(vault.resultsFile, "[]"); // no match this time
     const dir = await tmpDir();

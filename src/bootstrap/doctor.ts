@@ -7,6 +7,7 @@ import { nextId } from "../artifacts/id";
 import { bareIdOf, collectReferences, isLocalIdRef } from "../artifacts/references";
 import { loadStructure, type Structure } from "../artifacts/registry";
 import { slugifyTitle } from "../artifacts/store";
+import { withProjectLock } from "../artifacts/lock";
 import { BLOCK_VERSION } from "../cli/repo-link";
 import { exists } from "../util";
 
@@ -107,8 +108,20 @@ export type DuplicateRepair = {
  * Renaming the reassigned file to `<newid>-<slug>.md` is left to the fmt rename
  * pass that runs after this — only the frontmatter id moves here, which is enough
  * for the next {@link nextId} read to see the freshly minted id and not re-mint it.
+ *
+ * Review follow-up (P2c): the renumber runs under the per-project lock, the same
+ * seam create/capture allocate under, so a concurrent `wiki create` cannot mint an
+ * id this repair is about to hand out (and vice versa).
  */
 export async function repairDuplicateIds(
+  vaultRoot: string,
+  project: string,
+  structure: Structure,
+): Promise<DuplicateRepair> {
+  return withProjectLock(vaultRoot, project, () => repairDuplicateIdsLocked(vaultRoot, project, structure));
+}
+
+async function repairDuplicateIdsLocked(
   vaultRoot: string,
   project: string,
   structure: Structure,

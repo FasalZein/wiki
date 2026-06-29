@@ -218,23 +218,25 @@ type RenderedArtifact = { path: string; content: string; fields: NormalizedRecor
  * `wx` create + bounded retry stays as a cheap second guard for a same-path
  * collision. Different projects use different lockfiles, so they never contend.
  *
- * SLICE-0126: after the write, inside the SAME lock, fire a cheap incremental qmd
- * keyword `update` for the project's collection so the new artifact is searchable
- * with no manual `wiki sync`. Vector `embed` stays owned by `wiki sync`; the write
- * path never embeds. The update is best-effort — a qmd fault (binary missing, not
- * yet synced) must not fail the write, since `wiki sync` is the durable reindex.
+ * SLICE-0126: after the write, fire a cheap incremental qmd keyword `update` for
+ * the project's collection so the new artifact is searchable with no manual `wiki
+ * sync`. Vector `embed` stays owned by `wiki sync`; the write path never embeds.
+ * Best-effort — a qmd fault (binary missing, not yet synced) must not fail the
+ * write, since `wiki sync` is the durable reindex.
  *
- * SLICE-0127: `beforeAllocate` runs once INSIDE the lock, before the first id is
- * allocated — the capture path uses it to run the dedup refresh+query so the whole
- * critical section is dedup refresh+query -> allocate -> write -> qmd update, all
- * under the one per-project lock (no unlocked qmd touch).
+ * Review follow-up (P1): the lock wraps ONLY allocate->write. qmd is a subprocess
+ * that can take seconds (cold cache, large collection); a slow call held under the
+ * lock could outlast the stale-reclaim window and let a waiter reclaim a LIVE lock
+ * — reopening the duplicate-id race the lock exists to close. So the keyword update
+ * runs AFTER the lock releases, and the capture path's advisory dedup gate runs
+ * BEFORE this call (see capture.ts) — both unlocked. Neither needs the lock: dedup
+ * is advisory and files-anyway, the keyword update is idempotent.
  */
 export async function mintAndWrite(
-  target: { type: TemplateType; vaultRoot: string; project: string; structure: Structure; beforeAllocate?: () => Promise<void> },
+  target: { type: TemplateType; vaultRoot: string; project: string; structure: Structure },
   render: (id: string) => RenderedArtifact,
 ): Promise<Artifact> {
-  return withProjectLock(target.vaultRoot, target.project, async () => {
-    if (target.beforeAllocate !== undefined) await target.beforeAllocate();
+  const artifact = await withProjectLock(target.vaultRoot, target.project, async () => {
     const MAX_ATTEMPTS = 8;
     for (let attempt = 0; ; attempt++) {
       const id = await nextId(target.type, target.vaultRoot, target.project, target.structure);
@@ -246,10 +248,11 @@ export async function mintAndWrite(
         if (isFileExists(error) && attempt < MAX_ATTEMPTS) continue; // collision — recompute nextId
         throw error;
       }
-      await refreshKeywordIndex(target.vaultRoot, target.project);
       return { id, path, fields, body: content };
     }
   });
+  await refreshKeywordIndex(target.vaultRoot, target.project); // unlocked — see above
+  return artifact;
 }
 
 /**
@@ -346,6 +349,10 @@ export async function relocateArtifact(input: RelocateArtifactInput, structure: 
   if (destination !== existing.path) {
     await rm(existing.path, { force: true });
   }
+  // Review follow-up (P2): a same-section move/retitle writes outside mintAndWrite,
+  // so refresh the keyword index here too — otherwise the relocated artifact's new
+  // path/title stays stale in the keyword index until the next `wiki sync`.
+  await refreshKeywordIndex(input.vaultRoot, input.project);
   const parsed = matter(content);
   return { id: input.id, path: destination, fields: parsed.data, body: parsed.content.trimStart() };
 }

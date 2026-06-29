@@ -719,3 +719,63 @@ Verification (all green):
 
 No item state changed (no false->true this iteration); no source or test file
 changed. Only this progress note was appended. The bundle is complete.
+
+## REVIEW FOLLOW-UPS (Claude + GLM subagent review)
+
+Two reviewer subagents (Claude Opus, GLM-5.2) reviewed the finished bundle. One
+P1 and three P2 findings were addressed. No item state changed (all nine remain
+passes:true); these are hardening fixes on top of the completed bundle.
+
+P1 (Claude, valid — confirmed against the code): SLICE-0126/0127 had moved qmd
+subprocess calls INSIDE the per-project lock, but lock.ts STALE_MS stayed 10s on
+the now-false "critical section is sub-millisecond" assumption. A slow qmd call
+(cold cache, large collection) held under the lock could outlast the stale window
+and let a concurrent same-project waiter reclaim a LIVE lock, reopening the
+duplicate-id race the lock exists to close. Fix: the per-project lock now wraps
+ONLY allocate->write. The capture dedup gate runs BEFORE mintAndWrite (unlocked)
+and the keyword `update` runs AFTER the lock releases (unlocked) — neither needs
+the lock (dedup is advisory/files-anyway; the keyword update is idempotent). The
+observable qmd order (dedup update -> dedup query -> write -> keyword update) is
+unchanged, so the SLICE-0126/0127 contract tests stay green. mintAndWrite's
+`beforeAllocate` hook was removed (capture now calls captureDedupNote directly).
+
+P2a (GLM): a same-section relocate/retitle writes outside mintAndWrite and so
+never refreshed the keyword index — the moved path/title stayed stale until the
+next `wiki sync`. Fix: relocateArtifact now calls refreshKeywordIndex after the
+same-section write (the cross-section path already routes through mintAndWrite).
+
+P2c (GLM): doctor --fix renumbered duplicate ids (nextId -> reassignId) without
+the allocation lock, so a concurrent `wiki create` could mint an id the repair
+was about to hand out. Fix: repairDuplicateIds now runs its whole loop under
+withProjectLock (split into repairDuplicateIds wrapper + repairDuplicateIdsLocked).
+
+P2b (GLM): capture's idempotency index read sits outside the lock, so two
+PostToolUse fires on the SAME unstamped draft could each file a copy. Documented
+as a known ceiling rather than "fixed": the lock serializes id ALLOCATION (the
+two copies would get DISTINCT ids — the duplicate-*id* invariant holds), and the
+draft is read before the lock, so moving the check inside would still read the
+same pre-stamp id. The durable guard is the post-file stamp (a re-fire after the
+stamp lands is skipped) plus the dedup gate. Fully closing it needs a
+per-draft-path lock around read->decide->write; out of scope (concurrent fires on
+one exact path are not an observed pattern). Comment added in capture.ts.
+
+New regression test (tests/allocation-lock.test.ts): "the write-path qmd keyword
+update runs UNLOCKED" — a probe fake qmd records whether the per-project lockfile
+exists DURING each `update` call; the test asserts it is only ever "unlocked".
+Verified it is a true guard: moving refreshKeywordIndex back inside the lock makes
+it fail (1 fail / 5 pass), and it passes with the fix. Deterministic — no sleep.
+
+Files changed:
+- src/artifacts/store.ts (lock wraps allocate->write only; keyword update after
+  lock release; drop beforeAllocate; refresh after same-section relocate)
+- src/artifacts/capture.ts (dedup gate before mintAndWrite, unlocked; P2b note)
+- src/artifacts/lock.ts (STALE_MS docstring corrected)
+- src/bootstrap/doctor.ts (repairDuplicateIds under withProjectLock)
+- tests/capture-dedup.test.ts (test wording: dedup/update unlocked, not "one lock")
+- tests/allocation-lock.test.ts (new P1 unlocked-keyword-update guard)
+- .ralph/progress.md (this entry)
+
+Verification (all green):
+- bun run build: ok (cli.js 0.33 MB)
+- bunx tsc --noEmit: clean (exit 0)
+- bun run test: 440 pass, 0 fail, 1427 expect() calls, 61 files

@@ -140,28 +140,33 @@ async function fileArtifact(args: {
 
   // Idempotent: a declared id already indexed in the vault means this draft is
   // already filed — report captured without a duplicate write.
+  //
+  // Review follow-up (P2b): this index read is outside the per-project lock, so two
+  // PostToolUse fires on the SAME unstamped draft can both miss it and each file a
+  // copy. The lock cannot close this: it serializes id ALLOCATION (so the two get
+  // DISTINCT ids — the duplicate-*id* invariant holds), but the draft is read before
+  // the lock, so moving the check inside would still read the same pre-stamp id. The
+  // durable idempotency guard is the post-file stamp below (a re-fire after the stamp
+  // lands is correctly skipped); the dedup gate catches the rare double-content case.
+  // Closing it fully needs a per-draft-path lock around read->decide->write, out of
+  // scope here (concurrent fires on one exact path are not an observed pattern).
   if (declaredId !== undefined && (await buildIdIndex(vaultRoot, project, structure)).has(declaredId)) {
     return { outcome: "captured", context: captureContext(kind, declaredId, true) };
   }
 
   const directory = artifactDirectory(kind, vaultRoot, project, structure);
   const today = new Date().toISOString().slice(0, 10);
-  // SLICE-0127: run the dedup gate inside the same per-project lock as the write
-  // (via mintAndWrite's beforeAllocate), so the critical section is dedup
-  // refresh+query -> allocate -> write -> qmd update. Capture NEVER blocks or
-  // prompts (it is a non-interactive hook): a strong match files the artifact
-  // anyway and records an advisory note the caller surfaces to stderr.
-  let dedupNote: string | undefined;
+  // SLICE-0127: run the SAME advisory dedup gate `wiki create` uses, then file the
+  // artifact. Capture NEVER blocks or prompts (it is a non-interactive hook): a
+  // strong match files the artifact anyway and records an advisory note the caller
+  // surfaces to stderr. The gate runs BEFORE mintAndWrite (unlocked): it shells out
+  // to qmd, and the lock is reserved for the sub-millisecond allocate->write only
+  // (a slow qmd call under the lock could let a waiter reclaim a live lock — review
+  // follow-up P1). Dedup is advisory and files-anyway, so it needs no lock; the new
+  // artifact is not yet on disk, so it cannot self-match the query.
+  const dedupNote = await captureDedupNote({ kind, project, vaultRoot, structure, data, body });
   const artifact = await mintAndWrite(
-    {
-      type: kind,
-      vaultRoot,
-      project,
-      structure,
-      beforeAllocate: async () => {
-        dedupNote = await captureDedupNote({ kind, project, vaultRoot, structure, data, body });
-      },
-    },
+    { type: kind, vaultRoot, project, structure },
     (id) => {
       const title = typeof data.title === "string" && data.title.length > 0 ? data.title : id;
       const aliases = Array.isArray(data.aliases) ? [...new Set([id, ...data.aliases.map(String)])] : [id];
@@ -182,8 +187,9 @@ async function fileArtifact(args: {
  * otherwise. Capture must never block, prompt, or drop, so this only ever returns
  * a string to surface — it never throws past here: a weak match, no match, dedup
  * disabled for the kind, an unconfigured project, or any qmd fault all yield
- * undefined (file silently). Runs inside the per-project lock (beforeAllocate), so
- * its qmd refresh+query is part of the one locked critical section.
+ * undefined (file silently). Runs UNLOCKED, before mintAndWrite (review follow-up
+ * P1): it shells out to qmd, and only the sub-millisecond allocate->write belongs
+ * under the per-project lock.
  */
 async function captureDedupNote(args: {
   kind: TemplateType;

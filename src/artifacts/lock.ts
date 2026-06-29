@@ -4,8 +4,10 @@ import { join } from "node:path";
 import { assertSafeSegment } from "./paths";
 
 /** A crashed writer must not wedge the vault forever: a lockfile older than this
- *  is treated as abandoned and reclaimed. The id allocate->write critical section
- *  is sub-millisecond, so this is generous by orders of magnitude. */
+ *  is treated as abandoned and reclaimed. The locked section is ONLY the id
+ *  allocate->write (sub-millisecond) — no qmd subprocess or other slow call runs
+ *  under the lock (review follow-up P1), so this window is generous by orders of
+ *  magnitude and a live holder is never mistaken for a crashed one. */
 const STALE_MS = 10_000;
 /** Total time to wait for a held lock before giving up (the holder is alive but
  *  slow). Bounded so a genuinely stuck peer surfaces as an error, not a hang. */
