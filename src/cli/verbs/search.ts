@@ -58,10 +58,19 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
   const sinceRaw = stringValue(parsed.values, "since");
   let since: number | undefined;
   if (sinceRaw !== undefined) {
+    // Require a strict ISO `YYYY-MM-DD` (optionally with a time): `new Date("1")`
+    // or `new Date("june")` parse to something lenient and silently filter wrong.
+    if (!/^\d{4}-\d{2}-\d{2}([T ].*)?$/.test(sinceRaw)) {
+      console.error(`invalid --since date: ${sinceRaw} (use ISO format, e.g. 2026-06-01)`);
+      return { code: 1 };
+    }
     const parsedDate = new Date(sinceRaw).getTime();
     if (Number.isNaN(parsedDate)) {
-      console.error(`invalid --since date: ${sinceRaw} (use e.g. 2026-06-01)`);
+      console.error(`invalid --since date: ${sinceRaw} (use ISO format, e.g. 2026-06-01)`);
       return { code: 1 };
+    }
+    if (parsedDate > Date.now()) {
+      console.error(`note: --since ${sinceRaw} is in the future — nothing is newer, so results will be empty.`);
     }
     since = parsedDate;
   }

@@ -377,8 +377,13 @@ export async function relocateArtifact(input: RelocateArtifactInput, structure: 
           title: nextTitle,
           updated: new Date().toISOString().slice(0, 10),
         };
+        // Rewrite the moved artifact's OWN `[[OLD-ID]]` self-references to the new
+        // id so the re-minted file stays internally consistent (mirrors doctor's
+        // reassignId). Inbound links from OTHER files are still not rewritten — the
+        // settled cross-section rule; doctor flags those as the documented ceiling.
+        const body = existing.body.replace(new RegExp(`\\[\\[${existing.id}(?=[\\]|#])`, "g"), `[[${id}`);
         const path = join(projectPath(input.vaultRoot, input.project), resolved.bucket.folder, `${id}-${slugifyTitle(nextTitle)}.md`);
-        return { path, content: matter.stringify(existing.body, fields), fields };
+        return { path, content: matter.stringify(body, fields), fields };
       },
     );
     await rm(existing.path, { force: true });
@@ -465,6 +470,7 @@ function artifactPath(type: TemplateType, vaultRoot: string, project: string, id
   const directory = artifactDirectory(type, vaultRoot, project, structure);
   const fileName = `${id}-${slugifyTitle(title)}.md`;
   if (category !== undefined && category.length > 0) {
+    assertSafeSegment(category, "category"); // defense-in-depth: createArtifact is a public API
     return join(directory, category, fileName);
   }
   return join(directory, fileName);

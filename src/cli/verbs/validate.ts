@@ -31,7 +31,7 @@ export async function handleValidate(args: string[]): Promise<CliResult> {
   const type = structure.artifactTypeForVaultPath(rel);
   if (type === undefined) {
     console.error(`cannot infer artifact type from path: ${rel}`);
-    console.error("expected path under projects/<name>/<prds|slices|adrs|handoffs|docs>/");
+    console.error(`expected path under projects/<name>/<${structure.folders.join("|")}>/`);
     return { code: 1 };
   }
 

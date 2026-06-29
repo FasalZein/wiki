@@ -227,6 +227,20 @@ function buildStructure(
   const entries = Object.entries(kinds) as [TemplateType, ArtifactSpec][];
   const prefixToType = new Map(entries.map(([type, spec]) => [spec.prefix, type]));
   const folderToType = new Map(entries.map(([type, spec]) => [spec.folder, type]));
+  // Two kinds sharing a folder makes folderToType (and path->kind resolution)
+  // silently last-writer-wins. Reject it at load so a custom wiki.json fails loudly.
+  if (folderToType.size !== entries.length) {
+    const seen = new Set<string>();
+    const dup = entries.find(([, spec]) => seen.size === (seen.add(spec.folder), seen.size));
+    throw new Error(`wiki.json: two kinds share folder '${dup?.[1].folder}' — each kind needs a distinct folder`);
+  }
+  // A parent/child relationship that names a missing kind would fail deep in the
+  // create flow with a confusing error; validate the edge here at load instead.
+  for (const [type, spec] of entries) {
+    if (spec.parent !== undefined && kinds[spec.parent] === undefined) {
+      throw new Error(`wiki.json: kind '${type}' declares parent '${spec.parent}', which is not a defined kind`);
+    }
+  }
   const skillToKind = new Map(
     entries.filter(([, spec]) => spec.skill !== undefined).map(([type, spec]) => [spec.skill as string, type]),
   );

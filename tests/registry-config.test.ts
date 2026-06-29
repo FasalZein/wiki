@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { DEFAULT_STRUCTURE } from "../src/artifacts/registry";
+import { DEFAULT_STRUCTURE, buildStructure } from "../src/artifacts/registry";
 
 const { kinds } = DEFAULT_STRUCTURE;
 const specFor = (type: string) => DEFAULT_STRUCTURE.specFor(type);
@@ -21,5 +21,22 @@ describe("config-driven kind registry (wiki.json)", () => {
 
   test("specFor throws loudly on a kind not defined in wiki.json", () => {
     expect(() => specFor("nonexistent-kind")).toThrow(/unknown artifact kind/);
+  });
+
+  test("rejects two kinds sharing a folder at load (last-writer-wins guard)", () => {
+    expect(() =>
+      buildStructure({
+        prd: { prefix: "PRD", folder: "shared", dedup: true },
+        doc: { prefix: "DOC", folder: "shared", dedup: true },
+      } as never),
+    ).toThrow(/share folder/);
+  });
+
+  test("rejects a parent edge naming an undefined kind at load", () => {
+    expect(() =>
+      buildStructure({
+        slice: { prefix: "SLICE", folder: "slices", dedup: true, parent: "ghost" },
+      } as never),
+    ).toThrow(/declares parent 'ghost'/);
   });
 });

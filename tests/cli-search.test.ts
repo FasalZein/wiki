@@ -259,6 +259,15 @@ describe("search CLI", () => {
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("invalid --since date");
   });
+
+  test("search --since rejects a non-ISO date that Date() would parse leniently", async () => {
+    const fixture = await createSearchFixture("wiki-v2");
+    // `new Date("1")` parses to 2001-01-01 — a strict ISO guard must reject it.
+    const result = await runWiki(["search", "x", "--project", "wiki-v2", "--since", "1"], fixture);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("invalid --since date");
+  });
 });
 
 type SearchFixture = {
