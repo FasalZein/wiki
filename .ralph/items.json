@@ -118,7 +118,7 @@
         "Add a test: capture end-to-end against a custom-tree TEMP vault recognizes a custom bucket and files with a section-prefixed id; a re-fire is idempotent (no double-create). Never touch the real $HOME/Knowledge vault.",
         "Run all gates green and commit."
       ],
-      "passes": false,
+      "passes": true,
       "regression_notes": ""
     },
     {

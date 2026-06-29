@@ -568,3 +568,75 @@ item. After this slice store.ts and doc.ts no longer import the doc-category
 machinery; only registry.ts's own exports remain, so SLICE-0117 (capstone deletion)
 now needs only SLICE-0116's blocker chain plus its own already-passing blockers
 (0112/0113/0114/0115) -- but 0116 is lower-numbered and should be taken first.
+
+## SLICE-0116 CAPTURE RESOLVES KIND VIA PER-VAULT TREE (PASS)
+
+Selected as the lowest-numbered unfinished item; its blockers SLICE-0111 and
+SLICE-0112 are both passes:true.
+
+Decision rationale: fix the latent coupling in the PRD-0022 capture path so kind
+resolution rides the SAME per-vault Structure the write step uses. Today (verified)
+src/artifacts/capture.ts imported both DEFAULT_STRUCTURE and loadStructure:
+resolveKind read DEFAULT_STRUCTURE.kinds / DEFAULT_STRUCTURE.typeForId while
+fileArtifact loaded loadStructure(vaultRoot) for the write. Harmless while every
+vault uses the default tree, but under a custom wiki.json a capture of a
+custom-kind draft would warn "maps to no registered wiki kind" instead of filing
+it, because the default structure has never seen that kind.
+
+Implementation (src/artifacts/capture.ts only):
+- resolveKind now takes the loaded Structure as a parameter and checks
+  structure.kinds[template] / structure.typeForId(id) against it, not the bundled
+  default. Dropped the DEFAULT_STRUCTURE import (loadStructure + the Structure type
+  remain).
+- captureArtifact now resolves the vault (getVaultRoot) and loads its Structure
+  (loadStructure) UP FRONT, immediately after the artifact-shaped check and before
+  resolveKind, then threads vaultRoot + structure into both resolveKind and
+  fileArtifact. Both loads are wrapped so a vault/config fault becomes a warn (never
+  a throw past the seam), preserving the hook's stdout contract.
+- fileArtifact no longer loads the vault or structure itself (they are passed in);
+  it keeps only project resolution + the mintAndWrite file. The now-dead
+  `structure.kinds[kind] === undefined` guard was removed: kind was just resolved
+  against this same structure, so it is always present.
+
+Order note: vault + structure resolution now precede the no-kind warning. Under the
+test harness (KNOWLEDGE_VAULT_ROOT always set) the vault always resolves, so the
+existing warning order is unchanged: the "names no kind" case still warns about the
+kind, and the "no resolvable project" case still warns about the project. Verified by
+the unchanged tests/cli-hook.test.ts capture suite (8 cases) staying green.
+
+Conservative assumption recorded: "custom bucket" in this slice is exercised as a
+custom LEAF section (a kind the default tree does not define). A leaf section is its
+own bucket (named after the section, filing into the section folder), so capturing a
+custom-kind draft files it into that section's folder with a section-prefixed id via
+mintAndWrite. Bucket-subfolder routing on capture (filing into a branch section's
+named subfolder) is not in scope here — capture files into the section folder exactly
+as it did for the default doc section; this slice only fixes WHICH structure resolves
+the kind, matching the item's "regression + coupling fix, no direct user story" framing.
+
+Tests (tests/capture-custom-tree.test.ts, new — 2 cases) against a TEMP vault whose
+wiki.json declares a `bug` leaf kind (prefix BUG, folder bugs) the default structure
+has never seen: capturing a `template: bug` draft is recognized, filed into bugs/ as
+BUG-####-<slug>.md with a BUG-prefixed frontmatter id and the resolved project; a
+re-fire on the same (now id-stamped) draft is idempotent (still exactly one file).
+The real $HOME/Knowledge vault is never touched (mkdtemp temp vault + a saved/restored
+KNOWLEDGE_VAULT_ROOT). Confirmed the test is a real regression guard: it FAILS on the
+pre-fix code (custom `bug` kind warns instead of capturing) and PASSES with the fix.
+No existing test was deleted or weakened.
+
+Files changed:
+- src/artifacts/capture.ts (per-vault structure threaded into resolveKind; vault +
+  structure loaded up front; drop DEFAULT_STRUCTURE import; remove dead kind guard)
+- tests/capture-custom-tree.test.ts (new)
+- .ralph/items.json (SLICE-0116 passes false->true)
+- .ralph/progress.md (this entry)
+
+Verification (all green at this commit):
+- bun run build: ok (cli.js 0.32 MB, bundled 99 modules)
+- bunx tsc --noEmit: clean
+- bun run test: 410 pass, 0 fail, 1313 expect() calls, 54 files
+
+Next-iteration notes: SLICE-0117 (capstone deletion of DOC_CATEGORIES / isDocCategory
+/ defaultCategoryForDocType / DocCategory + the doc `type` enum) is now the lowest
+unfinished item. Its blockers 0112/0113/0114/0115 all pass and capture no longer
+imports the doc-category machinery, so grep should show only registry.ts (the owner /
+exporter) still referencing it. SLICE-0118 remains after 0117.
