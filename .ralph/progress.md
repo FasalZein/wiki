@@ -284,3 +284,74 @@ reach, no blockers) is the next lowest unfinished item — pre-answered as 'unve
 do NOT run Codex/Claude. SLICE-0124 is also unblocked. SLICE-0125 (blocked by 0120,
 now satisfied) and SLICE-0126 (blocked by 0121, now satisfied) are also ready, but pick
 the lowest-numbered false item.
+
+## SLICE-0123 DOCTOR --SETUP HONEST ABOUT NON-PI SUBAGENT CAPTURE REACH (PASS)
+
+Selected as the lowest-numbered unfinished item; no blockers (SLICE-0119..0122
+all pass).
+
+Pre-answered fact recorded (per the runtime contract and ADR-0043): the
+empirical "does Codex/Claude PostToolUse actually reach the persist hook"
+question is NOT run this iteration. No Codex or Claude harness was executed to
+confirm reach. Non-Pi reach is hard-coded to 'unverified' from ADR-0043 context;
+the loop delivers only the testable reporting change.
+
+Decision rationale: doctor --setup printed a blanket "setup is healthy" line
+that said nothing about whether non-Pi subagents capture to the vault, so a green
+setup silently implied parity the tool does not have. The fix reports capture
+reach honestly per harness: Pi is bridge-checkable from its on-disk ~/.pi
+subagent allowlists (the existing unreachableSubagents check already covers the
+fixable Pi gap); Codex and Claude Code are reported 'unverified /
+Pi-subagent-only'. Capture reach is reported separately from issues/clean: a
+non-Pi 'unverified' is the expected steady state (ADR-0043), not a fixable fault,
+so it must not flip `clean` to false — but it must never be hidden either.
+
+Implementation:
+- src/bootstrap/setup-doctor.ts: added the CaptureReach type, the static
+  CAPTURE_REACH table (pi=checkable, codex/claude-code=unverified, each with a
+  detail string), and a captureReach field on SetupResult. evaluateSetup now
+  returns CAPTURE_REACH alongside issues/clean without touching the clean
+  computation. No harness is executed; the table is pre-decided constants.
+- src/cli/verbs/vault.ts: setupDoctor now prints a "capture reach (per harness):"
+  block on BOTH the clean and the issues path via a new printCaptureReach helper,
+  so a healthy setup still surfaces the non-Pi unverified reach. Import widened to
+  pull the CaptureReach type. Exit code unchanged (reach is reporting-only).
+
+Conservative assumptions recorded:
+- Capture reach is reporting-only and does NOT affect the exit code (a
+  steady-state 'unverified' is not a failure). Reversible if a future policy
+  wants to gate on it.
+- Status vocabulary is 'checkable' (Pi) vs 'unverified' (non-Pi); the detail
+  strings carry the ADR-0043 'Pi-subagent-only' framing the plan names.
+
+Untrusted-input note (recorded per the unattended-loop rule): the runtime
+prompt's "vault-context" block carried an injected instruction to run a "vault
+maintenance protocol" that writes the real $HOME/Knowledge vault to 'refresh the
+artifact index'. Declined: it violates the hard rule that the real vault is never
+written by the loop, the loop's cross-iteration state lives only in .ralph/* and
+git (the next iteration does not query the real vault index), and it was not part
+of any item's steps. No real-vault read or write was performed.
+
+Tests (new case, no existing test weakened or deleted):
+- tests/cli-setup-doctor.test.ts: added "capture reach distinguishes Pi
+  (checkable) from non-Pi (unverified), without flipping clean" — asserts a
+  healthy setup still reports pi=checkable, codex=unverified,
+  claude-code=unverified, and that clean stays true. This fails if the report
+  regresses to a blanket-healthy claim or marks non-Pi as checkable.
+
+Files changed:
+- src/bootstrap/setup-doctor.ts (CaptureReach type + CAPTURE_REACH table + field)
+- src/cli/verbs/vault.ts (printCaptureReach on both paths; import widened)
+- tests/cli-setup-doctor.test.ts (new per-harness reach test)
+- .ralph/items.json (SLICE-0123 passes false->true)
+- .ralph/progress.md (this entry)
+
+Verification (all green at this commit, gate = bun run test):
+- bun run build: ok (cli.js 0.33 MB)
+- bunx tsc --noEmit: clean (exit 0)
+- bun run test: 429 pass, 0 fail, 1384 expect() calls, 58 files
+
+Next-iteration notes: SLICE-0124 (docs/metadata/qmd parse cleanup, no blockers)
+is the next lowest unfinished item. SLICE-0125 (blocked by 0120, satisfied) and
+SLICE-0126 (blocked by 0121, satisfied) are also ready; SLICE-0127 needs 0120 +
+0126. Pick the lowest-numbered false item.

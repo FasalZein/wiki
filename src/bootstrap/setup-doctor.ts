@@ -9,9 +9,36 @@ export type SetupIssue = {
   message: string;
 };
 
+/**
+ * Per-harness capture-reach honesty. Whether a harness's PostToolUse path is
+ * KNOWN to reach the persist bridge. Pi is bridge-checkable from its on-disk
+ * subagent allowlists; Codex/Claude reach is pre-decided 'unverified' per
+ * ADR-0043 (the doctor does NOT execute a harness to confirm it). Reported by
+ * `doctor --setup` instead of a blanket-healthy claim, so a green setup never
+ * implies non-Pi subagents capture to the vault.
+ */
+export type CaptureReach = {
+  harness: "pi" | "codex" | "claude-code";
+  status: "checkable" | "unverified";
+  detail: string;
+};
+
+/** The pre-decided per-harness capture reach (ADR-0043) — static, no harness run. */
+export const CAPTURE_REACH: CaptureReach[] = [
+  { harness: "pi", status: "checkable", detail: "bridge-checkable via ~/.pi subagent allowlists" },
+  { harness: "codex", status: "unverified", detail: "Pi-subagent-only — non-Pi PostToolUse reach unverified (ADR-0043)" },
+  {
+    harness: "claude-code",
+    status: "unverified",
+    detail: "Pi-subagent-only — non-Pi PostToolUse reach unverified (ADR-0043)",
+  },
+];
+
 export type SetupResult = {
   issues: SetupIssue[];
   clean: boolean;
+  /** Per-harness capture reach — Pi checkable, non-Pi pre-decided unverified (ADR-0043). */
+  captureReach: CaptureReach[];
 };
 
 /** The resolved facts `doctor --setup` checks; injectable so tests need no real install. */
@@ -103,5 +130,9 @@ export async function evaluateSetup(facts: SetupFacts): Promise<SetupResult> {
     });
   }
 
-  return { issues, clean: issues.length === 0 };
+  // Capture reach is reported honestly per harness, not folded into clean/issues:
+  // a non-Pi 'unverified' is the expected steady state (ADR-0043), not a fixable
+  // fault, so it must not flip `clean` — but it must never be hidden behind a
+  // blanket-healthy line either.
+  return { issues, clean: issues.length === 0, captureReach: CAPTURE_REACH };
 }

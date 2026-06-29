@@ -76,7 +76,7 @@
         "Record in this item's progress entry that non-Pi reach was pre-answered (unverified), not empirically run.",
         "Run all three gates green and commit."
       ],
-      "passes": false,
+      "passes": true,
       "regression_notes": ""
     },
     {

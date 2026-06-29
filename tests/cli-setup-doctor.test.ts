@@ -129,4 +129,26 @@ describe("doctor --setup distribution health", () => {
     expect(result.clean).toBe(true);
     expect(result.issues.map((i) => i.type)).not.toContain("unreachable-subagent");
   });
+
+  test("capture reach distinguishes Pi (checkable) from non-Pi (unverified), without flipping clean", async () => {
+    const { binaryPath, srcDir } = await freshBinary();
+    const bundle = join(await tmp("wiki-bundle-"), "SKILL.md");
+    await writeFile(bundle, "skill");
+    const result = await evaluateSetup({
+      binaryPath,
+      srcDir,
+      skillBundlePath: bundle,
+      hookWired: true,
+      unreachableSubagents: [],
+    });
+    // A healthy setup must still report non-Pi reach as unverified, never imply it.
+    expect(result.clean).toBe(true);
+    const byHarness = Object.fromEntries(result.captureReach.map((r) => [r.harness, r]));
+    expect(byHarness["pi"]!.status).toBe("checkable");
+    expect(byHarness["codex"]!.status).toBe("unverified");
+    expect(byHarness["claude-code"]!.status).toBe("unverified");
+    // The unverified harnesses are Pi-subagent-only and never run by the doctor.
+    expect(byHarness["codex"]!.detail).toContain("unverified");
+    expect(byHarness["claude-code"]!.detail).toContain("unverified");
+  });
 });
