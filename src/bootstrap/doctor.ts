@@ -1,10 +1,12 @@
-import { access, readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { access, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import matter from "gray-matter";
 
 import { buildIdIndex } from "../artifacts/id-index";
+import { nextId } from "../artifacts/id";
 import { bareIdOf, collectReferences, isLocalIdRef } from "../artifacts/references";
 import { loadStructure, type Structure } from "../artifacts/registry";
+import { slugifyTitle } from "../artifacts/store";
 import { BLOCK_VERSION } from "../cli/repo-link";
 import { exists } from "../util";
 
@@ -85,7 +87,72 @@ export async function checkProjectIdDrift(vaultPath: string, project: string, st
   return issues;
 }
 
-/** Project directories under the vault (excludes _-prefixed structural dirs). */
+/** What {@link repairDuplicateIds} changed for one project. */
+export type DuplicateRepair = {
+  /** Human-readable `OLD maps to N files; FILE -> NEW` lines, one per reassigned file. */
+  labels: string[];
+  /** Count of files reassigned a fresh id. */
+  reassigned: number;
+};
+
+/**
+ * Repair duplicate frontmatter ids in one project (SLICE-0122). When an id maps
+ * to more than one file, the lexicographically-first path keeps the id (canonical)
+ * and every other file is reassigned the next free id in that section's id-space
+ * via {@link nextId} (the same seam create uses, so the new id never re-collides).
+ * The reassigned file's own `id`, `aliases`, and any self-referential `[[OLD]]` body
+ * links are rewritten so it stays internally consistent; the canonical file is
+ * untouched, so inbound `[[OLD]]` links from other files still resolve to it.
+ *
+ * Renaming the reassigned file to `<newid>-<slug>.md` is left to the fmt rename
+ * pass that runs after this — only the frontmatter id moves here, which is enough
+ * for the next {@link nextId} read to see the freshly minted id and not re-mint it.
+ */
+export async function repairDuplicateIds(
+  vaultRoot: string,
+  project: string,
+  structure: Structure,
+): Promise<DuplicateRepair> {
+  const labels: string[] = [];
+  let reassigned = 0;
+  const index = await buildIdIndex(vaultRoot, project, structure);
+
+  for (const [id, paths] of index) {
+    if (paths.length <= 1) continue;
+    const type = structure.typeForId(id);
+    if (type === undefined) continue; // unknown prefix — not ours to renumber
+    // Canonical = lexicographically-first path keeps the id; reassign the rest.
+    const [, ...duplicates] = [...paths].sort();
+    for (const dupPath of duplicates) {
+      const newId = await nextId(type, vaultRoot, project, structure);
+      await reassignId(dupPath, id, newId);
+      labels.push(`${project}: id ${id} maps to ${paths.length} files; ${dupPath.split("/").pop()} -> ${newId}`);
+      reassigned++;
+    }
+  }
+
+  return { labels, reassigned };
+}
+
+/** Rewrite one file's frontmatter `id` (and matching `aliases`) plus any self
+ *  `[[oldId]]` body links to `newId`, then rename it to `<newId>-<slug>.md`. */
+async function reassignId(filePath: string, oldId: string, newId: string): Promise<void> {
+  const parsed = matter(await readFile(filePath, "utf8"));
+  const data = parsed.data as Record<string, unknown>;
+  data.id = newId;
+  if (Array.isArray(data.aliases)) {
+    const aliases = data.aliases.map((a) => (a === oldId ? newId : a));
+    if (!aliases.includes(newId)) aliases.unshift(newId);
+    data.aliases = aliases;
+  }
+  // Self-references only: a file that links to its own old id now links to the new one.
+  const body = parsed.content.replace(new RegExp(`\\[\\[${oldId}(?=[\\]|#])`, "g"), `[[${newId}`);
+  const content = matter.stringify(body, data);
+  const title = typeof data.title === "string" ? data.title : newId;
+  const target = join(dirname(filePath), `${newId}-${slugifyTitle(title)}.md`);
+  await writeFile(target, content);
+  if (target !== filePath) await rm(filePath, { force: true });
+}
 export async function listVaultProjects(vaultPath: string): Promise<string[]> {
   const projectsDir = join(vaultPath, "projects");
   if (!(await exists(projectsDir))) return [];

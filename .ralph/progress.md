@@ -192,3 +192,95 @@ Next-iteration notes: SLICE-0122 (doctor --fix duplicate ids + spine drift, no
 blockers) is the next lowest unfinished item. SLICE-0123/0124 are also unblocked.
 SLICE-0126 (incremental qmd update) is now UNBLOCKED since its blocker SLICE-0121
 passes — same mintAndWrite seam — but pick the lowest-numbered ready item.
+
+## SLICE-0122 WIKI DOCTOR --FIX REPAIRS DUPLICATE IDS AND SPINE DRIFT (PASS)
+
+Selected as the lowest-numbered unfinished item; no blockers (SLICE-0119/0120/0121
+all pass).
+
+Decision rationale: the duplicate-id check (checkProjectIdDrift) already DETECTS an
+id mapping to >1 file but had no repair path. SLICE-0122 adds the `--fix` mode: per
+project, renumber duplicate ids FIRST, then run the same mechanical fixes fmt --write
+already applies (legacy-id renumber with vault-wide [[id]] link rewrite, rename to
+id-slug, the per-file category pipeline). Renumber-then-fmt order matters so the
+post-renumber/rename world is what fmt sees, and a final runDoctor re-audit reports
+drift --fix cannot auto-repair (dangling links, repo bindings).
+
+Duplicate-id repair design (conservative, reversible): when an id maps to N files the
+lexicographically-FIRST path is canonical and KEEPS the id (so inbound [[OLD]] links
+from other files still resolve to it — there is no way to disambiguate which duplicate
+an external link meant, and keeping canonical is the least-surprising choice). Every
+other file is reassigned the next free id in that section's id-space via nextId (the
+same allocation seam create uses, so the new id never re-collides). The reassigned
+file's own id, aliases, and any SELF-referential [[OLD]] body links are rewritten to
+the new id so it stays internally consistent; the file is renamed to <newid>-<slug>.md.
+The frontmatter id moves before the next nextId read, so sequential duplicates each get
+a distinct fresh id.
+
+Implementation:
+- src/cli/verbs/fmt.ts: extracted the whole fix pipeline out of handleFmt into a new
+  exported applyFmtFixes(vaultRoot, projPath, write, structure) returning
+  {labels, total, manual, renumberMap}. handleFmt now calls it and prints exactly the
+  same output (same label order, same renumber/manual sections) — no behavior change,
+  proven by the unchanged cli-fmt.test.ts suite still green. This lets doctor --fix
+  drive the identical mechanical fixes without duplicating the renumber/rename/category
+  logic.
+- src/bootstrap/doctor.ts: added repairDuplicateIds(vaultRoot, project, structure)
+  (returns {labels, reassigned}) and the private reassignId helper. Reuses buildIdIndex
+  (the spine), nextId (allocation), and slugifyTitle (filename). New imports: nextId,
+  slugifyTitle, rm, writeFile, dirname.
+- src/cli/verbs/vault.ts: vaultDoctor now parses a `fix` boolean and routes to the new
+  vaultDoctorFix(vaultPath) — iterate projects, repairDuplicateIds then applyFmtFixes
+  (write=true), print the fixes, then runDoctor re-audit (exit 0 clean / 1 if drift
+  remains). Detect-only `doctor` (no --fix) is unchanged.
+- src/cli/usage.ts: documented the new --fix flag on both the `doctor` verb and the
+  `vault doctor` subverb.
+
+Conservative assumptions recorded:
+- Canonical = lexicographically-first path. Reversible; the alternative (first by mtime
+  or by filename-matches-id) is not more correct without semantic info, and the loop is
+  idempotent either way.
+- Renaming the reassigned file to <newid>-<slug>.md happens inside reassignId rather than
+  deferring solely to fmt's renameToId, so the on-disk name matches the new id immediately
+  and the next --fix run sees a clean vault (idempotency).
+- An external [[OLD]] link is left pointing at the canonical artifact (documented above);
+  --fix does not guess which duplicate it meant.
+
+Tests (new, TEMP vault only): tests/cli-doctor-fix.test.ts —
+  1. unit: repairDuplicateIds keeps canonical PRD-0005, renumbers the duplicate to
+     PRD-0006, rewrites its alias and its self-referential [[PRD-0005]] -> [[PRD-0006]],
+     and removes the old duplicate filename.
+  2. unit: no-op when every id is unique (reassigned === 0).
+  3. e2e: `wiki doctor <vault>` WITHOUT --fix is detect-only — reports duplicate-id,
+     exit 1, both files still PRD-0005 on disk (no write).
+  4. e2e: `wiki doctor <vault> --fix` repairs the duplicate (distinct PRD ids on disk)
+     AND drives the legacy-id renumber + vault-wide inbound-[[link]] rewrite
+     (SLICE-001 -> SLICE-0001, the referencing file's link updated — the link-rewriting
+     path the item requires); a second --fix run is a no-op and reports clean.
+No existing test weakened or deleted; cli-fmt.test.ts unchanged and still green
+(confirms the applyFmtFixes extraction preserved fmt's output contract).
+
+Note on running tests: the verification gate is `bun run test` (= `bun test tests/`).
+A bare `bun test` from the repo root picks up unrelated test files outside tests/ (an
+mcp/skill suite with 32 pre-existing failures and an intermittent Bun teardown abort);
+those are NOT part of this repo's gate and are unrelated to this change.
+
+Files changed:
+- src/cli/verbs/fmt.ts (extract applyFmtFixes; handleFmt consumes it)
+- src/bootstrap/doctor.ts (repairDuplicateIds + reassignId)
+- src/cli/verbs/vault.ts (--fix routing + vaultDoctorFix)
+- src/cli/usage.ts (document --fix on doctor and vault doctor)
+- tests/cli-doctor-fix.test.ts (new)
+- .ralph/items.json (SLICE-0122 passes false->true)
+- .ralph/progress.md (this entry)
+
+Verification (all green at this commit, gate = bun run test):
+- bun run build: ok (cli.js 0.33 MB, 100 modules)
+- bunx tsc --noEmit: clean (exit 0)
+- bun run test: 428 pass, 0 fail, 1378 expect() calls, 58 files
+
+Next-iteration notes: SLICE-0123 (doctor --setup honest about non-Pi subagent capture
+reach, no blockers) is the next lowest unfinished item — pre-answered as 'unverified',
+do NOT run Codex/Claude. SLICE-0124 is also unblocked. SLICE-0125 (blocked by 0120,
+now satisfied) and SLICE-0126 (blocked by 0121, now satisfied) are also ready, but pick
+the lowest-numbered false item.

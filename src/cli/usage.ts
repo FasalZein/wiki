@@ -204,10 +204,13 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
     example: "wiki schema slice",
   },
   doctor: {
-    summary: "Check vault health (docs-structure and repo-binding drift). --setup checks distribution health (binary freshness, skill-bundle presence, hook install state).",
-    usage: "wiki doctor [--setup]",
-    flags: { "--setup": "check distribution health instead of vault drift (binary freshness, skill bundle, hook wiring)" },
-    example: "wiki doctor --setup",
+    summary: "Check vault health (docs-structure and repo-binding drift). --fix repairs duplicate ids and the mechanical drift fmt --write fixes. --setup checks distribution health (binary freshness, skill-bundle presence, hook install state).",
+    usage: "wiki doctor [--fix] [--setup]",
+    flags: {
+      "--fix": "repair duplicate ids (renumber in the section id-space) and apply the mechanical fmt fixes",
+      "--setup": "check distribution health instead of vault drift (binary freshness, skill bundle, hook wiring)",
+    },
+    example: "wiki doctor --fix",
   },
   fmt: {
     summary: "Format vault artifacts. Default mode is check: report format drift and exit 1 if any; --write applies the mechanical fixes idempotently (dates, frontmatter order, legacy-id renumber, and renaming files to <ID>-<slug>.md when id/slug drift from the filename — id preserved so links survive).",
@@ -239,10 +242,13 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
         example: "wiki vault init ~/Knowledge",
       },
       doctor: {
-        summary: "Report docs-structure and repo-binding drift. --setup reports distribution health (binary freshness, skill-bundle presence, hook install state).",
-        usage: "wiki vault doctor [--setup]",
-        flags: { "--setup": "check distribution health instead of vault drift" },
-        example: "wiki vault doctor --setup",
+        summary: "Report docs-structure and repo-binding drift. --fix repairs duplicate ids and mechanical drift. --setup reports distribution health (binary freshness, skill-bundle presence, hook install state).",
+        usage: "wiki vault doctor [--fix] [--setup]",
+        flags: {
+          "--fix": "repair duplicate ids and apply the mechanical fmt fixes",
+          "--setup": "check distribution health instead of vault drift",
+        },
+        example: "wiki vault doctor --fix",
       },
     },
   },

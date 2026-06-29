@@ -49,50 +49,11 @@ export async function handleFmt(args: string[]): Promise<CliResult> {
   await assertProjectStructure(projPath, structure);
 
   const write = booleanValue(parsed.values, "write");
-  let total = 0;
-
-  // Renumbering runs before the per-file pipeline: it renames files and
-  // rewrites cross-references vault-wide, so the pipeline below sees the
-  // post-rename world.
-  const renumber = await renumberLegacyIds(vaultRoot, projPath, write, structure);
-  total += renumber.labels.length;
-  for (const label of renumber.labels) {
+  const result = await applyFmtFixes(vaultRoot, projPath, write, structure);
+  for (const label of result.labels) {
     console.log(write ? `fixed ${label}` : label);
   }
-  const manual: string[] = [...renumber.collisions];
-
-  // Rename mismatched files to ${id}-${slug}.md after renumbering, so it sees
-  // the post-renumber names. The id is preserved, so [[id]] links survive.
-  const renamed = await renameToId(vaultRoot, projPath, write, structure);
-  total += renamed.labels.length;
-  for (const label of renamed.labels) {
-    console.log(write ? `fixed ${label}` : label);
-  }
-  manual.push(...renamed.collisions);
-
-  for (const filePath of await markdownFiles(projPath)) {
-    const raw = await readFile(filePath, "utf8");
-    const file = relative(vaultRoot, filePath);
-    let content = raw;
-    const labels: string[] = [];
-    for (const category of CATEGORIES) {
-      const result = await category(content, file, structure);
-      labels.push(...result.labels);
-      content = result.fixed;
-    }
-    for (const diagnostic of DIAGNOSTICS) {
-      manual.push(...(await diagnostic(content, file, structure)));
-    }
-    if (labels.length === 0) continue;
-    total += labels.length;
-
-    for (const label of labels) {
-      console.log(write ? `fixed ${label}` : label);
-    }
-    if (write) {
-      await writeBack(filePath, content);
-    }
-  }
+  const { total, manual, renumberMap } = result;
 
   if (total === 0 && manual.length === 0) {
     console.log("clean");
@@ -100,9 +61,9 @@ export async function handleFmt(args: string[]): Promise<CliResult> {
   }
   if (write) {
     if (total > 0) console.log(`fixed ${total} violation(s)`);
-    if (renumber.map.size > 0) {
+    if (renumberMap.size > 0) {
       console.log("renumbered:");
-      for (const [oldId, newId] of renumber.map) {
+      for (const [oldId, newId] of renumberMap) {
         console.log(`  ${oldId} -> ${newId}`);
       }
       console.log(`run wiki sync --project ${project} to re-embed — search still references the old ids`);
@@ -120,6 +81,68 @@ export async function handleFmt(args: string[]): Promise<CliResult> {
   }
   console.log(`${total + manual.length} finding(s) — run wiki fmt --write --project ${project} to fix the mechanical ones`);
   return { code: 1 };
+}
+
+/** What {@link applyFmtFixes} resolved: the ordered fix labels (renumber, rename,
+ *  then per-file categories), the count of applied/applicable fixes, the
+ *  manual-attention findings (collisions + flag-only diagnostics), and the
+ *  legacy-id renumber map. */
+export type FmtFixResult = {
+  labels: string[];
+  total: number;
+  manual: string[];
+  renumberMap: Map<string, string>;
+};
+
+/**
+ * The formatter's whole fix pipeline for one project, decoupled from CLI output
+ * so both `wiki fmt` and `wiki doctor --fix` drive the same mechanical fixes
+ * (SLICE-0122): legacy-id renumber (with vault-wide reference rewrite) -> rename
+ * to id-slug -> the per-file category pipeline. With `write` false it reports
+ * only; with `write` true it persists. Renumbering runs first so the rest of the
+ * pipeline sees the post-rename world.
+ */
+export async function applyFmtFixes(
+  vaultRoot: string,
+  projPath: string,
+  write: boolean,
+  structure: Structure,
+): Promise<FmtFixResult> {
+  const labels: string[] = [];
+  let total = 0;
+
+  const renumber = await renumberLegacyIds(vaultRoot, projPath, write, structure);
+  total += renumber.labels.length;
+  labels.push(...renumber.labels);
+  const manual: string[] = [...renumber.collisions];
+
+  const renamed = await renameToId(vaultRoot, projPath, write, structure);
+  total += renamed.labels.length;
+  labels.push(...renamed.labels);
+  manual.push(...renamed.collisions);
+
+  for (const filePath of await markdownFiles(projPath)) {
+    const raw = await readFile(filePath, "utf8");
+    const file = relative(vaultRoot, filePath);
+    let content = raw;
+    const fileLabels: string[] = [];
+    for (const category of CATEGORIES) {
+      const result = await category(content, file, structure);
+      fileLabels.push(...result.labels);
+      content = result.fixed;
+    }
+    for (const diagnostic of DIAGNOSTICS) {
+      manual.push(...(await diagnostic(content, file, structure)));
+    }
+    if (fileLabels.length === 0) continue;
+    total += fileLabels.length;
+    labels.push(...fileLabels);
+    if (write) {
+      await writeBack(filePath, content);
+    }
+  }
+
+  return { labels, total, manual, renumberMap: renumber.map };
 }
 
 /**

@@ -63,7 +63,7 @@
         "Tests cover the link-rewriting path, not just the renumber; use a TEMP vault.",
         "Run all three gates green and commit."
       ],
-      "passes": false,
+      "passes": true,
       "regression_notes": ""
     },
     {
