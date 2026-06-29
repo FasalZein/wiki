@@ -73,9 +73,6 @@ or `~/.config/wiki/config.toml`:
 ```toml
 [vault]
 root = "/Users/you/Knowledge"
-
-[research]
-sources = ["~/.claude/artifacts/research"]   # optional extra search sources
 ```
 
 **3. Create a project and bind your code repo to it.** Linking stamps a

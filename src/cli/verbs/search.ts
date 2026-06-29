@@ -31,7 +31,7 @@ import type { CliResult } from "../dispatch";
 const TYPE_FILTER_FETCH = 50;
 
 export async function handleSearch(args: string[]): Promise<CliResult> {
-  const parsed = parseCommand(args, ["project", "type", "since"], [], ["include-research", "explain", "no-refresh", "recent"]);
+  const parsed = parseCommand(args, ["project", "type", "since"], [], ["explain", "no-refresh", "recent"]);
   const query = parsed.positionals[0]?.trim();
   if (query === undefined || query.length === 0) {
     console.error("missing required field: query");
@@ -95,7 +95,7 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
 
   try {
     // Load every targeted project's config first so we can resolve a single qmd
-    // binary (and research path) before touching any collection. A vault-wide
+    // binary before touching any collection. A vault-wide
     // query registers/updates/queries all collections in one pass, so they must
     // share one binary — otherwise we'd register with one qmd and query with
     // another. An explicit QMD_COMMAND pins it; otherwise every targeted project
@@ -141,19 +141,6 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
       collections.push(proj);
       collectionBases.set(proj, projectPath(vaultRoot, proj));
     }
-    if (booleanValue(parsed.values, "include-research")) {
-      const researchPath = uniformConfigValue(configs.map(([proj, c]) => [proj, c.research_path] as const));
-      if (researchPath === null) {
-        console.error(divergenceMessage("research_path", configs.map(([proj, c]) => [proj, c.research_path] as const), "align research_path across projects"));
-        return { code: 10 };
-      }
-      if (registered.has("research")) {
-        collections.push("research");
-        collectionBases.set("research", researchPath);
-      } else {
-        console.error("skipping research: never synced — run: wiki sync");
-      }
-    }
 
     if (collections.length === 0) {
       console.error("no synced collections to search — run: wiki sync");
@@ -192,7 +179,7 @@ function parseSearchType(value: string | undefined, allowedTypes: readonly Templ
 
 /**
  * Return the shared value when every project agrees (or there is only one), else
- * null to signal divergence. Used to enforce a single qmd binary / research path
+ * null to signal divergence. Used to enforce a single qmd binary
  * across a vault-wide search.
  */
 function uniformConfigValue(pairs: ReadonlyArray<readonly [string, string]>): string | null {

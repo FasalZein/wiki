@@ -3,12 +3,11 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 import { type Structure } from "../artifacts/registry";
-import { expandHome, isFileNotFound } from "../util";
+import { isFileNotFound } from "../util";
 
 export type ProjectConfig = {
   repo: string;
   qmd_command: string;
-  research_path: string;
   dedup_threshold_weak: number;
   dedup_threshold_strong: number;
   /** Opt-in strict mode: when true, a strong dedup match blocks create unless an override flag is passed.
@@ -66,7 +65,6 @@ export async function loadProjectConfig(projectPath: string): Promise<ProjectCon
   return {
     repo: isNonEmptyString(data.repo) ? data.repo : projectPath,
     qmd_command: isNonEmptyString(data.qmd_command) ? data.qmd_command : "qmd",
-    research_path: expandHome(isNonEmptyString(data.research_path) ? data.research_path : "~/.pi/artifacts/research"),
     dedup_threshold_weak: numberValue(data.dedup_threshold_weak, 0.7),
     dedup_threshold_strong: numberValue(data.dedup_threshold_strong, 0.85),
     dedup_strong_blocks: typeof data.dedup_strong_blocks === "boolean" ? data.dedup_strong_blocks : false,

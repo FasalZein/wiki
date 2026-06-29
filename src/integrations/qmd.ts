@@ -4,8 +4,6 @@
  *
  * QMD command resolution is owned by the caller: QMD_COMMAND env, then
  * _project.md qmd_command, then default `qmd`.
- * Research path resolution is owned by project config: _project.md research_path,
- * then default `~/.pi/artifacts/research` with ~ expansion.
  *
  * Collection existence parses exact names out of `qmd collection list` output.
  * This depends on that human-readable output shape ("name (qmd://name/)").

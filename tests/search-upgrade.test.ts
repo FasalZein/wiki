@@ -114,7 +114,6 @@ afterEach(async () => {
 type SearchFixture = {
   vaultRoot: string;
   projectPath: string;
-  researchPath: string;
   stateFile: string;
   resultsFile: string;
   env: Record<string, string>;
@@ -151,11 +150,9 @@ async function createSearchFixture(project: string): Promise<SearchFixture> {
   await mkdir(join(projectPath, "adrs"));
   await mkdir(join(projectPath, "handoffs"));
   await mkdir(join(projectPath, "docs"));
-  const researchPath = join(root, "research");
-  await mkdir(researchPath);
   await writeFile(
     join(projectPath, "_project.md"),
-    `---\nrepo: /tmp/repo\ntest_command: bun test\nresearch_path: ${researchPath}\n---\n`,
+    `---\nrepo: /tmp/repo\ntest_command: bun test\n---\n`,
   );
 
   const stateFile = join(root, "qmd-state.log");
@@ -199,7 +196,6 @@ esac
   return {
     vaultRoot,
     projectPath,
-    researchPath,
     stateFile,
     resultsFile,
     env: {
@@ -276,7 +272,7 @@ describe("CLI --no-refresh flag", () => {
     await mkdir(join(otherPath, "docs"));
     await writeFile(
       join(otherPath, "_project.md"),
-      `---\nrepo: /tmp/repo\ntest_command: bun test\nresearch_path: ${fixture.researchPath}\n---\n`,
+      `---\nrepo: /tmp/repo\ntest_command: bun test\n---\n`,
     );
 
     const result = await runWiki(["search", "list all specs", "--project", "unsynced-proj"], fixture);

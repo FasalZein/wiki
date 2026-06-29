@@ -103,13 +103,12 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
   },
   search: {
     summary: "Search artifacts by keyword. Vault-wide with no --project.",
-    usage: "wiki search <query> [--project <name>] [--type <type>] [--recent] [--since <date>] [--include-research] [--explain] [--no-refresh] [--json]",
+    usage: "wiki search <query> [--project <name>] [--type <type>] [--recent] [--since <date>] [--explain] [--no-refresh] [--json]",
     flags: {
       "--project": "narrow to one project (optional; default: all projects)",
       "--type": "filter by artifact type",
       "--recent": "order by last-modified (newest first) instead of relevance; a temporal query (e.g. 'what changed recently') triggers this too",
       "--since": "only artifacts modified at/after this date (e.g. 2026-06-01); implies --recent ordering",
-      "--include-research": "include research collection",
       "--explain": "include qmd's match explanation",
       "--no-refresh": "accepted for back-compat; search is read-only and never refreshes (no-op)",
       "--json": "emit a JSON array of {id,kind,title,path,score,snippet} hits ([] when empty)",
@@ -221,10 +220,9 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
   },
   sync: {
     summary: "Re-index a project into the QMD search collections.",
-    usage: "wiki sync [--project <name>] [--include-research] [--pull] [--force-embed]",
+    usage: "wiki sync [--project <name>] [--pull] [--force-embed]",
     flags: {
       "--project": "project name (required if the repo isn't linked)",
-      "--include-research": "also sync the research collection",
       "--pull": "pull remote changes before indexing",
       "--force-embed": "re-embed all documents",
     },
