@@ -30,10 +30,11 @@ export async function handleSync(args: string[]): Promise<CliResult> {
     throw error;
   }
 
-  // Gate: don't embed a project whose docs/ violates the locked-category invariant
-  // (ADR-0028). sync is the natural chokepoint — catch rogue folders / loose docs here
-  // before they get indexed, and point the user at the fix. Same check `wiki doctor` runs.
-  const docsIssues = await checkProjectDocsStructure(vaultRoot, project);
+  // Gate: don't embed a project whose folders violate the config structure tree
+  // (ADR-0028's no-loose-files invariant, now config-declared per PRD-0019). sync is the
+  // natural chokepoint — catch rogue folders / loose docs here before they get indexed,
+  // and point the user at the fix. Same check `wiki doctor` runs.
+  const docsIssues = await checkProjectDocsStructure(vaultRoot, project, structure);
   if (docsIssues.length > 0) {
     for (const issue of docsIssues) console.error(issue.message);
     console.error(`refusing to sync: fix the ${docsIssues.length} docs-structure issue(s) above, then retry.`);

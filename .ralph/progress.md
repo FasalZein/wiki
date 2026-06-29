@@ -322,3 +322,76 @@ Lowest-numbered next is SLICE-0113: reframe doctor's structural check in
 src/bootstrap/doctor.ts to validate folders against the config tree (declared
 section/bucket; no loose files in a branch section) instead of the hardcoded
 DOC_CATEGORIES lock, READ-only (do not delete DOC_CATEGORIES — that is 0117).
+
+## SLICE-0113 DOCTOR STRUCTURE-ONLY (PASS)
+
+Selected as the lowest-numbered unfinished item; its only blocker SLICE-0110 is
+passes:true.
+
+Decision rationale: reframe doctor's structural validation to read the per-vault
+config tree (PRD-0019) instead of the hardcoded DOC_CATEGORIES lock. The same
+invariant (ADR-0028's no-loose-files) is now expressed through the section/bucket
+tree: a branch section's folder may hold only its config-declared bucket subfolders
+and no loose files. This slice only READS the tree; the dead DOC_CATEGORIES
+machinery stays importable (its deletion is SLICE-0117).
+
+Implementation:
+- src/bootstrap/doctor.ts: checkProjectDocsStructure now takes the loaded Structure
+  and iterates every BRANCH section (tree === "branch"). For each, it derives the
+  allowed bucket subfolder names from section.buckets (folder minus the section
+  prefix) and flags (a) any subdirectory that is not a declared bucket and (b) any
+  loose .md file sitting directly in the branch folder. Leaf sections hold artifacts
+  directly and are not policed for loose files. The check validates structural truth
+  only and emits no fuzzy "wrong bucket" warning — a declared-but-debatable bucket
+  choice is never flagged. Dropped the DOC_CATEGORIES import from doctor.ts (it is no
+  longer read here); registry.ts still exports it for the not-yet-migrated consumers.
+  runDoctor already had `structure` in scope and now threads it in.
+- src/cli/verbs/sync.ts: the sync gate caller passes the already-loaded `structure`
+  into checkProjectDocsStructure; updated the gate comment to reflect the
+  config-declared invariant.
+
+Behavior under the default tree is unchanged in substance: `doc` is the one branch
+section (folder docs/) with the six default buckets, so a rogue docs/ subfolder or a
+loose doc is still flagged — only the message wording changed from "not a locked
+category" to "is not a declared bucket of section '<name>'".
+
+Conservative assumptions recorded:
+- Only BRANCH sections are policed for undeclared subfolders / loose files. Leaf
+  sections (prds, slices, adrs, handoffs under the default tree) hold their artifacts
+  directly, exactly as before, so they are intentionally not checked here. This
+  preserves today's behavior (the old check only looked at docs/) and is reversible.
+- Allowed bucket subfolder name is computed as bucket.folder.slice(section.folder.length + 1),
+  relying on the registry's one-level "<section-folder>/<bucket>" convention from
+  SLICE-0110; correct for every one-level tree the loader can produce.
+
+Tests:
+- tests/doctor-structure-tree.test.ts (new — 5 cases): an undeclared folder in a
+  branch section is flagged; a loose file directly under a branch section is flagged;
+  a valid-but-debatable bucket choice is NOT flagged (no fuzzy warning); a leaf
+  section holding artifacts directly is not policed; and a CUSTOM wiki.json tree is
+  validated against its own declared buckets, not the default categories (a default
+  doc bucket name under a custom section is correctly flagged as undeclared there).
+- tests/cli-sync.test.ts: updated the one pinned assertion from "not a locked
+  category" to "is not a declared bucket" to match the new (config-driven) message;
+  the sync-refuses-on-rogue-folder contract is otherwise unchanged. No test deleted
+  or weakened.
+
+Files changed:
+- src/bootstrap/doctor.ts (config-tree validation; drop DOC_CATEGORIES import)
+- src/cli/verbs/sync.ts (thread structure into the gate; comment)
+- tests/doctor-structure-tree.test.ts (new)
+- tests/cli-sync.test.ts (pinned message assertion updated to new contract)
+- .ralph/items.json (SLICE-0113 passes false->true)
+- .ralph/progress.md (this entry)
+
+Verification (all green at this commit):
+- bun run build: ok (cli.js 0.32 MB, bundled 99 modules)
+- bunx tsc --noEmit: clean
+- bun run test: 400 pass, 0 fail, 1281 expect() calls, 51 files
+
+Next-iteration notes: SLICE-0114 (generic parent backlink) is now unblocked
+(blockers 0110 + 0112 both pass), as is SLICE-0115 (0111 + 0112). Lowest-numbered
+next is SLICE-0114: replace the hardcoded PRD<->slice backlink in
+src/cli/verbs/create.ts (both the pre-flight parent read and backlinkParentPrd write)
+with a config-declared parent + child_list relationship, with no-double-add and
+create-if-absent.

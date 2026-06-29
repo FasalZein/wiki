@@ -4,7 +4,7 @@ import matter from "gray-matter";
 
 import { buildIdIndex } from "../artifacts/id-index";
 import { bareIdOf, collectReferences, isLocalIdRef } from "../artifacts/references";
-import { DOC_CATEGORIES, loadStructure, type Structure } from "../artifacts/registry";
+import { loadStructure, type Structure } from "../artifacts/registry";
 import { BLOCK_VERSION } from "../cli/repo-link";
 import { exists } from "../util";
 
@@ -27,7 +27,9 @@ export type DoctorResult = {
 /**
  * Vault content checks (Obsidian is a viewer now, so there's no plugin/config/template
  * drift to police — just the vault's own invariants):
- *  - docs-structure: docs/ holds only the locked category subfolders (ADR-0028).
+ *  - docs-structure: every branch-section folder holds only its config-declared
+ *    bucket subfolders and no loose files (the no-loose-files invariant of ADR-0028,
+ *    now expressed through the per-vault config tree, PRD-0019).
  *  - repo-binding: every linked repo carries a current-version wiki block (and no
  *    contract-drift artifacts like a local CONTEXT.md / docs/adr/).
  */
@@ -35,7 +37,7 @@ export async function runDoctor(vaultPath: string): Promise<DoctorResult> {
   const issues: DriftIssue[] = [];
   const structure = await loadStructure(vaultPath);
   for (const project of await listVaultProjects(vaultPath)) {
-    issues.push(...(await checkProjectDocsStructure(vaultPath, project)));
+    issues.push(...(await checkProjectDocsStructure(vaultPath, project, structure)));
     issues.push(...(await checkProjectRepoBindings(vaultPath, project)));
     issues.push(...(await checkProjectIdDrift(vaultPath, project, structure)));
   }
@@ -93,29 +95,41 @@ export async function listVaultProjects(vaultPath: string): Promise<string[]> {
 }
 
 /**
- * Docs-structure invariant (ADR-0028) for one project: docs/ may contain only the locked
- * category subfolders, and every doc must live inside one (no loose files directly under
- * docs/). Returns the violations as DriftIssues. Reused by `wiki doctor` (audit) and
- * `wiki sync` (gate before re-embedding) so the rule has one implementation.
+ * Structure invariant for one project, read from the per-vault config tree (PRD-0019):
+ * every branch section's folder may contain only its config-declared bucket subfolders,
+ * and no loose files directly inside it (every artifact lives in a bucket — the
+ * no-loose-files invariant of ADR-0028, now config-declared rather than a hardcoded
+ * category lock). Leaf sections hold artifacts directly and are not policed here.
+ * This validates structural truth only: it never emits a fuzzy "wrong bucket" warning,
+ * since bucket fitness is the authoring agent's judgment. Reused by `wiki doctor`
+ * (audit) and `wiki sync` (gate before re-embedding) so the rule has one implementation.
  */
-export async function checkProjectDocsStructure(vaultPath: string, project: string): Promise<DriftIssue[]> {
+export async function checkProjectDocsStructure(
+  vaultPath: string,
+  project: string,
+  structure: Structure,
+): Promise<DriftIssue[]> {
   const issues: DriftIssue[] = [];
-  const locked = new Set<string>(DOC_CATEGORIES);
-  const docsDir = join(vaultPath, "projects", project, "docs");
-  if (!(await exists(docsDir))) return issues;
-  for (const entry of await readdir(docsDir, { withFileTypes: true })) {
-    if (entry.isDirectory()) {
-      if (!locked.has(entry.name)) {
+  const projectDir = join(vaultPath, "projects", project);
+  for (const section of structure.sections) {
+    if (section.tree !== "branch") continue;
+    const allowed = new Set(section.buckets.map((b) => b.folder.slice(section.folder.length + 1)));
+    const sectionDir = join(projectDir, section.folder);
+    if (!(await exists(sectionDir))) continue;
+    for (const entry of await readdir(sectionDir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        if (!allowed.has(entry.name)) {
+          issues.push({
+            type: "docs-structure",
+            message: `${project}: ${section.folder}/${entry.name}/ is not a declared bucket of section '${section.name}' — declare it in wiki.json or move its contents into a bucket. Buckets: ${[...allowed].join(", ")}.`,
+          });
+        }
+      } else if (entry.name.endsWith(".md")) {
         issues.push({
           type: "docs-structure",
-          message: `${project}: docs/${entry.name}/ is not a locked category — docs must live in one of: ${DOC_CATEGORIES.join(", ")}. Move its docs with 'wiki doc recategorize' or remove the folder.`,
+          message: `${project}: ${section.folder}/${entry.name} sits directly under ${section.folder}/ — a branch section holds no loose files; every artifact belongs in a bucket. Recreate via 'wiki create <bucket>' or move it into a bucket.`,
         });
       }
-    } else if (entry.name.endsWith(".md")) {
-      issues.push({
-        type: "docs-structure",
-        message: `${project}: docs/${entry.name} sits directly under docs/ — docs belong inside a locked category folder, not loose. Recreate via 'wiki create doc' or move it into a category.`,
-      });
     }
   }
   return issues;

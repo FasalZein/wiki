@@ -83,7 +83,7 @@
         "Keep the old DOC_CATEGORIES machinery importable for now (do not delete here); only change doctor's validation logic.",
         "Add tests: an undeclared folder is flagged; a loose file in a branch section is flagged; a valid-but-debatable bucket choice is NOT flagged. Run all gates green and commit."
       ],
-      "passes": false,
+      "passes": true,
       "regression_notes": ""
     },
     {
