@@ -9,9 +9,11 @@ import { type Structure } from "./registry";
 export async function nextId(type: TemplateType, vaultRoot: string, project: string, structure: Structure): Promise<string> {
   const prefix = structure.specFor(type).prefix;
   const directory = artifactDirectory(type, vaultRoot, project, structure);
-  // Docs may be organized into category subfolders; ids stay globally unique
-  // per project, so scan recursively for that type. Other types stay flat.
-  const entries = type === "doc" ? await readMarkdownNamesRecursive(directory) : await readdir(directory);
+  // SLICE-0111: id allocation keys on the SECTION, not the kind. A section folder
+  // may hold bucket subfolders (a branch section) whose artifacts all share the
+  // section prefix and id-space, so scan the section folder recursively for every
+  // type. A leaf section has no subfolders, so a recursive scan equals a flat read.
+  const entries = await readMarkdownNamesRecursive(directory);
 
   const prefixPattern = new RegExp(`^${prefix}-(\\d{3,})(?:-.+)?\\.md$`);
   const adrPattern = /^(\d{3,})-.+\.md$/;

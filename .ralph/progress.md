@@ -180,3 +180,62 @@ It should generalize src/artifacts/id.ts nextId() and the id-index builder to ke
 on the SECTION (so buckets under one branch share one increasing id-space keyed
 on the section prefix) while keeping the default tree's single-bucket kinds on
 their current sequences. The section model it needs is now on Structure.sections.
+
+## SLICE-0111 PER-SECTION ID ALLOCATION (PASS)
+
+Selected as the lowest-numbered unfinished item; its only blocker SLICE-0110 is
+passes:true.
+
+Decision rationale: move id allocation from per-kind to per-section so all
+buckets under one branch section draw from a single increasing id-space keyed on
+the section's prefix. This is the mechanism a later intra-section move needs to
+preserve identity. Under the bundled default tree it preserves today's per-kind
+sequences exactly.
+
+Implementation (src/artifacts/id.ts only):
+- nextId() already keys on structure.specFor(type).prefix (the section prefix)
+  and scans the section folder returned by artifactDirectory(type). The ONLY
+  per-kind special case was the filename scan: docs scanned recursively (to cover
+  category subfolders sharing the DOC id-space) while every other type did a flat
+  readdir. Generalized that single branch — the filename scan is now always
+  recursive over the section folder. A branch section's bucket subfolders are
+  therefore all covered by one scan keyed on the section prefix; a leaf section
+  has no subfolders so a recursive scan equals the old flat read (byte-identical
+  result for prd/slice/adr/handoff).
+- The frontmatter id-index path (highestFrontmatterId -> buildIdIndex) already
+  keys on the section: buildIdIndex walks every project folder and nextId filters
+  its keys by the section prefix regex, so a branch section's buckets already
+  shared one frontmatter id-space. No change needed in id-index.ts.
+
+Conservative assumption recorded: making the non-doc scan recursive also makes a
+missing section directory return empty instead of throwing (readMarkdownNamesRecursive
+swallows ENOENT). This is strictly safer for allocation (start at 0001 instead of
+crashing) and reversible; no existing test depended on the throw.
+
+Tests (tests/section-id-allocation.test.ts, new — 4 cases): on a custom branch
+section `feature` (prefix FEAT) with buckets alpha/beta filing into separate
+subfolders, allocation sees across buckets and returns FEAT-0003 (one shared
+counter, not two per-bucket counters); an empty multi-bucket section starts at
+0001; default-tree leaf kinds keep their flat per-kind sequence (PRD-0003,
+SLICE-0001); the default doc branch stays globally unique across its category
+buckets (DOC-0010). No existing test was weakened; the pre-existing
+id-generation.test.ts doc-recursive case and structure-loader nextId tracers still
+pass unchanged.
+
+Files changed:
+- src/artifacts/id.ts (always-recursive section scan; comment update)
+- tests/section-id-allocation.test.ts (new)
+- .ralph/items.json (SLICE-0111 passes false->true)
+- .ralph/progress.md (this entry)
+
+Verification (all green at this commit):
+- bun run build: ok (cli.js 0.32 MB, bundled 99 modules)
+- bunx tsc --noEmit: clean
+- bun run test: 390 pass, 0 fail, 1260 expect() calls, 49 files
+
+Next-iteration notes: SLICE-0112 (create by bucket/leaf name) is now unblocked
+(blockers 0110 + 0111 both pass). It should make `wiki create <name>` resolve a
+bucket/leaf name to its section (prefix + id-space) and template, file into the
+bucket folder with a section-prefixed id, error on unknown name, and migrate
+src/cli/verbs/create.ts + src/artifacts/store.ts off DocCategory/isDocCategory so
+no dangling doc-category type remains for the SLICE-0117 deletion.

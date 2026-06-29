@@ -59,7 +59,7 @@
         "Add a test on a custom multi-bucket tree: creating into two buckets of one section yields sequential ids sharing the section prefix (one counter, not two).",
         "Add a default-tree regression test: existing kinds keep their current id sequence. Run all gates green and commit."
       ],
-      "passes": false,
+      "passes": true,
       "regression_notes": ""
     },
     {
