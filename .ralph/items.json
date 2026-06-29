@@ -1,0 +1,149 @@
+{
+  "version": 1,
+  "runtime_contract": {
+    "source_docs": [],
+    "verification_gates": [
+      { "name": "build", "command": "bun run build" },
+      { "name": "typecheck", "command": "bunx tsc --noEmit" },
+      { "name": "test", "command": "bun run test" }
+    ],
+    "require_progress_append": true,
+    "require_one_item_per_iteration": true,
+    "require_commit": true
+  },
+  "items": [
+    {
+      "category": "functional",
+      "description": "SLICE-0108 SPIKE (PRD-0018, blockers: none). Resolve one unknown the read-only search contract depends on: when a qmd collection has been registered (qmd collection add) but never embedded, does `qmd query` against it ERROR or quietly return empty? The answer decides whether the read-only search slice's membership branch must treat present-but-unembedded as a warn-and-skip case, or only entirely-absent collections. This item ships a characterization test (not feature code) that reproduces both states against the existing qmd mock/integration surface in tests/, plus a recorded finding. Real qmd binary may be absent: if so, use the existing qmd mock/fake in the test suite (see tests/qmd-collections.test.ts and the qmd command indirection in src/integrations/qmd.ts) as the safe local substitute and characterize the mock's contract, noting in progress what remains unverified against a real binary.",
+      "steps": [
+        "Inspect src/integrations/qmd.ts (updateCollection/refreshCollections/embedCollection/query) and tests/qmd-collections.test.ts to find the existing qmd command indirection and how tests stub it.",
+        "Add a characterization test in tests/qmd-collections.test.ts (or a sibling test file) that drives a query against a collection that was added but never embedded, asserting the observed behavior (error vs empty result) of the qmd surface as the suite can exercise it.",
+        "Record the finding explicitly in the SLICE-0108 file's ## Evidence section in the vault is NOT required at runtime; instead record it in .ralph/progress.md AND as a comment atop the new test, so the SLICE-0109 iteration can read it from git history.",
+        "Run all verification gates green (bun run build, bunx tsc --noEmit, bun run test) and commit; the new passing characterization test is this item's verification signal."
+      ],
+      "passes": true,
+      "regression_notes": ""
+    },
+    {
+      "category": "functional",
+      "description": "SLICE-0109 READ-ONLY SEARCH (PRD-0018, blockers: SLICE-0108). Make `wiki search` a pure read against whatever `wiki sync` last produced. In src/cli/verbs/search.ts remove the per-collection `qmd update` refresh from the search read path (today search calls refreshCollections(qmdCommand, collections) before querying). Collapse the N per-project ensureCollection membership probes into ONE `qmd collection list` call up front, and use that single returned set for three things: which collections to query, the add-only-missing decision, and a never-synced detector (an absent collection has never been synced -> warn to stderr suggesting `wiki sync --project <name>` and SKIP it, never a silent empty, never silent auto-register of an unembedded collection). Honor the SLICE-0108 finding: if query errors on a present-but-unembedded collection, treat that as warn-and-skip too. Reconcile the shared refreshCollections seam (src/integrations/qmd.ts, also called by src/artifacts/dedup.ts): dedup runs at create time and KEEPS its refresh; search DROPS it; assert the split by test, not by side effect. Reconcile the `--no-refresh` flag with the new default. Update the wiki skill doc to drop the 'search updates the keyword index' promise. Land atomically in one commit so the silent-empty footgun never ships between commits.",
+      "steps": [
+        "Read src/cli/verbs/search.ts, src/integrations/qmd.ts (refreshCollections/updateCollection/ensureCollection), src/artifacts/dedup.ts, and tests/search-upgrade.test.ts to map the current refresh + membership flow.",
+        "Remove the per-query qmd update from search; replace the N membership probes with one `qmd collection list`; query only listed collections; warn-and-skip never-synced (and per the spike, present-but-unembedded) collections to stderr.",
+        "Keep dedup's create-time refresh intact; reconcile the --no-refresh flag with the new read-only default; update the wiki skill doc text.",
+        "Update the two pinned tests/search-upgrade.test.ts cases that assert refresh-on-search ('auto-refresh runs by default' and '--no-refresh skips updateCollection call') to the new contract; do not silently delete tests. Add a test asserting exactly one `qmd collection list` regardless of project count and zero qmd update/embed during search.",
+        "Run all verification gates green and commit."
+      ],
+      "passes": false,
+      "regression_notes": ""
+    },
+    {
+      "category": "functional",
+      "description": "SLICE-0110 STRUCTURE TREE SKELETON (PRD-0019, blockers: none). Extend the per-vault method-based `Structure` (PRD-0021: buildStructure precomputes reverse maps; methods specFor/typeForId/kindForSkill/artifactTypeForVaultPath in src/artifacts/registry.ts) from a flat kind map into a one-level section/bucket tree. A section is a top-level folder owning an id prefix and id-space, declared as a BRANCH (holds buckets, no artifacts directly) XOR a LEAF (one template, holds artifacts). A bucket is a leaf inside a branch section, owning a template and a `criteria` string and sharing its section's prefix. The reverse-map precompute generalizes from per-kind to per-section/bucket. The bundled DEFAULT tree reproduces today's five kinds and six doc categories EXACTLY so an unconfigured vault is byte-for-byte unaffected. Config load validates the tree (unique bucket names, branch-XOR-leaf invariant) and hard-errors on a malformed tree, writing nothing. Walking skeleton: the type and loader carry the tree end-to-end; create/doctor/relocation behavior changes land in later slices.",
+      "steps": [
+        "Read src/artifacts/registry.ts fully (Structure type, buildStructure, loadStructure, DEFAULT_STRUCTURE, DOC_CATEGORIES) to see exactly what a flat kind looks like today.",
+        "Introduce the section/bucket tree types and extend buildStructure to precompute per-section/bucket reverse maps; keep the existing Structure methods working.",
+        "Define the bundled default tree so a no-config vault produces byte-identical create/doctor/nextId behavior; the 5 kinds + 6 doc categories are modeled as ordinary sections (no privileged kinds).",
+        "Make config load validate the tree and hard-error (writing nothing) on a duplicate bucket name or a branch-and-leaf node, with a clear message.",
+        "Add tests: no-config falls back to default and existing paths are unchanged; a malformed tree fails at load. Run all gates green and commit."
+      ],
+      "passes": false,
+      "regression_notes": ""
+    },
+    {
+      "category": "functional",
+      "description": "SLICE-0111 PER-SECTION ID ALLOCATION (PRD-0019, blockers: SLICE-0110). Move id allocation from per-kind to per-section so all buckets under one branch section draw from a single shared increasing id-space keyed on the section's prefix. Today src/artifacts/id.ts nextId() keys on structure.specFor(type).prefix and scans the type's directory; doc already scans recursively across categories sharing the DOC id-space. Generalize so nextId and the id-index (src/artifacts/id-index.ts / buildIdIndex) key on the SECTION. This is the mechanism that makes a later intra-section move identity-preserving. Under the default tree this preserves today's per-kind sequences exactly.",
+      "steps": [
+        "Read src/artifacts/id.ts (nextId) and the id-index builder to see how allocation and the PREFIX_TO_TYPE/typeForId reverse maps key today.",
+        "Change allocation to key on the section so buckets in one section share one increasing id-space; keep the default tree's single-bucket kinds on their current sequences.",
+        "Add a test on a custom multi-bucket tree: creating into two buckets of one section yields sequential ids sharing the section prefix (one counter, not two).",
+        "Add a default-tree regression test: existing kinds keep their current id sequence. Run all gates green and commit."
+      ],
+      "passes": false,
+      "regression_notes": ""
+    },
+    {
+      "category": "functional",
+      "description": "SLICE-0112 CREATE BY BUCKET/LEAF NAME (PRD-0019, blockers: SLICE-0110, SLICE-0111). Make `wiki create <name>` resolve <name> to its section (for prefix + id-space) and the bucket's body template, where <name> is a bucket inside a branch section or a leaf section. Names are unique within a project config (validated at load in SLICE-0110). An unknown name errors clearly. The artifact lands in the bucket's folder with a section-prefixed id minted per-section. This subsumes today's --category flag and doc recategorize's category argument. CRITICAL for the later deletion: the create path in src/cli/verbs/create.ts and the type in src/artifacts/store.ts must migrate off the DocCategory/isDocCategory import to the section/bucket model, leaving no dangling doc-category type for SLICE-0117. The agent picks the bucket by reading its criteria; the tool only validates the bucket exists and applies its template (no fuzzy matching).",
+      "steps": [
+        "Read src/cli/verbs/create.ts and src/artifacts/store.ts (CreateInput.category: DocCategory, artifactPath usage) to map every place --category / DocCategory flows.",
+        "Resolve create by bucket/leaf name to section + template; mint a section-prefixed id; file into the bucket folder; error clearly on unknown name.",
+        "Migrate store.ts create path off DocCategory/isDocCategory to the section/bucket model so no dangling doc-category type remains for the deletion slice.",
+        "Add tests: create <bucket> files to the right folder with the right template and a section-prefixed id; unknown bucket errors; --category behavior is subsumed. Run all gates green and commit."
+      ],
+      "passes": false,
+      "regression_notes": ""
+    },
+    {
+      "category": "functional",
+      "description": "SLICE-0113 DOCTOR STRUCTURE-ONLY (PRD-0019, blockers: SLICE-0110). Reframe doctor's structural validation in src/bootstrap/doctor.ts to read the config tree instead of the hardcoded category lock: every folder must be a config-declared section or bucket, and a branch section must hold no loose files directly (preserving ADR-0028's no-loose-files invariant, now expressed as config). doctor validates structural truth only (folder declared, no loose files, ids unique, frontmatter matches the bucket template) and NEVER emits a fuzzy 'wrong bucket' warning, since bucket fitness is agent judgment. This slice only READS the tree; it does NOT delete the old DOC_CATEGORIES machinery (that deletion is SLICE-0117, after all consumers migrate).",
+      "steps": [
+        "Read src/bootstrap/doctor.ts to find the current locked-category folder check.",
+        "Reframe the check to validate folders against the config tree (declared section/bucket; no loose files in a branch section).",
+        "Keep the old DOC_CATEGORIES machinery importable for now (do not delete here); only change doctor's validation logic.",
+        "Add tests: an undeclared folder is flagged; a loose file in a branch section is flagged; a valid-but-debatable bucket choice is NOT flagged. Run all gates green and commit."
+      ],
+      "passes": false,
+      "regression_notes": ""
+    },
+    {
+      "category": "functional",
+      "description": "SLICE-0114 GENERIC PARENT BACKLINK (PRD-0019, blockers: SLICE-0110, SLICE-0112). Replace the hardcoded PRD<->slice backlink with a config-declared relationship. A child section/bucket declares parent: <section-name>; the parent section declares which list field receives the child id via child_list: <field> (today's prd.slices). On create, resolve the child's parent, read the parent artifact, and append the new child id to that list field (no double-add, create-if-absent). This must replace BOTH hardcoded prd/slice specials in src/cli/verbs/create.ts: the pre-flight parent read AND the backlinkParentPrd write. After this the PRD<->slice link is pure config: slice declares parent: prds, prds declares child_list: slices, with no kind name hardcoded in create.",
+      "steps": [
+        "Read src/cli/verbs/create.ts to find both prd/slice specials: the pre-flight parent read and backlinkParentPrd (the only place the slices backlink is written).",
+        "Add parent + child_list config fields and a generic resolve-parent/append-child-id flow with no-double-add and create-if-absent.",
+        "Replace both hardcoded specials with the generic path; keep the PRD<->slice link working purely from config.",
+        "Add tests: a child declaring parent gets its id appended to the parent's child_list on create; no double-add; create-if-absent. Run all gates green and commit."
+      ],
+      "passes": false,
+      "regression_notes": ""
+    },
+    {
+      "category": "functional",
+      "description": "SLICE-0115 RELOCATION PRESERVES IDENTITY (PRD-0019, blockers: SLICE-0111, SLICE-0112). Generalize relocateArtifact / doc recategorize (src/artifacts/store.ts, src/cli/verbs/doc.ts) into a section-agnostic 'move to bucket'. Same-section move keeps the artifact id (inbound [[id]] links stay resolvable) because the section owns the id-space. Cross-section move RE-MINTS the id (the settled rule; cross-section moves are rare; no link-rewriting in this PRD). This is largely generalizing what half-exists: nextId('doc') already scans recursively across categories sharing the DOC id-space and recategorize already moves a doc between categories keeping its id; make it any-section, not doc-only. Migrate store.ts relocation off DocCategory/isDocCategory as part of this.",
+      "steps": [
+        "Read src/artifacts/store.ts relocateArtifact and src/cli/verbs/doc.ts recategorize to see the doc-only move today.",
+        "Generalize to move-to-bucket: same-section keeps id; cross-section re-mints; migrate off DocCategory/isDocCategory.",
+        "Add tests: a same-section move keeps the id and [[id]] still resolves; a cross-section move re-mints. Run all gates green and commit."
+      ],
+      "passes": false,
+      "regression_notes": ""
+    },
+    {
+      "category": "functional",
+      "description": "SLICE-0116 CAPTURE RESOLVES KIND VIA PER-VAULT TREE (PRD-0019, blockers: SLICE-0111, SLICE-0112). Fix the latent coupling in the PRD-0022 capture path (src/artifacts/capture.ts) so it rides the section/bucket tree. Today capture's resolveKind reads the bundled DEFAULT_STRUCTURE while the write step loads the per-vault Structure via loadStructure(vaultRoot) (verified: capture.ts imports both; resolveKind uses DEFAULT_STRUCTURE.kinds / DEFAULT_STRUCTURE.typeForId, fileArtifact calls loadStructure). Harmless while every vault uses the default tree, but under a custom tree capture would fail to recognize a custom bucket it is about to write into. Move kind resolution onto the SAME per-vault loaded Structure the write uses, so a custom-tree bucket is recognized and filed with a section-prefixed id via mintAndWrite. Regression + coupling fix; no direct user story.",
+      "steps": [
+        "Read src/artifacts/capture.ts (resolveKind, fileArtifact, captureArtifact) to confirm resolveKind uses DEFAULT_STRUCTURE while the write uses loadStructure.",
+        "Thread the per-vault loaded Structure into kind resolution so resolveKind no longer reads DEFAULT_STRUCTURE.",
+        "Add a test: capture end-to-end against a custom-tree TEMP vault recognizes a custom bucket and files with a section-prefixed id; a re-fire is idempotent (no double-create). Never touch the real $HOME/Knowledge vault.",
+        "Run all gates green and commit."
+      ],
+      "passes": false,
+      "regression_notes": ""
+    },
+    {
+      "category": "functional",
+      "description": "SLICE-0117 DELETE DEAD DOC-CATEGORY MACHINERY (PRD-0019, blockers: SLICE-0112, SLICE-0113, SLICE-0114, SLICE-0115). Capstone deletion: remove DOC_CATEGORIES, isDocCategory, defaultCategoryForDocType (and the DocCategory type) from src/artifacts/registry.ts and the `type` enum from templates/doc.md, now that every consumer routes through the section/bucket tree. Confirmed importers that MUST already be migrated by the blockers: src/artifacts/store.ts (0112 create + 0115 relocation), src/bootstrap/doctor.ts (0113), src/cli/verbs/create.ts (0112 + 0114), src/cli/verbs/doc.ts (0115). After this a doc no longer carries both a `type` field and a `category` folder that can disagree (the three-vocabularies cleanup). ADR-0028 (locked categories) is superseded by the config-declared bucket model. The build must be green at THIS commit (no dangling import).",
+      "steps": [
+        "grep the tree for DOC_CATEGORIES / isDocCategory / defaultCategoryForDocType / DocCategory and confirm only registry.ts (owner) and already-migrated consumers remain.",
+        "Delete the machinery from registry.ts and the doc `type` enum from templates/doc.md.",
+        "Fix any residual reference so build + typecheck are clean; ensure a doc no longer carries a type/category that can disagree.",
+        "Note ADR-0028 superseded in progress. Add/adjust a test proving the doc-category machinery is gone and docs still create/validate. Run all gates green and commit."
+      ],
+      "passes": false,
+      "regression_notes": ""
+    },
+    {
+      "category": "functional",
+      "description": "SLICE-0118 CUSTOM TREE END-TO-END + CRITERIA (PRD-0019, blockers: SLICE-0110, SLICE-0111, SLICE-0112, SLICE-0113). Prove the whole mechanism on a TEMP vault whose wiki.json declares a custom tree the tool has never seen (e.g. a `bugs` bucket and a top-level `architecture` section with its own buckets). Creating into those buckets drives folders, prefixes, and templates entirely from config, mints section-prefixed ids, and passes doctor's structural validation with zero code change. Surface each bucket's `criteria` (the agent's what-goes-where signal) through `wiki create <bucket> --help` and `wiki schema <bucket>`, both reading it from the loaded structure. Update the wiki skill doc to reflect the new `wiki create <bucket>` syntax (replacing the --category guidance). Never touch the real $HOME/Knowledge vault.",
+      "steps": [
+        "Build a TEMP vault with a custom wiki.json tree (a bugs bucket + an architecture section with buckets).",
+        "Verify end-to-end on that vault: create into custom buckets drives folders/prefixes/templates from config and mints section-prefixed ids; doctor passes; nextId honors the tree.",
+        "Surface bucket criteria via `wiki create <bucket> --help` and `wiki schema <bucket>` from the loaded structure.",
+        "Update the wiki skill doc for the new create-by-bucket syntax. Run all gates green and commit."
+      ],
+      "passes": false,
+      "regression_notes": ""
+    }
+  ]
+}
