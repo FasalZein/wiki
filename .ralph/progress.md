@@ -745,3 +745,95 @@ build a TEMP vault with a custom wiki.json (a bugs bucket + an architecture sect
 with buckets), prove create/doctor/nextId drive entirely from config, surface each
 bucket's `criteria` via `wiki create <bucket> --help` and `wiki schema <bucket>`,
 and update the wiki skill doc for the create-by-bucket syntax.
+
+## SLICE-0118 CUSTOM TREE END-TO-END + CRITERIA (PASS)
+
+Selected as the only remaining unfinished item; its blockers 0110/0111/0112/0113
+all pass.
+
+Decision rationale: prove the section/bucket tree mechanism end-to-end on a TEMP
+vault whose wiki.json declares a tree the tool has never seen, and surface each
+bucket's `criteria` (the agent's what-goes-where signal) through the CLI. Two
+small code gaps blocked a true end-to-end proof and are closed here:
+- handleCreate resolved a create-name only against the bundled DEFAULT_STRUCTURE,
+  so `wiki create <custom-bucket>` (a bucket declared only in the vault's
+  wiki.json) errored "unknown artifact type". It now tries the default tree first
+  (preserving the `create bogus`/`create blueprints` contracts that run before any
+  vault load), then falls back to the per-vault loaded Structure for a custom kind
+  or bucket. A vault-load fault (unconfigured) keeps the default-kinds error; a
+  malformed wiki.json still throws loudly.
+- `wiki create <bucket> --help` and `wiki schema <bucket>` only knew section kinds,
+  so a bucket's criteria was unreachable from the CLI.
+
+Implementation:
+- src/cli/verbs/create.ts: handleCreate gained a per-vault fallback (tryLoadStructure
+  -> structure.kinds / structure.bucketFor) after the synchronous default-tree
+  resolve; extracted presetFor() (branch bucket -> subfolder, leaf -> none) shared by
+  both resolve paths. tryLoadStructure returns undefined when no vault is configured
+  (getVaultRoot throws) so the unconfigured `create bogus` contract still lists the
+  bundled kinds. Added renderBucketCreateHelp(name): loads the structure (default
+  fallback), resolves the bucket, and renders help showing the section prefix, the
+  config-declared folder, and the bucket's `criteria`. Returns null for a non-bucket
+  so dispatch falls back to generic help.
+- src/cli/dispatch.ts: the per-verb help branch, when the create subverb names no
+  curated USAGE entry, now calls renderBucketCreateHelp and prints it if the name
+  resolves to a bucket (else falls through to generic create help). Imported the
+  helper.
+- src/cli/verbs/schema.ts: rewrote handleSchema to resolve the positional via a new
+  resolveSchemaTarget(structure, name) that accepts a kind OR a bucket/leaf name. A
+  bucket resolves to its section's template and carries the bucket's `criteria`,
+  printed after the field list (human) and added to the JSON object. The usage line
+  now lists kinds + branch-bucket names. The existing `wiki schema slice` (kind,
+  --json) contract is unchanged (a kind has no criteria).
+- src/cli/usage.ts: schema entry updated to `wiki schema <kind|bucket>` and notes a
+  bucket prints its criteria.
+- skills/wiki/SKILL.md: replaced the locked-category guidance with the create-by-bucket
+  syntax — `wiki create <bucket>` files into the bucket subfolder, `wiki create
+  <bucket> --help` / `wiki schema <bucket>` show criteria, buckets are config-declared
+  in wiki.json (not a hardcoded lock); doctor flags undeclared folders / loose files.
+
+Conservative assumptions recorded:
+- Per-bucket template OVERRIDE on the create path stays out of scope (as in SLICE-0112):
+  the create path still loads the template by SECTION name, and the custom-tree test
+  reuses the bundled `doc` / `decision` templates by reshaping those sections' folders,
+  prefixes (DOC/ADR, matching the templates' id patterns), and buckets entirely from
+  config. The slice's "drives templates from config" is exercised by config-declared
+  section->template selection, which is what the bucket model already provides; a
+  genuinely new template body for a never-before-seen kind would need a templates/<kind>.md
+  and is not required to prove the tree mechanism. The "architecture section" is modeled
+  as the decision section relocated to folder architecture/ with components/boundaries
+  buckets, proving a top-level non-default section with its own buckets and id-space.
+- A malformed wiki.json on the create fallback path throws (a present-but-broken config
+  is a real error); only an unconfigured vault falls back to the bundled-kinds error.
+
+Tests (tests/custom-tree-e2e.test.ts, new — 5 cases) against a TEMP vault whose
+wiki.json declares a custom tree (doc reshaped to a knowledge/ branch with a `bugs`
+bucket the default tree never had; decision reshaped to a top-level architecture/
+branch with components/boundaries buckets): creating into custom buckets files into
+the config-declared folders with section-prefixed ids minted per-section (DOC-0001
+bug, DOC-0002 runbook sharing the doc id-space; ADR-0001 component from the separate
+architecture id-space); doctor passes structural validation against the custom tree
+and nextId honors each section's independent id-space (DOC-0002 / ADR-0002); an
+undeclared folder under a custom branch section is flagged; `wiki create bugs --help`
+surfaces the bucket criteria + folder + prefix from the loaded structure; `wiki schema
+components` lists the decision-template fields and prints the bucket criteria (human +
+--json). The real $HOME/Knowledge vault is never touched (mkdtemp temp vaults only).
+No existing test was deleted or weakened.
+
+Files changed:
+- src/cli/verbs/create.ts (per-vault create-name fallback; renderBucketCreateHelp)
+- src/cli/dispatch.ts (intercept create-by-bucket --help)
+- src/cli/verbs/schema.ts (resolve kind OR bucket; surface criteria)
+- src/cli/usage.ts (schema entry: kind|bucket + criteria)
+- skills/wiki/SKILL.md (create-by-bucket syntax; criteria via help/schema)
+- tests/custom-tree-e2e.test.ts (new)
+- .ralph/items.json (SLICE-0118 passes false->true)
+- .ralph/progress.md (this entry)
+
+Verification (all green at this commit):
+- bun run build: ok (cli.js 0.32 MB, bundled 99 modules)
+- bunx tsc --noEmit: clean (exit 0)
+- bun run test: 414 pass, 0 fail, 1334 expect() calls, 55 files
+
+This is the last item in the bundle. PRD-0018 (0108-0109) and PRD-0019 (0110-0118)
+are complete: all 11 items pass with the full gate green at each commit.

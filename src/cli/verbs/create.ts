@@ -41,15 +41,42 @@ export async function handleCreate(args: string[]): Promise<CliResult> {
   if (name !== undefined && DEFAULT_STRUCTURE.kinds[name] !== undefined) {
     return createGeneric(name as TemplateType, rest);
   }
-  const resolved = name === undefined ? undefined : DEFAULT_STRUCTURE.bucketFor(name);
-  if (resolved !== undefined) {
-    // A branch bucket carries an explicit subfolder; a leaf bucket (name === its
-    // section) files straight into the section folder, so no preset category.
-    const presetCategory = resolved.section.tree === "branch" ? resolved.bucket.name : undefined;
-    return createGeneric(resolved.section.name, rest, presetCategory);
+  const defaultResolved = name === undefined ? undefined : DEFAULT_STRUCTURE.bucketFor(name);
+  if (defaultResolved !== undefined) {
+    return createGeneric(defaultResolved.section.name, rest, presetFor(defaultResolved));
   }
-  console.error(unknownMessage("artifact type", name ?? "", Object.keys(DEFAULT_STRUCTURE.kinds)));
+  // SLICE-0118: the name isn't in the bundled default tree — it may be a kind or
+  // a bucket declared only in this vault's custom wiki.json. Load the per-vault
+  // structure and resolve against it so `wiki create <custom-bucket>` works with
+  // zero code change. A vault-load fault (unconfigured) keeps the default error.
+  const structure = await tryLoadStructure();
+  if (structure !== undefined && name !== undefined) {
+    if (structure.kinds[name] !== undefined) return createGeneric(name as TemplateType, rest);
+    const resolved = structure.bucketFor(name);
+    if (resolved !== undefined) return createGeneric(resolved.section.name, rest, presetFor(resolved));
+  }
+  const kinds = Object.keys(structure?.kinds ?? DEFAULT_STRUCTURE.kinds);
+  console.error(unknownMessage("artifact type", name ?? "", kinds));
   return { code: 1 };
+}
+
+/** A branch bucket carries an explicit subfolder; a leaf bucket (name === its
+ *  section) files straight into the section folder, so no preset category. */
+function presetFor(resolved: { section: { tree: "leaf" | "branch" }; bucket: { name: string } }): string | undefined {
+  return resolved.section.tree === "branch" ? resolved.bucket.name : undefined;
+}
+
+/** Load the per-vault structure, or undefined when no vault is configured (so the
+ *  `create bogus` contract still fails with the bundled kinds). A malformed
+ *  wiki.json still throws — a present-but-broken config is a real error. */
+async function tryLoadStructure(): Promise<Structure | undefined> {
+  let vaultRoot: string;
+  try {
+    vaultRoot = await getVaultRoot();
+  } catch {
+    return undefined;
+  }
+  return loadStructure(vaultRoot);
 }
 
 /** Snake-case schema/placeholder name -> kebab CLI flag (e.g. parent_prd -> parent-prd). */
@@ -381,4 +408,28 @@ function missingFields(fields: Record<string, unknown>): CliResult | null {
 async function stdinOrValue(value: string | undefined): Promise<string | undefined> {
   if (value === "-") return Bun.stdin.text();
   return value;
+}
+
+/**
+ * SLICE-0118: render `wiki create <bucket> --help` for a bucket/leaf that has no
+ * curated USAGE_REGISTRY entry, surfacing its config-declared `criteria` (the
+ * what-goes-where signal) read from the per-vault loaded Structure. Returns null
+ * when the name resolves to no bucket, so dispatch falls back to generic help.
+ */
+export async function renderBucketCreateHelp(name: string): Promise<string | null> {
+  const structure = (await tryLoadStructure()) ?? DEFAULT_STRUCTURE;
+  const resolved = structure.bucketFor(name);
+  if (resolved === undefined) return null;
+  const { section, bucket } = resolved;
+  const lines: string[] = [];
+  lines.push(`Create a ${section.name} artifact in the '${bucket.name}' bucket (files into ${bucket.folder}/, id prefix ${section.prefix}).`);
+  lines.push("");
+  lines.push(`usage: wiki create ${bucket.name} --project <name> --title <title> [--body -]`);
+  if (bucket.criteria !== undefined) {
+    lines.push("");
+    lines.push(`Criteria: ${bucket.criteria}`);
+  }
+  lines.push("");
+  lines.push(`Run 'wiki schema ${bucket.name}' for this bucket's fields.`);
+  return lines.join("\n");
 }

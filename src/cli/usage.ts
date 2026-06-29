@@ -199,9 +199,9 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
     example: "wiki delete SLICE-0032",
   },
   schema: {
-    summary: "List an artifact type's fields, types, required flags, and enum values.",
-    usage: "wiki schema <prd|slice|decision|doc|handoff> [--json]",
-    flags: { "--json": "emit the schema object to stdout" },
+    summary: "List an artifact type's fields, types, required flags, and enum values. A bucket name also prints its criteria.",
+    usage: "wiki schema <kind|bucket> [--json]",
+    flags: { "--json": "emit the schema object to stdout (a bucket adds its criteria)" },
     example: "wiki schema slice",
   },
   doctor: {

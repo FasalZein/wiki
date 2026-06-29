@@ -142,7 +142,7 @@
         "Surface bucket criteria via `wiki create <bucket> --help` and `wiki schema <bucket>` from the loaded structure.",
         "Update the wiki skill doc for the new create-by-bucket syntax. Run all gates green and commit."
       ],
-      "passes": false,
+      "passes": true,
       "regression_notes": ""
     }
   ]

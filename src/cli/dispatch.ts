@@ -1,4 +1,4 @@
-import { handleCreate } from "./verbs/create";
+import { handleCreate, renderBucketCreateHelp } from "./verbs/create";
 import { handleDoc } from "./verbs/doc";
 import { handleFmt } from "./verbs/fmt";
 import { handleHooks } from "./verbs/hooks";
@@ -66,6 +66,15 @@ export async function dispatch(args: string[]): Promise<CliResult> {
       if (subEntry !== undefined) {
         console.log(renderHelp(`${verb} ${subverb}`, subEntry));
         return { code: 0 };
+      }
+      // SLICE-0118: a `wiki create <bucket>` with no curated subverb may name a
+      // config-declared bucket/leaf; surface its criteria from the loaded tree.
+      if (verb === "create") {
+        const bucketHelp = await renderBucketCreateHelp(subverb);
+        if (bucketHelp !== null) {
+          console.log(bucketHelp);
+          return { code: 0 };
+        }
       }
     }
     console.log(renderHelp(verb, entry));
