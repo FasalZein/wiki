@@ -37,7 +37,7 @@
         "Add tests pinning each branch; the unknown-kind test must fail if capture regresses to returning null on an id/template-bearing draft. Use a TEMP vault.",
         "Run all three gates green and commit."
       ],
-      "passes": false,
+      "passes": true,
       "regression_notes": ""
     },
     {

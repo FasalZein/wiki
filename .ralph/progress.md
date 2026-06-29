@@ -76,3 +76,53 @@ Verification (all green at this commit):
 Next-iteration notes: SLICE-0120 (capture honest on frontmatter) is the next
 lowest unfinished item and has no blockers. SLICE-0121 (allocation lock) and
 SLICE-0122/0123/0124 are also unblocked; pick the lowest-numbered false item.
+
+## SLICE-0120 CAPTURE IS HONEST ON FRONTMATTER (PASS)
+
+Selected as the lowest-numbered unfinished item; no blockers.
+
+Decision rationale: the warn/captured/null/idempotent behavior already lives in
+src/artifacts/capture.ts (built across SLICE-0116). resolveKind returns null only
+when neither template nor id maps to a registered kind, and captureArtifact then
+returns the 'no registered wiki kind' WARN outcome (not null, not a wrong-kind
+write). A bare draft with no id/template returns null (silent). So this item's
+real deliverable per the plan was pinning that contract with tests — in
+particular a regression guard that fails if capture ever regresses to returning
+null on an id/template-bearing draft whose kind is unregistered. No source change
+was needed; capture.ts already satisfies every step.
+
+Implementation:
+- tests/capture-frontmatter-contract.test.ts (new): four branches on a TEMP vault
+  with a custom single-`bug`-kind wiki.json —
+  1. template:bug resolvable -> captured + filed under bugs/.
+  2. template:epic and id:EPIC-0001 (neither registered) -> WARN, message
+     contains 'no registered wiki kind'. This is the regression guard: it asserts
+     the outcome is not null and is 'warn'.
+  3. a draft with only title (no id/template) -> null (silent); the test comment
+     documents why a bare draft cannot warn (capture sees every write via the
+     unfiltered hook path).
+  4. re-fire on an id-stamped draft -> captured both times, filed once
+     (idempotent).
+
+No source files changed (capture.ts already correct); no existing test weakened
+or deleted.
+
+Conservative assumption recorded: capture's existing message text 'maps to no
+registered wiki kind' is treated as the stable contract phrase; the test asserts
+the substring 'no registered wiki kind' so a future reword that keeps the meaning
+still passes while a regression to null fails.
+
+Files changed:
+- tests/capture-frontmatter-contract.test.ts (new contract test)
+- .ralph/items.json (SLICE-0120 passes false->true)
+- .ralph/progress.md (this entry)
+
+Verification (all green at this commit):
+- bun run build: ok (cli.js 0.32 MB, 99 modules)
+- bunx tsc --noEmit: clean (exit 0)
+- bun run test: 419 pass, 0 fail, 1344 expect() calls, 56 files
+
+Next-iteration notes: SLICE-0121 (per-project allocation lock, no blockers) is the
+next lowest unfinished item. Its shared-seam rule puts the lock INSIDE mintAndWrite
+in src/artifacts/store.ts. SLICE-0122/0123/0124 are also unblocked; pick the lowest
+false item.
