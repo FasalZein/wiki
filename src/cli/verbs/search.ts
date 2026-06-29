@@ -12,7 +12,7 @@ import matter from "gray-matter";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { ensureCollection, QmdError, refreshCollections, runQuery, type QmdResult } from "../../integrations/qmd";
+import { listCollections, QmdError, runQuery, type QmdResult } from "../../integrations/qmd";
 import { artifactFolder, projectPath } from "../../artifacts/paths";
 import { loadStructure, type Structure } from "../../artifacts/registry";
 import { recentArtifacts, RECENT_LIMIT, type RecentArtifact } from "../../artifacts/recent";
@@ -47,7 +47,10 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
     return { code: 1 };
   }
   const explain = booleanValue(parsed.values, "explain");
-  const noRefresh = booleanValue(parsed.values, "no-refresh");
+  // PRD-0018: search is read-only by default now, so --no-refresh is the default
+  // and the flag is an accepted no-op. Kept parseable so existing invocations and
+  // scripts that still pass it don't error.
+  // ponytail: no-op flag retained for back-compat; drop it in a later cleanup if usage dies.
 
   // Recency path: --recent, --since, or a temporal query ("what changed recently")
   // orders artifacts by mtime off disk — no qmd ranking. Reuses status's
@@ -117,15 +120,26 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
       qmdCommand = resolved;
     }
 
+    // PRD-0018: search is a pure read against whatever `wiki sync` last produced.
+    // One `qmd collection list` up front tells us which collections exist; we
+    // query only those — no per-query refresh, no auto-register. An absent
+    // collection was never synced, so we warn-and-skip to stderr (never a silent
+    // empty, never a silent auto-register of an unembedded collection). Per the
+    // SLICE-0108 spike a present-but-unembedded collection still yields lexical
+    // hits, so "present in the list" is the only gate to query it.
+    //
     // collection name -> base directory, so a qmd://<collection>/<rel> URI can be
     // resolved back to a file on disk for frontmatter enrichment.
+    const registered = new Set(await listCollections(qmdCommand));
     const collectionBases = new Map<string, string>();
     const collections: string[] = [];
     for (const [proj] of configs) {
-      const base = projectPath(vaultRoot, proj);
-      await ensureCollection(qmdCommand, proj, base);
+      if (!registered.has(proj)) {
+        console.error(`skipping ${proj}: never synced — run: wiki sync --project ${proj}`);
+        continue;
+      }
       collections.push(proj);
-      collectionBases.set(proj, base);
+      collectionBases.set(proj, projectPath(vaultRoot, proj));
     }
     if (booleanValue(parsed.values, "include-research")) {
       const researchPath = uniformConfigValue(configs.map(([proj, c]) => [proj, c.research_path] as const));
@@ -133,15 +147,18 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
         console.error(divergenceMessage("research_path", configs.map(([proj, c]) => [proj, c.research_path] as const), "align research_path across projects"));
         return { code: 10 };
       }
-      await ensureCollection(qmdCommand, "research", researchPath);
-      collections.push("research");
-      collectionBases.set("research", researchPath);
+      if (registered.has("research")) {
+        collections.push("research");
+        collectionBases.set("research", researchPath);
+      } else {
+        console.error("skipping research: never synced — run: wiki sync");
+      }
     }
 
-    // Auto-refresh collections before querying (unless --no-refresh), via the
-    // same shared helper the dedup gate uses so freshness cannot drift.
-    if (!noRefresh) {
-      await refreshCollections(qmdCommand, collections);
+    if (collections.length === 0) {
+      console.error("no synced collections to search — run: wiki sync");
+      await writeResults([], collectionBases, structure);
+      return { code: 0 };
     }
 
     // Build structured query document instead of passing raw text

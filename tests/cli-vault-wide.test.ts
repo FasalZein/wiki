@@ -25,6 +25,10 @@ async function makeVault(projects: string[]): Promise<Fixture> {
   const resultsFile = join(root, "qmd-results.json");
   const qmdCommand = join(root, "fake-qmd");
   await writeFile(resultsFile, "[]");
+  // PRD-0018: read-only search queries only collections already present in
+  // `qmd collection list`; pre-register every project (the state a prior
+  // `wiki sync` would have left behind).
+  await writeFile(registeredFile, projects.map((p) => `${p} (qmd://${p}/)`).join("\n") + "\n");
   await writeFile(qmdCommand, `#!/usr/bin/env bash
 set -euo pipefail
 echo "$@" >> "$STATE_FILE"

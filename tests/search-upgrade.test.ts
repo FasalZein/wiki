@@ -163,6 +163,10 @@ async function createSearchFixture(project: string): Promise<SearchFixture> {
   const resultsFile = join(root, "qmd-results.json");
   const qmdCommand = join(root, "fake-qmd");
   await writeFile(resultsFile, "[]");
+  // Pre-register the project collection in the format parseCollectionNames reads
+  // ("name (qmd://name/)"): PRD-0018 search is read-only and only queries
+  // collections already present in `qmd collection list`.
+  await writeFile(registeredFile, `${project} (qmd://${project}/)\n`);
   await writeFile(
     qmdCommand,
     `#!/usr/bin/env bash
@@ -177,7 +181,7 @@ case "\${1:-}" in
         fi
         ;;
       add)
-        echo "$3" >> "$REGISTERED_FILE"
+        echo "$3 (qmd://$3/)" >> "$REGISTERED_FILE"
         ;;
     esac
     ;;
@@ -224,7 +228,7 @@ describe("CLI --explain flag", () => {
 });
 
 describe("CLI --no-refresh flag", () => {
-  test("--no-refresh skips updateCollection call", async () => {
+  test("--no-refresh is accepted and search never calls update", async () => {
     const fixture = await createSearchFixture("wiki-v2");
 
     const result = await runWiki(
@@ -238,7 +242,9 @@ describe("CLI --no-refresh flag", () => {
     expect(log).not.toContain("update");
   });
 
-  test("auto-refresh runs by default (without --no-refresh)", async () => {
+  test("search is read-only by default: no update/embed, exactly one collection list", async () => {
+    // PRD-0018: search no longer refreshes the index. It reads the last sync via
+    // one `qmd collection list` and queries; it must never run update or embed.
     const fixture = await createSearchFixture("wiki-v2");
 
     const result = await runWiki(
@@ -248,7 +254,38 @@ describe("CLI --no-refresh flag", () => {
 
     expect(result.exitCode).toBe(0);
     const log = await readFile(fixture.stateFile, "utf8");
-    // Should contain an update command
-    expect(log).toContain("update");
+    const lines = log.split("\n").filter((l) => l.trim().length > 0);
+    // Read-only: no refresh (update) and no embed during search.
+    expect(lines.some((l) => l.startsWith("update"))).toBe(false);
+    expect(lines.some((l) => l.startsWith("embed"))).toBe(false);
+    // Exactly one membership probe regardless of project count.
+    expect(lines.filter((l) => l.startsWith("collection list")).length).toBe(1);
+    expect(lines.some((l) => l.startsWith("query"))).toBe(true);
+  });
+
+  test("a never-synced project is warned and skipped, not auto-registered", async () => {
+    // The fixture pre-registers only "wiki-v2"; searching a sibling project that
+    // was never synced must warn to stderr and skip it, never auto-add it.
+    const fixture = await createSearchFixture("wiki-v2");
+    // Create a second, never-synced project so the vault has it as a target.
+    const otherPath = join(fixture.vaultRoot, "projects", "unsynced-proj");
+    await mkdir(join(otherPath, "prds"), { recursive: true });
+    await mkdir(join(otherPath, "slices"));
+    await mkdir(join(otherPath, "adrs"));
+    await mkdir(join(otherPath, "handoffs"));
+    await mkdir(join(otherPath, "docs"));
+    await writeFile(
+      join(otherPath, "_project.md"),
+      `---\nrepo: /tmp/repo\ntest_command: bun test\nresearch_path: ${fixture.researchPath}\n---\n`,
+    );
+
+    const result = await runWiki(["search", "list all specs", "--project", "unsynced-proj"], fixture);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toContain("never synced");
+    expect(result.stderr).toContain("unsynced-proj");
+    const log = await readFile(fixture.stateFile, "utf8");
+    // Never auto-registers a never-synced collection.
+    expect(log).not.toContain("collection add");
   });
 });

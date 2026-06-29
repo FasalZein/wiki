@@ -74,8 +74,10 @@ One validated `wiki` call per intent — never hand-edit frontmatter:
   matches (`dedup_strong_blocks: true`); create then exits non-zero until you choose.
 - After creating, run `wiki sync` — it regenerates each project's `index.md` **roster**
   (incrementally — only changed files are re-read) plus a vault-root `index.md` linking
-  every project, and re-embeds for ranked search. Plain `search` updates only the keyword index, so
-  new artifacts stay invisible to ranked search and dedup until a sync.
+  every project, and re-embeds for ranked search. `search` is a pure read against the
+  last `wiki sync`: it neither refreshes nor embeds, so new artifacts stay invisible to
+  search and dedup until a sync. Search warns and skips any project collection that was
+  never synced.
 - Docs live only in the locked `docs/<category>/` folders (architecture, research,
   runbooks, specs, notes, legacy) — never invent a folder; an unfit doc goes in the
   closest locked one. `wiki doctor` flags rogue folders or loose files under `docs/`.

@@ -34,7 +34,7 @@
         "Update the two pinned tests/search-upgrade.test.ts cases that assert refresh-on-search ('auto-refresh runs by default' and '--no-refresh skips updateCollection call') to the new contract; do not silently delete tests. Add a test asserting exactly one `qmd collection list` regardless of project count and zero qmd update/embed during search.",
         "Run all verification gates green and commit."
       ],
-      "passes": false,
+      "passes": true,
       "regression_notes": ""
     },
     {
