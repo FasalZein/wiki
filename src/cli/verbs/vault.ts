@@ -1,7 +1,10 @@
 import { dirname, join, resolve } from "node:path";
 
-import { runDoctor } from "../../bootstrap/doctor";
-import { evaluateSetup } from "../../bootstrap/setup-doctor";
+import { repairDuplicateIds, runDoctor, listVaultProjects } from "../../bootstrap/doctor";
+import { applyFmtFixes } from "./fmt";
+import { loadStructure } from "../../artifacts/registry";
+import { projectPath } from "../../artifacts/paths";
+import { evaluateSetup, type CaptureReach } from "../../bootstrap/setup-doctor";
 import { anyHookWired, unreachableSubagents } from "./hooks";
 import { initVault } from "../../bootstrap/init";
 import { parseCommand } from "../parse";
@@ -48,10 +51,12 @@ async function vaultInit(args: string[]): Promise<CliResult> {
 }
 
 async function vaultDoctor(args: string[]): Promise<CliResult> {
-  const parsed = parseCommand(args, [], [], ["setup"]);
+  const parsed = parseCommand(args, [], [], ["setup", "fix"]);
   if (parsed.values.setup === true) return setupDoctor();
   const rawPath = parsed.positionals[0] ?? ".";
   const vaultPath = resolve(rawPath);
+
+  if (parsed.values.fix === true) return vaultDoctorFix(vaultPath);
 
   const result = await runDoctor(vaultPath);
 
@@ -65,6 +70,49 @@ async function vaultDoctor(args: string[]): Promise<CliResult> {
     console.log(`  [${issue.type}] ${issue.message}`);
   }
 
+  return { code: 1 };
+}
+
+/**
+ * `wiki doctor --fix` — repair what is mechanically repairable, then re-audit
+ * (SLICE-0122). Per project: renumber duplicate ids (canonical keeps the id, the
+ * rest get a fresh id in the section's id-space) FIRST, then run the fmt fix
+ * pipeline (legacy-id renumber with vault-wide link rewrite, rename-to-id-slug,
+ * and the per-file category fixes) so the renamed/renumbered world is consistent.
+ * A final `runDoctor` reports any drift `--fix` cannot auto-repair (e.g. dangling
+ * links, repo bindings); a second `--fix` run is a no-op (idempotent).
+ */
+async function vaultDoctorFix(vaultPath: string): Promise<CliResult> {
+  const structure = await loadStructure(vaultPath);
+  let changed = 0;
+  for (const project of await listVaultProjects(vaultPath)) {
+    const repair = await repairDuplicateIds(vaultPath, project, structure);
+    changed += repair.reassigned;
+    for (const label of repair.labels) console.log(`fixed ${label}`);
+
+    const fmt = await applyFmtFixes(vaultPath, projectPath(vaultPath, project), true, structure);
+    changed += fmt.total;
+    for (const label of fmt.labels) console.log(`fixed ${label}`);
+    if (fmt.renumberMap.size > 0) {
+      for (const [oldId, newId] of fmt.renumberMap) console.log(`  renumbered ${oldId} -> ${newId}`);
+    }
+    if (fmt.manual.length > 0) {
+      console.log(`${project}: needs manual attention:`);
+      for (const finding of fmt.manual) console.log(`  ${finding}`);
+    }
+  }
+
+  if (changed > 0) console.log(`applied ${changed} fix(es)`);
+
+  const result = await runDoctor(vaultPath);
+  if (result.clean) {
+    console.log("vault is clean — no drift detected");
+    return { code: 0 };
+  }
+  console.log(`${result.issues.length} issue(s) remain (manual fix needed):\n`);
+  for (const issue of result.issues) {
+    console.log(`  [${issue.type}] ${issue.message}`);
+  }
   return { code: 1 };
 }
 
@@ -87,6 +135,7 @@ async function setupDoctor(): Promise<CliResult> {
 
   if (result.clean) {
     console.log("setup is healthy — binary fresh, skill bundle present, hook wired");
+    printCaptureReach(result.captureReach);
     return { code: 0 };
   }
 
@@ -94,5 +143,18 @@ async function setupDoctor(): Promise<CliResult> {
   for (const issue of result.issues) {
     console.log(`  [${issue.type}] ${issue.message}`);
   }
+  printCaptureReach(result.captureReach);
   return { code: 1 };
+}
+
+/**
+ * Print the per-harness capture reach so a green setup never implies non-Pi
+ * subagents capture to the vault. Pi is checkable; Codex/Claude are 'unverified'
+ * (ADR-0043, not run). Honest reporting only — does not affect the exit code.
+ */
+function printCaptureReach(reach: CaptureReach[]): void {
+  console.log("\ncapture reach (per harness):");
+  for (const r of reach) {
+    console.log(`  [${r.status}] ${r.harness} — ${r.detail}`);
+  }
 }

@@ -92,7 +92,12 @@ async function makeVault(project: string): Promise<string> {
   prevVaultRoot = process.env.KNOWLEDGE_VAULT_ROOT;
   prevQmd = process.env.QMD_COMMAND;
   process.env.KNOWLEDGE_VAULT_ROOT = vaultRoot;
-  delete process.env.QMD_COMMAND; // dedup is off on both sections; no qmd needed
+  // dedup is off on both sections, but SLICE-0126 fires an incremental qmd
+  // `update` on every write — keep the preload's no-op fake so this never reaches
+  // the real qmd index (do NOT delete QMD_COMMAND, which would fall back to PATH).
+  if (process.env.QMD_COMMAND === undefined) {
+    process.env.QMD_COMMAND = join(import.meta.dir, "fixtures", "noop-qmd.sh");
+  }
   return vaultRoot;
 }
 

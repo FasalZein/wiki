@@ -1,850 +1,781 @@
-# Ralph progress — PRD-0018 + PRD-0019
+# PRD-0023 progress
 
-## SLICE-0108 SPIKE — read-only search membership contract (PASS)
-
-Selected as the lowest-numbered unfinished item with no blockers.
-
-Decision rationale: PRD-0018's read-only search slice (SLICE-0109) needs to know
-whether `qmd query` against a registered-but-never-embedded collection errors or
-returns empty, to decide if its warn-and-skip branch must cover present-but-
-unembedded collections or only entirely-absent ones.
-
-Method: the real `qmd` binary (2.5.3) is present at /opt/homebrew/bin/qmd, so I
-characterized it empirically against throwaway temp indexes (QMD_HOME pointed at a
-mktemp dir; the real $HOME/Knowledge vault was never touched), then pinned the
-observed contract into a deterministic fake-qmd in the test so the suite does not
-depend on the binary.
-
-Finding (recorded atop tests/qmd-unembedded-collection.test.ts as well):
-- registered-but-never-embedded -> `qmd query --collection <name>` returns LEXICAL
-  results, exit 0, stderr embeddings warning only. NOT an error, NOT empty.
-  `collection add` indexes lexically up front; embed only improves vector ranking.
-- absent / never-added -> "Collection not found: <name>" on stderr, exit 1 (hard
-  error; runQmd turns exit!=0 + empty stdout into a thrown QmdError).
-- empty index, no --collection -> `[]`, exit 0.
-
-Consequence for SLICE-0109: warn-and-skip applies ONLY to entirely-absent
-collections (the ones that error at the integration surface). A present-but-
-unembedded collection is an ordinary queryable collection and must be queried, not
-skipped.
-
-Files changed:
-- tests/qmd-unembedded-collection.test.ts (new characterization test, 3 cases)
-- .ralph/items.json (SLICE-0108 passes false->true)
-- .ralph/progress.md (this entry)
-
-Substitute used: fake-qmd bash script reproducing the real binary's exit/stdout/
-stderr contract. What remains unverified against a future real-binary upgrade: the
-exact stderr/warning wording and exit codes are pinned to qmd 2.5.3 as observed;
-if qmd changes its "Collection not found" message or starts erroring on unembedded
-collections, SLICE-0109's branch assumptions would need re-checking. The behavioral
-classes (error vs results-with-warning) are what the spike commits to.
-
-Verification (all green at this commit):
-- bun run build: ok (bundled 99 modules)
-- bunx tsc --noEmit: clean
-- bun run test: 376 pass, 0 fail, 1202 expect() calls, 47 files
-
-Next-iteration notes: SLICE-0109 (read-only search) is now unblocked. It should
-drop the per-query refresh from search.ts, collapse N ensureCollection probes into
-one `qmd collection list`, query only listed collections, and warn-and-skip absent
-collections per this finding. Update the two pinned tests/search-upgrade.test.ts
-cases (auto-refresh-by-default, --no-refresh-skips-update) to the read-only
-contract rather than deleting them.
-
-## SLICE-0109 READ-ONLY SEARCH (PASS)
-
-Selected as the lowest-numbered unfinished item; its only blocker SLICE-0108 is
-passes:true.
-
-Decision rationale: make `wiki search` a pure read against whatever `wiki sync`
-last produced. Search previously ran a per-collection `qmd update` refresh and an
-ensureCollection probe per project before querying; both are dropped from the read
-path.
-
-Implementation:
-- src/cli/verbs/search.ts: replaced the per-project ensureCollection probes with a
-  single `listCollections(qmdCommand)` call up front. The returned set is used to
-  decide which collections to query and to detect never-synced ones: an absent
-  project collection is warned to stderr ("skipping <name>: never synced — run:
-  wiki sync --project <name>") and skipped, never silently auto-registered. The
-  research collection (under --include-research) follows the same present-or-skip
-  rule. If no targeted collection is present, search emits a "no synced collections"
-  notice and returns an empty result set (code 0). Removed the `refreshCollections`
-  call entirely. Honored the SLICE-0108 finding: a present-but-unembedded collection
-  is in the list and is queried (it yields lexical hits); only entirely-absent
-  collections are skipped.
-- The `--no-refresh` flag is now an accepted no-op (read-only is the default). Kept
-  parseable so existing invocations don't error; marked with a ponytail comment.
-- Dedup's create-time refresh is untouched: src/artifacts/dedup.ts still calls
-  ensureCollection + refreshCollections in runDedupGate. The split is asserted by
-  test (search logs show zero update/embed; dedup path unchanged).
-- skills/wiki/SKILL.md: dropped the "search updates only the keyword index" promise;
-  now states search is a pure read against the last sync and warns-and-skips
-  never-synced project collections.
-
-Tests:
-- tests/search-upgrade.test.ts: pre-register the project collection in the fixture
-  (read-only search only queries listed collections). Reframed "--no-refresh skips
-  updateCollection call" to "--no-refresh is accepted and search never calls update";
-  replaced "auto-refresh runs by default" with "search is read-only by default: no
-  update/embed, exactly one collection list". Added a new case proving a never-synced
-  sibling project is warned and skipped, never auto-registered (no `collection add`).
-- tests/cli-search.test.ts: pre-seed the project collection in the fixture; updated
-  the enriched-lines, repeated-calls, and include-research cases to the read-only
-  contract (no `collection add`, no `update`; query the pre-synced collection).
-- tests/cli-vault-wide.test.ts: pre-register every project in makeVault so the two
-  vault-wide query cases exercise real queries under the read-only contract.
-
-No test was deleted or weakened; each pinned refresh-on-search assertion was
-explicitly rewritten to the new read-only contract.
-
-Verification (all green at this commit):
-- bun run build: ok (bundled 99 modules)
-- bunx tsc --noEmit: clean
-- bun run test: 377 pass, 0 fail, 1207 expect() calls, 47 files
-
-Next-iteration notes: PRD-0018 is complete (0108 + 0109). The next unblocked item
-is SLICE-0110 (Structure tree skeleton, no blockers) — the start of PRD-0019.
-
-## SLICE-0110 STRUCTURE TREE SKELETON (PASS)
+## SLICE-0119 RESEARCH BECOMES A VAULT KIND (PASS)
 
 Selected as the lowest-numbered unfinished item; it has no blockers and starts
-PRD-0019.
+PRD-0023.
 
-Decision rationale: extend the per-vault method-based `Structure` from a flat
-kind map into a one-level section/bucket tree, as a walking skeleton — the type
-and loader carry the tree end-to-end and validate it; create/doctor/relocation
-behavior changes land in later slices. The bundled default tree must reproduce
-today's five kinds + six doc categories byte-for-byte so an unconfigured vault
-is unaffected.
-
-Implementation (src/artifacts/registry.ts only — no consumer migration this slice):
-- Added two tree types: SectionSpec (a top-level folder owning a prefix and a
-  single shared id-space, tagged tree:"leaf"|"branch", with a non-empty buckets
-  array) and BucketSpec (name, folder, template, optional criteria).
-- Structure gained a `sections` field; every existing method (specFor, typeForId,
-  artifactTypeForVaultPath, kindForSkill) and `folders`/`kinds` are unchanged and
-  still derive from the flat kind map, so default-vault behavior is byte-identical.
-- buildStructure(kinds, bucketsByKind?) now also calls buildSections to expand the
-  flat kinds + per-kind declared buckets into the tree. A kind with no declared
-  buckets becomes a LEAF (one self-named bucket filing into the section folder);
-  a kind with declared buckets becomes a BRANCH (each bucket files into
-  <folder>/<bucket>). The branch-XOR-leaf invariant and globally-unique bucket
-  names are validated here, throwing loudly.
-- parseBuckets reads the optional per-kind `buckets` map from config: each bucket
-  entry is an object with optional criteria/template strings; a bucket may not
-  declare nested `buckets` (one-level tree). Malformed shapes throw before any
-  write.
-- DEFAULT_BUCKETS models `doc` as the one default BRANCH with six buckets
-  (architecture/research/runbooks/specs/notes/legacy) reproducing the locked
-  DOC_CATEGORIES (ADR-0028) exactly — each files into docs/<category>/, shares
-  the DOC prefix and id-space, uses the doc template, and carries a criteria
-  string. DEFAULT_KINDS is unchanged (byte-compatible). DOC_CATEGORIES /
-  isDocCategory / defaultCategoryForDocType are left in place for now (their
-  deletion is SLICE-0117, after consumers migrate).
-- loadStructure threads parseBuckets(rawKinds) into buildStructure so a custom
-  wiki.json declaring buckets produces a branch section, and a config with no
-  buckets stays all-leaf.
-
-Conservative assumptions recorded:
-- "branch-and-leaf node" is enforced two ways: a section with an empty `buckets`
-  object (neither branch nor leaf) errors, and a bucket that itself declares
-  `buckets` (a second tree level) errors. Both are reversible config-shape rules.
-- The default doc bucket criteria strings are descriptive paraphrases of the
-  locked-category intent; they are informational metadata surfaced in a later
-  slice and do not affect behavior.
-
-Tests (tests/structure-tree.test.ts, new — 9 cases): default exposes one section
-per kind; the four artifact kinds are leaf sections with a self-named bucket;
-doc is the one branch with six DOC-prefixed buckets filing into docs/<category>/;
-existing flat lookups are byte-identical; the loader carries the default tree and
-a custom branch tree end-to-end; and three malformed-tree cases (duplicate bucket
-name, empty buckets, nested buckets) hard-error at load. No existing test was
-weakened.
-
-Files changed:
-- src/artifacts/registry.ts (tree types, buildSections, parseBuckets, default
-  doc-branch buckets, loadStructure wiring)
-- tests/structure-tree.test.ts (new)
-- .ralph/items.json (SLICE-0110 passes false->true)
-- .ralph/progress.md (this entry)
-
-Verification (all green at this commit):
-- bun run build: ok (cli.js 0.32 MB)
-- bunx tsc --noEmit: clean
-- bun run test: 386 pass, 0 fail, 1255 expect() calls, 48 files
-
-Next-iteration notes: SLICE-0111 (per-section id allocation) is now unblocked.
-It should generalize src/artifacts/id.ts nextId() and the id-index builder to key
-on the SECTION (so buckets under one branch share one increasing id-space keyed
-on the section prefix) while keeping the default tree's single-bucket kinds on
-their current sequences. The section model it needs is now on Structure.sections.
-
-## SLICE-0111 PER-SECTION ID ALLOCATION (PASS)
-
-Selected as the lowest-numbered unfinished item; its only blocker SLICE-0110 is
-passes:true.
-
-Decision rationale: move id allocation from per-kind to per-section so all
-buckets under one branch section draw from a single increasing id-space keyed on
-the section's prefix. This is the mechanism a later intra-section move needs to
-preserve identity. Under the bundled default tree it preserves today's per-kind
-sequences exactly.
-
-Implementation (src/artifacts/id.ts only):
-- nextId() already keys on structure.specFor(type).prefix (the section prefix)
-  and scans the section folder returned by artifactDirectory(type). The ONLY
-  per-kind special case was the filename scan: docs scanned recursively (to cover
-  category subfolders sharing the DOC id-space) while every other type did a flat
-  readdir. Generalized that single branch — the filename scan is now always
-  recursive over the section folder. A branch section's bucket subfolders are
-  therefore all covered by one scan keyed on the section prefix; a leaf section
-  has no subfolders so a recursive scan equals the old flat read (byte-identical
-  result for prd/slice/adr/handoff).
-- The frontmatter id-index path (highestFrontmatterId -> buildIdIndex) already
-  keys on the section: buildIdIndex walks every project folder and nextId filters
-  its keys by the section prefix regex, so a branch section's buckets already
-  shared one frontmatter id-space. No change needed in id-index.ts.
-
-Conservative assumption recorded: making the non-doc scan recursive also makes a
-missing section directory return empty instead of throwing (readMarkdownNamesRecursive
-swallows ENOENT). This is strictly safer for allocation (start at 0001 instead of
-crashing) and reversible; no existing test depended on the throw.
-
-Tests (tests/section-id-allocation.test.ts, new — 4 cases): on a custom branch
-section `feature` (prefix FEAT) with buckets alpha/beta filing into separate
-subfolders, allocation sees across buckets and returns FEAT-0003 (one shared
-counter, not two per-bucket counters); an empty multi-bucket section starts at
-0001; default-tree leaf kinds keep their flat per-kind sequence (PRD-0003,
-SLICE-0001); the default doc branch stays globally unique across its category
-buckets (DOC-0010). No existing test was weakened; the pre-existing
-id-generation.test.ts doc-recursive case and structure-loader nextId tracers still
-pass unchanged.
-
-Files changed:
-- src/artifacts/id.ts (always-recursive section scan; comment update)
-- tests/section-id-allocation.test.ts (new)
-- .ralph/items.json (SLICE-0111 passes false->true)
-- .ralph/progress.md (this entry)
-
-Verification (all green at this commit):
-- bun run build: ok (cli.js 0.32 MB, bundled 99 modules)
-- bunx tsc --noEmit: clean
-- bun run test: 390 pass, 0 fail, 1260 expect() calls, 49 files
-
-Next-iteration notes: SLICE-0112 (create by bucket/leaf name) is now unblocked
-(blockers 0110 + 0111 both pass). It should make `wiki create <name>` resolve a
-bucket/leaf name to its section (prefix + id-space) and template, file into the
-bucket folder with a section-prefixed id, error on unknown name, and migrate
-src/cli/verbs/create.ts + src/artifacts/store.ts off DocCategory/isDocCategory so
-no dangling doc-category type remains for the SLICE-0117 deletion.
-
-## SLICE-0112 CREATE BY BUCKET/LEAF NAME (PASS)
-
-Selected as the lowest-numbered unfinished item; its blockers SLICE-0110 and
-SLICE-0111 are both passes:true.
-
-Decision rationale: `wiki create <name>` now resolves <name> to a bucket/leaf in
-the section tree (not just a section kind), files into the bucket folder with a
-section-prefixed id, and the create path no longer touches DocCategory — the
-first of the four migrations the SLICE-0117 deletion needs.
+Decision rationale: research already files into the bundled `doc` branch
+section's `research` bucket (docs/research/, DOC id-space) via the config-driven
+tree from PRD-0019. The separate `research` qmd collection, its `research_path`
+config, and the `--include-research` flag were a parallel store with no remaining
+purpose (G2 collision + G9 dead knob, ADR-0039). Removed them so research is an
+ordinary vault artifact returned by plain `wiki search`.
 
 Implementation:
-- src/artifacts/registry.ts: added a `bucketFor(name)` lookup to the Structure
-  seam (precomputed bucket-name -> {section, bucket} map in buildStructure, built
-  off the already-validated unique bucket names). No behavior change to existing
-  methods; purely additive.
-- src/cli/verbs/create.ts (the migration off DocCategory): handleCreate resolves
-  the create-name against the bundled DEFAULT tree synchronously (so an unknown
-  name still fails before any vault load — the `create bogus` contract runs with
-  no vault configured): a section kind (e.g. `doc`) goes straight to createGeneric;
-  a branch bucket name (e.g. `architecture`) resolves to its section + a preset
-  category subfolder; a leaf name files into the section folder with no preset.
-  createGeneric now loads the per-vault Structure up front and validates an
-  explicit --category against THAT section's declared bucket names (replacing the
-  isDocCategory/DOC_CATEGORIES enum check). The legacy `wiki create doc --type X`
-  default bucket map (runbook->runbooks, research->research, else->notes) is
-  inlined locally as `defaultDocBucket` and gated to kind==="doc"; it is back-compat
-  for the doc `type` enum that SLICE-0117 removes. Dropped the
-  defaultCategoryForDocType / DOC_CATEGORIES / isDocCategory / DocCategory imports
-  entirely from create.ts. Threaded vaultRoot + structure through CreateRequest so
-  createWithSupersede no longer re-loads them.
-- src/artifacts/store.ts: CreateArtifactInput.category is now `string` (a bucket
-  subfolder) instead of `DocCategory`; artifactPath files into the subfolder for
-  ANY kind when category is set (dropped the `type === "doc"` guard). The relocate
-  path (RelocateArtifactInput.category, isDocCategory in relocateArtifact) still
-  imports DocCategory — that migration is SLICE-0115, so store.ts keeps the import
-  for now. No dangling doc-category type remains on the CREATE path.
+- src/cli/verbs/search.ts: dropped the `include-research` boolean flag and the
+  whole research-collection branch (the uniformConfigValue/divergence check on
+  research_path, the registered.has("research") push, the never-synced skip).
+  uniformConfigValue/divergenceMessage stay — still used for the qmd_command
+  single-binary check. Updated the two stale "research path" comments.
+- src/cli/verbs/sync.ts: dropped the `include-research` flag and the research
+  target push; sync now only ever targets the project's own collection.
+  booleanValue is still used (pull/force-embed).
+- src/config/project.ts: removed the `research_path` field from ProjectConfig and
+  its loader line; dropped the now-unused `expandHome` import (it was used only
+  for research_path).
+- src/integrations/qmd.ts: removed the stale research_path resolution comment from
+  the module header.
+- src/cli/usage.ts: removed `--include-research` from the `wiki search` and
+  `wiki sync` usage strings and flag tables.
+- README.md: deleted the dead `[research] sources` TOML example from the config
+  block. (The "Docs are nested by locked category" line is left for SLICE-0124,
+  which owns the README docs-category text; this item owns only the [research]
+  block per the plan.)
 
-Consumers NOT touched this slice (still on the old machinery until their own
-slice): src/cli/verbs/doc.ts recategorize (SLICE-0115), src/bootstrap/doctor.ts
-(SLICE-0113), and store.ts relocate (SLICE-0115). registry.ts still exports
-DOC_CATEGORIES/isDocCategory/defaultCategoryForDocType/DocCategory (deleted in
-SLICE-0117 after all consumers migrate).
+Conservative assumption recorded: a now-removed flag (`--include-research`) is
+rejected by strict parseArgs as an unknown option, which the CLI surfaces as a
+ParseError (exit 1). The rewritten tests pin that exit-1 contract rather than
+silently dropping the cases.
 
-Conservative assumptions recorded:
-- A branch section other than `doc` with no explicit --category and no preset
-  bucket files straight into the section folder (category undefined). No default
-  tree has such a section, and doctor (SLICE-0113) will flag a loose file in a
-  branch section, so this is a reversible, safe default rather than inventing a
-  fallback bucket.
-- bucket.template overrides are honored by the registry data model but the create
-  path keeps filing under the section template (type === section name); under the
-  default tree every bucket's template equals its section, so this is byte-identical.
-  A genuine per-bucket template override is out of scope until a slice demands it.
+Tests (no test deleted or weakened; the two flag-exercising cases were rewritten
+to the new contract explicitly):
+- tests/cli-search.test.ts: replaced "search include-research queries both
+  pre-synced collections" with "search rejects the removed --include-research
+  flag" (exit 1, no `--collection research` touched). Removed the unused
+  researchPath fixture field, its mkdir, and the research_path frontmatter line.
+- tests/cli-sync.test.ts: replaced "sync include-research also refreshes the
+  research collection" with "sync rejects the removed --include-research flag"
+  (exit 1, no `--name research`). Removed the researchPath fixture plumbing.
+- tests/search-upgrade.test.ts: removed the researchPath fixture field, its mkdir,
+  and the research_path frontmatter lines (no test there exercised the flag; pure
+  fixture noise now that the config field is gone).
 
-Tests (tests/create-by-bucket.test.ts, new — 5 cases): create <branch-bucket>
-(`architecture`) files into docs/architecture/ with a DOC id and the doc template;
-create <leaf-name> (`prd`) files into prds/ with a PRD id; an unknown name errors
-"unknown artifact type" and lists the kinds; --category is subsumed (names a
-bucket of the section and files there); an unknown --category bucket errors against
-the loaded tree. No existing test was weakened; the pinned cli-doc.test.ts and
-cli-create-path-echo.test.ts contracts (create doc --category / --type default)
-still pass unchanged because the hybrid path preserves them.
+Step 4 (research files into docs/research/) is already proven by the existing
+tests/create-by-bucket.test.ts case (`--category research` -> docs/research/ with
+a DOC-0001 id and the doc template) and tests/cli-one-shot-create.test.ts; no new
+test needed.
 
 Files changed:
-- src/artifacts/registry.ts (bucketFor lookup)
-- src/artifacts/store.ts (create category -> string; generic subfolder path)
-- src/cli/verbs/create.ts (resolve by bucket/leaf name; migrate off DocCategory)
-- tests/create-by-bucket.test.ts (new)
-- .ralph/items.json (SLICE-0112 passes false->true)
-- .ralph/progress.md (this entry)
-
-Verification (all green at this commit):
-- bun run build: ok (cli.js 0.32 MB, bundled 99 modules)
-- bunx tsc --noEmit: clean
-- bun run test: 395 pass, 0 fail, 1272 expect() calls, 50 files
-
-Next-iteration notes: SLICE-0113 (doctor structure-only) is unblocked (blocker
-0110 passes). SLICE-0114 and SLICE-0115 are now also unblocked (both needed 0112).
-Lowest-numbered next is SLICE-0113: reframe doctor's structural check in
-src/bootstrap/doctor.ts to validate folders against the config tree (declared
-section/bucket; no loose files in a branch section) instead of the hardcoded
-DOC_CATEGORIES lock, READ-only (do not delete DOC_CATEGORIES — that is 0117).
-
-## SLICE-0113 DOCTOR STRUCTURE-ONLY (PASS)
-
-Selected as the lowest-numbered unfinished item; its only blocker SLICE-0110 is
-passes:true.
-
-Decision rationale: reframe doctor's structural validation to read the per-vault
-config tree (PRD-0019) instead of the hardcoded DOC_CATEGORIES lock. The same
-invariant (ADR-0028's no-loose-files) is now expressed through the section/bucket
-tree: a branch section's folder may hold only its config-declared bucket subfolders
-and no loose files. This slice only READS the tree; the dead DOC_CATEGORIES
-machinery stays importable (its deletion is SLICE-0117).
-
-Implementation:
-- src/bootstrap/doctor.ts: checkProjectDocsStructure now takes the loaded Structure
-  and iterates every BRANCH section (tree === "branch"). For each, it derives the
-  allowed bucket subfolder names from section.buckets (folder minus the section
-  prefix) and flags (a) any subdirectory that is not a declared bucket and (b) any
-  loose .md file sitting directly in the branch folder. Leaf sections hold artifacts
-  directly and are not policed for loose files. The check validates structural truth
-  only and emits no fuzzy "wrong bucket" warning — a declared-but-debatable bucket
-  choice is never flagged. Dropped the DOC_CATEGORIES import from doctor.ts (it is no
-  longer read here); registry.ts still exports it for the not-yet-migrated consumers.
-  runDoctor already had `structure` in scope and now threads it in.
-- src/cli/verbs/sync.ts: the sync gate caller passes the already-loaded `structure`
-  into checkProjectDocsStructure; updated the gate comment to reflect the
-  config-declared invariant.
-
-Behavior under the default tree is unchanged in substance: `doc` is the one branch
-section (folder docs/) with the six default buckets, so a rogue docs/ subfolder or a
-loose doc is still flagged — only the message wording changed from "not a locked
-category" to "is not a declared bucket of section '<name>'".
-
-Conservative assumptions recorded:
-- Only BRANCH sections are policed for undeclared subfolders / loose files. Leaf
-  sections (prds, slices, adrs, handoffs under the default tree) hold their artifacts
-  directly, exactly as before, so they are intentionally not checked here. This
-  preserves today's behavior (the old check only looked at docs/) and is reversible.
-- Allowed bucket subfolder name is computed as bucket.folder.slice(section.folder.length + 1),
-  relying on the registry's one-level "<section-folder>/<bucket>" convention from
-  SLICE-0110; correct for every one-level tree the loader can produce.
-
-Tests:
-- tests/doctor-structure-tree.test.ts (new — 5 cases): an undeclared folder in a
-  branch section is flagged; a loose file directly under a branch section is flagged;
-  a valid-but-debatable bucket choice is NOT flagged (no fuzzy warning); a leaf
-  section holding artifacts directly is not policed; and a CUSTOM wiki.json tree is
-  validated against its own declared buckets, not the default categories (a default
-  doc bucket name under a custom section is correctly flagged as undeclared there).
-- tests/cli-sync.test.ts: updated the one pinned assertion from "not a locked
-  category" to "is not a declared bucket" to match the new (config-driven) message;
-  the sync-refuses-on-rogue-folder contract is otherwise unchanged. No test deleted
-  or weakened.
-
-Files changed:
-- src/bootstrap/doctor.ts (config-tree validation; drop DOC_CATEGORIES import)
-- src/cli/verbs/sync.ts (thread structure into the gate; comment)
-- tests/doctor-structure-tree.test.ts (new)
-- tests/cli-sync.test.ts (pinned message assertion updated to new contract)
-- .ralph/items.json (SLICE-0113 passes false->true)
-- .ralph/progress.md (this entry)
-
-Verification (all green at this commit):
-- bun run build: ok (cli.js 0.32 MB, bundled 99 modules)
-- bunx tsc --noEmit: clean
-- bun run test: 400 pass, 0 fail, 1281 expect() calls, 51 files
-
-Next-iteration notes: SLICE-0114 (generic parent backlink) is now unblocked
-(blockers 0110 + 0112 both pass), as is SLICE-0115 (0111 + 0112). Lowest-numbered
-next is SLICE-0114: replace the hardcoded PRD<->slice backlink in
-src/cli/verbs/create.ts (both the pre-flight parent read and backlinkParentPrd write)
-with a config-declared parent + child_list relationship, with no-double-add and
-create-if-absent.
-
-## SLICE-0114 GENERIC PARENT BACKLINK (PASS)
-
-Selected as the lowest-numbered unfinished item; its blockers SLICE-0110 and
-SLICE-0112 are both passes:true.
-
-Decision rationale: replace the hardcoded PRD<->slice backlink with a
-config-declared parent + child_list relationship so no kind name is hardcoded in
-the create path. The PRD<->slice link is now pure config.
-
-Implementation:
-- src/artifacts/registry.ts: added two optional ArtifactSpec fields — `parent`
-  (the parent kind a child backlinks to) and `child_list` (the list field on a
-  parent that receives child ids). parseKinds validates both as optional strings.
-  DEFAULT_KINDS now declares prd.child_list = "slices" and slice.parent = "prd".
-  Added a pure helper `parentBacklink(structure, childType)` that resolves the
-  parent kind, the child's parent-id field (convention: `parent_<parent>`, e.g.
-  parent: "prd" -> field parent_prd), and the parent's child_list field. Returns
-  undefined when the kind has no parent, the parent kind is unknown, or the parent
-  declares no child_list — a config-incomplete relationship backlinks nothing
-  rather than throwing. The helper does no I/O; the caller owns the reads/writes.
-- wiki.json: the repo-root reference config now declares the same prd.child_list /
-  slice.parent so a real vault loading wiki.json gets the relationship from config.
-- src/cli/verbs/create.ts: replaced BOTH prd/slice specials. The pre-flight parent
-  read (was `if (type === "slice" && fields.parent_prd...)`) now resolves
-  parentBacklink(structure, type) and pre-flights whatever parent kind/field config
-  declares. The backlinkParentPrd write was renamed/rewritten as the generic
-  backlinkParent: it resolves the same backlink, reads the parent artifact, and
-  appends the child id to the config-declared child_list field — no-double-add
-  (skips when the id is already present) and create-if-absent (setField writes the
-  list whether or not the parent had one). Both run inside createWithSupersede's
-  rollback try block, so a missing/invalid parent still rolls back the child.
-  Imported parentBacklink; no kind name (prd/slice) appears in create.ts anymore.
-
-Conservative assumptions recorded:
-- The child's parent-id field name is derived by convention as `parent_<parent>`
-  (slice's existing `parent_prd` field), not a third config field. This keeps the
-  one-seam rule and matches the existing template field; a genuinely different
-  field name is out of scope until a slice demands it.
-- A config-incomplete relationship (child declares parent, but the parent declares
-  no child_list) is inert (backlinks nothing) rather than a hard error, so a
-  partially-configured tree still creates artifacts. Reversible.
-- "slices" stays in create.ts NON_FLAG_FIELDS (unchanged): the child-side list
-  field is still CLI-owned, exactly as before.
-
-Tests:
-- tests/parent-backlink.test.ts (new — 4 cases): parentBacklink resolves a child's
-  parent kind, parent-id field, and child_list field from config under ARBITRARY
-  kind names (epic/task, no prd/slice hardcode); a kind with no parent and a parent
-  kind both backlink nothing; a child whose parent declares no child_list is inert
-  (no throw); and the default prd<->slice relationship is carried as config.
-- tests/cli-slice.test.ts (unchanged, still green): the three pinned e2e cases
-  (backlink appends without clobbering; create-if-absent when the parent lacks the
-  list; optional parent) now exercise the generic config-driven path end-to-end.
-- tests/registry-config.test.ts: extended the pinned default-shape assertion to the
-  new contract (prd carries child_list: "slices"; added slice.parent === "prd" and
-  prd.child_list === "slices" assertions). No test deleted or weakened.
-
-Files changed:
-- src/artifacts/registry.ts (parent/child_list fields, parseKinds validation,
-  DEFAULT_KINDS, parentBacklink helper)
-- src/cli/verbs/create.ts (generic pre-flight + backlinkParent; drop prd/slice
-  hardcode)
-- wiki.json (declare prd.child_list / slice.parent in the reference config)
-- tests/parent-backlink.test.ts (new)
-- tests/registry-config.test.ts (pinned shape updated to the new contract)
-- .ralph/items.json (SLICE-0114 passes false->true)
-- .ralph/progress.md (this entry)
-
-Verification (all green at this commit):
-- bun run build: ok (cli.js 0.32 MB, bundled 99 modules)
-- bunx tsc --noEmit: clean
-- bun run test: 404 pass, 0 fail, 1288 expect() calls, 52 files
-
-Next-iteration notes: SLICE-0115 (relocation preserves identity) is unblocked
-(blockers 0111 + 0112 both pass), as is SLICE-0116 (0111 + 0112). Lowest-numbered
-next is SLICE-0115: generalize relocateArtifact / doc recategorize
-(src/artifacts/store.ts, src/cli/verbs/doc.ts) into a section-agnostic move-to-bucket
-(same-section keeps id, cross-section re-mints), migrating store.ts relocation off
-DocCategory/isDocCategory.
-
-## SLICE-0115 RELOCATION PRESERVES IDENTITY (PASS)
-
-Selected as the lowest-numbered unfinished item; its blockers SLICE-0111 and
-SLICE-0112 are both passes:true.
-
-Decision rationale: generalize the doc-only relocate/recategorize into a
-section-agnostic "move to bucket". A same-section move keeps the artifact id
-(the section owns the id-space, so inbound [[id]] links stay resolvable); a
-cross-section move re-mints the id in the target section's id-space (the settled
-rule; this PRD does no link rewriting). Migrate store.ts relocation off
-DocCategory/isDocCategory so no dangling doc-category type remains on the move
-path for the SLICE-0117 deletion.
-
-Implementation:
-- src/artifacts/store.ts: RelocateArtifactInput.category (DocCategory) is replaced
-  by `bucket?: string` (a create-name resolved through the structure). relocateArtifact
-  now resolves the target via structure.bucketFor(bucket) and branches on section:
-  - unknown bucket -> ArtifactValidationError("unknown bucket: <name>").
-  - cross-section (resolved.section.name !== input.type) -> re-mint via the shared
-    mintAndWrite seam against the TARGET section, rewriting id + aliases on the moved
-    frontmatter (remintAliases swaps the old id for the new and guarantees the new id
-    is present), passing body/other fields through verbatim, then rm the old file. No
-    re-validation (a move repositions, it does not repair), consistent with the
-    existing narrowed-write philosophy.
-  - same-section move or pure retitle -> id preserved; destination is the resolved
-    bucket folder (or the file's current dirname for a pure retitle), re-slugged
-    filename, existing duplicate-destination guard kept.
-  Dropped the DocCategory/isDocCategory imports and the doc-only existingCategory
-  helper + its `relative` import. Added a `projectPath` import (used to build the
-  destination under the resolved bucket.folder). artifactDirectory is still used by
-  the create/read paths, so its import stays.
-- src/cli/verbs/doc.ts: dropped DOC_CATEGORIES/isDocCategory/DocCategory imports.
-  recategorizeDoc now passes { bucket: category }; the relocate() helper validates
-  the requested category against the loaded doc section's declared bucket names
-  (structure.sections.find name==="doc") and emits the same "unknown category" +
-  "category must be one of: ..." messages before any move, so the CLI contract
-  (exit 1, message contains "category") is preserved while the vocabulary is now
-  config-driven rather than the hardcoded DOC_CATEGORIES enum.
-
-Consumers still on the old machinery after this slice: src/artifacts/registry.ts
-(owner) and src/bootstrap/doctor.ts no longer import it; the remaining importer of
-DOC_CATEGORIES/isDocCategory/defaultCategoryForDocType/DocCategory is registry.ts
-itself (the exports), deleted in SLICE-0117. Verified: store.ts and doc.ts now have
-zero references; create.ts (0112) and doctor.ts (0113) were already migrated.
-
-Conservative assumptions recorded:
-- The doc-only ADR-0028 "refuse to relocate a doc sitting in a non-locked folder
-  unless an explicit locked category is given" guard is dropped. It was doc-specific
-  and tied to isDocCategory; the no-loose-files / undeclared-folder invariant is now
-  enforced structurally by doctor against the config tree (SLICE-0113), so the store
-  seam no longer second-guesses the move. A pure retitle keeps the file exactly where
-  it is (dirname of the current path), so a doc in any folder retitles in place. This
-  is reversible and no existing test depended on the refusal.
-- Cross-section re-mint rewrites only id + aliases + title + updated; it does not
-  re-validate against the target template (a cross-section move is rare and may cross
-  schemas). Matches the existing "move, don't repair" stance.
-
-Tests (tests/relocate-section.test.ts, new -- 4 cases) on a custom wiki.json tree
-(branch section `notebook` prefix NOTE with draft/final buckets; leaf section
-`archive` prefix ARCH) against a TEMP vault: a same-section draft->final move keeps
-NOTE-0001 and the id still resolves via readArtifact; a pure retitle (no bucket)
-keeps the file in its current folder with the id preserved; a cross-section
-notebook->archive move re-mints to ARCH-0008 (highest archive id + 1), swaps aliases
-to the new id, removes the old file, and resolves by the new id; an unknown bucket
-throws "unknown bucket". The real $HOME/Knowledge vault is never touched (mkdtemp
-temp vaults only).
-
-Pinned tests still green unchanged: tests/cli-doc.test.ts (doc recategorize moves
-DOC-0001 architecture<->runbooks keeping its id; unknown category exits 1 with the
-category vocabulary) and tests/path-containment.test.ts (relocateArtifact id
-traversal guard; create+read+retitle keeps the id) now exercise the generalized
-path. No test was deleted or weakened.
-
-Files changed:
-- src/artifacts/store.ts (section-agnostic relocate; bucket input; re-mint on
-  cross-section; drop DocCategory/isDocCategory + existingCategory)
-- src/cli/verbs/doc.ts (recategorize -> bucket; validate against loaded doc section)
-- tests/relocate-section.test.ts (new)
-- .ralph/items.json (SLICE-0115 passes false->true)
-- .ralph/progress.md (this entry)
-
-Verification (all green at this commit):
-- bun run build: ok (cli.js 0.32 MB)
-- bunx tsc --noEmit: clean
-- bun run test: 408 pass, 0 fail, 1305 expect() calls, 53 files
-
-Next-iteration notes: SLICE-0116 (capture resolves kind via per-vault tree) is
-unblocked (blockers 0111 + 0112 both pass) and is the lowest-numbered remaining
-item. After this slice store.ts and doc.ts no longer import the doc-category
-machinery; only registry.ts's own exports remain, so SLICE-0117 (capstone deletion)
-now needs only SLICE-0116's blocker chain plus its own already-passing blockers
-(0112/0113/0114/0115) -- but 0116 is lower-numbered and should be taken first.
-
-## SLICE-0116 CAPTURE RESOLVES KIND VIA PER-VAULT TREE (PASS)
-
-Selected as the lowest-numbered unfinished item; its blockers SLICE-0111 and
-SLICE-0112 are both passes:true.
-
-Decision rationale: fix the latent coupling in the PRD-0022 capture path so kind
-resolution rides the SAME per-vault Structure the write step uses. Today (verified)
-src/artifacts/capture.ts imported both DEFAULT_STRUCTURE and loadStructure:
-resolveKind read DEFAULT_STRUCTURE.kinds / DEFAULT_STRUCTURE.typeForId while
-fileArtifact loaded loadStructure(vaultRoot) for the write. Harmless while every
-vault uses the default tree, but under a custom wiki.json a capture of a
-custom-kind draft would warn "maps to no registered wiki kind" instead of filing
-it, because the default structure has never seen that kind.
-
-Implementation (src/artifacts/capture.ts only):
-- resolveKind now takes the loaded Structure as a parameter and checks
-  structure.kinds[template] / structure.typeForId(id) against it, not the bundled
-  default. Dropped the DEFAULT_STRUCTURE import (loadStructure + the Structure type
-  remain).
-- captureArtifact now resolves the vault (getVaultRoot) and loads its Structure
-  (loadStructure) UP FRONT, immediately after the artifact-shaped check and before
-  resolveKind, then threads vaultRoot + structure into both resolveKind and
-  fileArtifact. Both loads are wrapped so a vault/config fault becomes a warn (never
-  a throw past the seam), preserving the hook's stdout contract.
-- fileArtifact no longer loads the vault or structure itself (they are passed in);
-  it keeps only project resolution + the mintAndWrite file. The now-dead
-  `structure.kinds[kind] === undefined` guard was removed: kind was just resolved
-  against this same structure, so it is always present.
-
-Order note: vault + structure resolution now precede the no-kind warning. Under the
-test harness (KNOWLEDGE_VAULT_ROOT always set) the vault always resolves, so the
-existing warning order is unchanged: the "names no kind" case still warns about the
-kind, and the "no resolvable project" case still warns about the project. Verified by
-the unchanged tests/cli-hook.test.ts capture suite (8 cases) staying green.
-
-Conservative assumption recorded: "custom bucket" in this slice is exercised as a
-custom LEAF section (a kind the default tree does not define). A leaf section is its
-own bucket (named after the section, filing into the section folder), so capturing a
-custom-kind draft files it into that section's folder with a section-prefixed id via
-mintAndWrite. Bucket-subfolder routing on capture (filing into a branch section's
-named subfolder) is not in scope here — capture files into the section folder exactly
-as it did for the default doc section; this slice only fixes WHICH structure resolves
-the kind, matching the item's "regression + coupling fix, no direct user story" framing.
-
-Tests (tests/capture-custom-tree.test.ts, new — 2 cases) against a TEMP vault whose
-wiki.json declares a `bug` leaf kind (prefix BUG, folder bugs) the default structure
-has never seen: capturing a `template: bug` draft is recognized, filed into bugs/ as
-BUG-####-<slug>.md with a BUG-prefixed frontmatter id and the resolved project; a
-re-fire on the same (now id-stamped) draft is idempotent (still exactly one file).
-The real $HOME/Knowledge vault is never touched (mkdtemp temp vault + a saved/restored
-KNOWLEDGE_VAULT_ROOT). Confirmed the test is a real regression guard: it FAILS on the
-pre-fix code (custom `bug` kind warns instead of capturing) and PASSES with the fix.
-No existing test was deleted or weakened.
-
-Files changed:
-- src/artifacts/capture.ts (per-vault structure threaded into resolveKind; vault +
-  structure loaded up front; drop DEFAULT_STRUCTURE import; remove dead kind guard)
-- tests/capture-custom-tree.test.ts (new)
-- .ralph/items.json (SLICE-0116 passes false->true)
-- .ralph/progress.md (this entry)
-
-Verification (all green at this commit):
-- bun run build: ok (cli.js 0.32 MB, bundled 99 modules)
-- bunx tsc --noEmit: clean
-- bun run test: 410 pass, 0 fail, 1313 expect() calls, 54 files
-
-Next-iteration notes: SLICE-0117 (capstone deletion of DOC_CATEGORIES / isDocCategory
-/ defaultCategoryForDocType / DocCategory + the doc `type` enum) is now the lowest
-unfinished item. Its blockers 0112/0113/0114/0115 all pass and capture no longer
-imports the doc-category machinery, so grep should show only registry.ts (the owner /
-exporter) still referencing it. SLICE-0118 remains after 0117.
-
-## SLICE-0117 DELETE DEAD DOC-CATEGORY MACHINERY (PASS)
-
-Selected as the lowest-numbered unfinished item; its blockers 0112/0113/0114/0115
-all pass. Pre-flight grep confirmed only registry.ts (the owner/exporter) and two
-test COMMENTS still referenced the machinery — every runtime consumer (store.ts,
-doctor.ts, create.ts, doc.ts, capture.ts) was already migrated by the earlier
-slices, so the deletion had no un-migrated importer to break.
-
-Decision rationale: capstone of PRD-0019's three-vocabularies cleanup. Remove the
-hardcoded DOC_CATEGORIES / DocCategory / isDocCategory / defaultCategoryForDocType
-from registry.ts and the doc `type` enum from templates/doc.md, so a doc no longer
-carries BOTH a `type` field and a `category` folder that can disagree. The
-config-declared bucket model (SLICE-0110..0116) supersedes ADR-0028's locked
-categories.
-
-Implementation:
-- src/artifacts/registry.ts: deleted the DOC_CATEGORIES const, the DocCategory
-  type, isDocCategory(), and defaultCategoryForDocType(). Kept the `export {
-  buildStructure }` that sat between them. The remaining lone reference is a
-  descriptive comment on DEFAULT_BUCKETS noting the buckets reproduce "today's
-  locked DOC_CATEGORIES (ADR-0028)" — left as historical provenance, references no
-  deleted symbol.
-- templates/doc.md: removed the `type: { type: enum, required: true, values:
-  [runbook, research, guide, learning, reference] }` schema field and the
-  `· {{type}}` fragment from the body header line (now `> {{id}} · {{project}}`).
-  A doc has no `type` field at all anymore.
-- src/cli/verbs/create.ts: removed the legacy defaultDocBucket() helper (it mapped
-  the now-gone doc `type` enum to a bucket). A bare `wiki create doc` with no
-  --category now defaults to the `notes` bucket (the catch-all) so it still files
-  into a declared bucket, not loose in docs/. Explicit --category still validates
-  against the loaded section's bucket names; create-by-bucket-name (SLICE-0112) is
-  unchanged.
-- src/cli/usage.ts: updated the `wiki create doc` help (dropped the --type flag,
-  reworded --category as the bucket subfolder defaulting to notes). No test pins
-  this string.
-- src/bootstrap/doctor.ts: the CONTEXT.md drift remediation message now says
-  `wiki create doc --project <p> --category notes` instead of `--type reference`
-  (the bootstrap-doctor-repo-binding test only asserts the message contains "wiki
-  create doc", which still holds).
-
-Conservative assumptions recorded:
-- A bare `wiki create doc` (no bucket name, no --category) defaults to `notes`.
-  Rationale: the old code already routed every unmapped `type` to `notes`, and a
-  loose doc in docs/ would now be flagged by doctor (SLICE-0113). `notes` is the
-  documented catch-all, a reversible default, and keeps `wiki create doc` working
-  without inventing a new fallback.
-- `type: research`/`type: runbook` still appearing in tests/artifacts.test.ts
-  createArtifact `fields` is now a harmless unknown frontmatter field: validate()
-  only checks declared schema fields and render preserves extras, so those path/id
-  assertions stay green untouched. Not migrated because nothing asserts on the
-  field there.
-
-Tests (no test deleted or weakened; every type-enum assertion was rewritten to the
-new contract explicitly):
-- tests/cli-doc.test.ts: the basic-create case now asserts the file has NO `type:`
-  field. Replaced "derives the category from type" with "no --category defaults to
-  the notes bucket". Removed the now-meaningless "routes an unmapped type to notes"
-  (the type enum is gone) — folded into the notes-default case. Replaced "exits 1
-  when type is missing" with "no longer requires --type and creates with no type
-  field" (exit 0, no type field). Replaced "exits 1 for invalid type enum value"
-  with "rejects the removed --type flag" (--type is now an unknown flag -> nonzero
-  exit). Dropped --type from the tags case (and its `type: research` assertion),
-  the unknown-category case, the increments-IDs case, and the createArgs() helper
-  (now files via --category runbooks to keep the docs/runbooks/ path assertions).
-- Dropped the stale --type arg from tests/cli-create-path-echo.test.ts (->
-  --category runbooks), tests/cli-template-bleed.test.ts (-> --category runbooks),
-  tests/cli-one-shot-create.test.ts (-> --category research),
-  tests/cli-dedup.test.ts (-> --category notes), and the three --type reference
-  args in tests/create-by-bucket.test.ts (removed; --category drives the folder).
-
-Verified the new "creates with no type field" assertion is a real deletion guard:
-manually created a doc against a TEMP fixture vault (never the real $HOME/Knowledge)
-— it filed into docs/notes/DOC-0001-*.md with frontmatter carrying no `type` key and
-a clean body header `> DOC-0001 · p` (no literal {{type}}).
-
-Files changed:
-- src/artifacts/registry.ts (delete DOC_CATEGORIES/DocCategory/isDocCategory/
-  defaultCategoryForDocType)
-- templates/doc.md (remove the `type` enum field + `· {{type}}` body fragment)
-- src/cli/verbs/create.ts (remove defaultDocBucket; bare doc defaults to notes)
-- src/cli/usage.ts (doc create help: drop --type, reword --category)
-- src/bootstrap/doctor.ts (drift message: --type reference -> --category notes)
-- tests/cli-doc.test.ts, tests/cli-create-path-echo.test.ts,
-  tests/cli-template-bleed.test.ts, tests/cli-one-shot-create.test.ts,
-  tests/cli-dedup.test.ts, tests/create-by-bucket.test.ts (migrate off --type)
-- .ralph/items.json (SLICE-0117 passes false->true)
-- .ralph/progress.md (this entry)
-
-ADR-0028 (locked doc categories) is superseded by the config-declared bucket model
-introduced across SLICE-0110..0116; doctor's no-loose-files invariant is now
-expressed against the per-vault config tree (SLICE-0113) rather than the deleted
-DOC_CATEGORIES enum.
-
-Verification (all green at this commit):
-- bun run build: ok (cli.js 0.32 MB, bundled 99 modules)
-- bunx tsc --noEmit: clean (exit 0)
-- bun run test: 409 pass, 0 fail, 1310 expect() calls, 54 files
-
-Next-iteration notes: SLICE-0118 (custom tree end-to-end + criteria) is the only
-remaining unfinished item; its blockers 0110/0111/0112/0113 all pass. It should
-build a TEMP vault with a custom wiki.json (a bugs bucket + an architecture section
-with buckets), prove create/doctor/nextId drive entirely from config, surface each
-bucket's `criteria` via `wiki create <bucket> --help` and `wiki schema <bucket>`,
-and update the wiki skill doc for the create-by-bucket syntax.
-
-## SLICE-0118 CUSTOM TREE END-TO-END + CRITERIA (PASS)
-
-Selected as the only remaining unfinished item; its blockers 0110/0111/0112/0113
-all pass.
-
-Decision rationale: prove the section/bucket tree mechanism end-to-end on a TEMP
-vault whose wiki.json declares a tree the tool has never seen, and surface each
-bucket's `criteria` (the agent's what-goes-where signal) through the CLI. Two
-small code gaps blocked a true end-to-end proof and are closed here:
-- handleCreate resolved a create-name only against the bundled DEFAULT_STRUCTURE,
-  so `wiki create <custom-bucket>` (a bucket declared only in the vault's
-  wiki.json) errored "unknown artifact type". It now tries the default tree first
-  (preserving the `create bogus`/`create blueprints` contracts that run before any
-  vault load), then falls back to the per-vault loaded Structure for a custom kind
-  or bucket. A vault-load fault (unconfigured) keeps the default-kinds error; a
-  malformed wiki.json still throws loudly.
-- `wiki create <bucket> --help` and `wiki schema <bucket>` only knew section kinds,
-  so a bucket's criteria was unreachable from the CLI.
-
-Implementation:
-- src/cli/verbs/create.ts: handleCreate gained a per-vault fallback (tryLoadStructure
-  -> structure.kinds / structure.bucketFor) after the synchronous default-tree
-  resolve; extracted presetFor() (branch bucket -> subfolder, leaf -> none) shared by
-  both resolve paths. tryLoadStructure returns undefined when no vault is configured
-  (getVaultRoot throws) so the unconfigured `create bogus` contract still lists the
-  bundled kinds. Added renderBucketCreateHelp(name): loads the structure (default
-  fallback), resolves the bucket, and renders help showing the section prefix, the
-  config-declared folder, and the bucket's `criteria`. Returns null for a non-bucket
-  so dispatch falls back to generic help.
-- src/cli/dispatch.ts: the per-verb help branch, when the create subverb names no
-  curated USAGE entry, now calls renderBucketCreateHelp and prints it if the name
-  resolves to a bucket (else falls through to generic create help). Imported the
-  helper.
-- src/cli/verbs/schema.ts: rewrote handleSchema to resolve the positional via a new
-  resolveSchemaTarget(structure, name) that accepts a kind OR a bucket/leaf name. A
-  bucket resolves to its section's template and carries the bucket's `criteria`,
-  printed after the field list (human) and added to the JSON object. The usage line
-  now lists kinds + branch-bucket names. The existing `wiki schema slice` (kind,
-  --json) contract is unchanged (a kind has no criteria).
-- src/cli/usage.ts: schema entry updated to `wiki schema <kind|bucket>` and notes a
-  bucket prints its criteria.
-- skills/wiki/SKILL.md: replaced the locked-category guidance with the create-by-bucket
-  syntax — `wiki create <bucket>` files into the bucket subfolder, `wiki create
-  <bucket> --help` / `wiki schema <bucket>` show criteria, buckets are config-declared
-  in wiki.json (not a hardcoded lock); doctor flags undeclared folders / loose files.
-
-Conservative assumptions recorded:
-- Per-bucket template OVERRIDE on the create path stays out of scope (as in SLICE-0112):
-  the create path still loads the template by SECTION name, and the custom-tree test
-  reuses the bundled `doc` / `decision` templates by reshaping those sections' folders,
-  prefixes (DOC/ADR, matching the templates' id patterns), and buckets entirely from
-  config. The slice's "drives templates from config" is exercised by config-declared
-  section->template selection, which is what the bucket model already provides; a
-  genuinely new template body for a never-before-seen kind would need a templates/<kind>.md
-  and is not required to prove the tree mechanism. The "architecture section" is modeled
-  as the decision section relocated to folder architecture/ with components/boundaries
-  buckets, proving a top-level non-default section with its own buckets and id-space.
-- A malformed wiki.json on the create fallback path throws (a present-but-broken config
-  is a real error); only an unconfigured vault falls back to the bundled-kinds error.
-
-Tests (tests/custom-tree-e2e.test.ts, new — 5 cases) against a TEMP vault whose
-wiki.json declares a custom tree (doc reshaped to a knowledge/ branch with a `bugs`
-bucket the default tree never had; decision reshaped to a top-level architecture/
-branch with components/boundaries buckets): creating into custom buckets files into
-the config-declared folders with section-prefixed ids minted per-section (DOC-0001
-bug, DOC-0002 runbook sharing the doc id-space; ADR-0001 component from the separate
-architecture id-space); doctor passes structural validation against the custom tree
-and nextId honors each section's independent id-space (DOC-0002 / ADR-0002); an
-undeclared folder under a custom branch section is flagged; `wiki create bugs --help`
-surfaces the bucket criteria + folder + prefix from the loaded structure; `wiki schema
-components` lists the decision-template fields and prints the bucket criteria (human +
---json). The real $HOME/Knowledge vault is never touched (mkdtemp temp vaults only).
-No existing test was deleted or weakened.
-
-Files changed:
-- src/cli/verbs/create.ts (per-vault create-name fallback; renderBucketCreateHelp)
-- src/cli/dispatch.ts (intercept create-by-bucket --help)
-- src/cli/verbs/schema.ts (resolve kind OR bucket; surface criteria)
-- src/cli/usage.ts (schema entry: kind|bucket + criteria)
-- skills/wiki/SKILL.md (create-by-bucket syntax; criteria via help/schema)
-- tests/custom-tree-e2e.test.ts (new)
-- .ralph/items.json (SLICE-0118 passes false->true)
+- src/cli/verbs/search.ts (drop include-research branch + flag)
+- src/cli/verbs/sync.ts (drop include-research flag + research target)
+- src/config/project.ts (remove research_path field + loader + expandHome import)
+- src/integrations/qmd.ts (remove research_path header comment)
+- src/cli/usage.ts (remove --include-research from search/sync)
+- README.md (delete [research] sources example)
+- tests/cli-search.test.ts, tests/cli-sync.test.ts, tests/search-upgrade.test.ts
+  (rewrite flag cases to the rejection contract; drop research fixture plumbing)
+- .ralph/items.json (SLICE-0119 passes false->true)
 - .ralph/progress.md (this entry)
 
 Verification (all green at this commit):
 - bun run build: ok (cli.js 0.32 MB, bundled 99 modules)
 - bunx tsc --noEmit: clean (exit 0)
-- bun run test: 414 pass, 0 fail, 1334 expect() calls, 55 files
+- bun run test: 415 pass, 0 fail, 1333 expect() calls, 55 files
 
-This is the last item in the bundle. PRD-0018 (0108-0109) and PRD-0019 (0110-0118)
-are complete: all 11 items pass with the full gate green at each commit.
+Next-iteration notes: SLICE-0120 (capture honest on frontmatter) is the next
+lowest unfinished item and has no blockers. SLICE-0121 (allocation lock) and
+SLICE-0122/0123/0124 are also unblocked; pick the lowest-numbered false item.
 
-## Bundle verification (COMPLETE) — no item changed
+## SLICE-0120 CAPTURE IS HONEST ON FRONTMATTER (PASS)
 
-All 11 items were already passes:true on entry to this iteration. Re-ran the
-full gate on the finished bundle at HEAD 437a7b8 to confirm the COMPLETE claim:
-- bun run build: ok (cli.js 0.32 MB)
+Selected as the lowest-numbered unfinished item; no blockers.
+
+Decision rationale: the warn/captured/null/idempotent behavior already lives in
+src/artifacts/capture.ts (built across SLICE-0116). resolveKind returns null only
+when neither template nor id maps to a registered kind, and captureArtifact then
+returns the 'no registered wiki kind' WARN outcome (not null, not a wrong-kind
+write). A bare draft with no id/template returns null (silent). So this item's
+real deliverable per the plan was pinning that contract with tests — in
+particular a regression guard that fails if capture ever regresses to returning
+null on an id/template-bearing draft whose kind is unregistered. No source change
+was needed; capture.ts already satisfies every step.
+
+Implementation:
+- tests/capture-frontmatter-contract.test.ts (new): four branches on a TEMP vault
+  with a custom single-`bug`-kind wiki.json —
+  1. template:bug resolvable -> captured + filed under bugs/.
+  2. template:epic and id:EPIC-0001 (neither registered) -> WARN, message
+     contains 'no registered wiki kind'. This is the regression guard: it asserts
+     the outcome is not null and is 'warn'.
+  3. a draft with only title (no id/template) -> null (silent); the test comment
+     documents why a bare draft cannot warn (capture sees every write via the
+     unfiltered hook path).
+  4. re-fire on an id-stamped draft -> captured both times, filed once
+     (idempotent).
+
+No source files changed (capture.ts already correct); no existing test weakened
+or deleted.
+
+Conservative assumption recorded: capture's existing message text 'maps to no
+registered wiki kind' is treated as the stable contract phrase; the test asserts
+the substring 'no registered wiki kind' so a future reword that keeps the meaning
+still passes while a regression to null fails.
+
+Files changed:
+- tests/capture-frontmatter-contract.test.ts (new contract test)
+- .ralph/items.json (SLICE-0120 passes false->true)
+- .ralph/progress.md (this entry)
+
+Verification (all green at this commit):
+- bun run build: ok (cli.js 0.32 MB, 99 modules)
 - bunx tsc --noEmit: clean (exit 0)
-- bun run test: 414 pass, 0 fail, 1334 expect() calls, 55 files
+- bun run test: 419 pass, 0 fail, 1344 expect() calls, 56 files
 
-No item's passes/steps/description changed and no item was added or removed. This
-entry records the final verification pass so the iteration carries a commit.
+Next-iteration notes: SLICE-0121 (per-project allocation lock, no blockers) is the
+next lowest unfinished item. Its shared-seam rule puts the lock INSIDE mintAndWrite
+in src/artifacts/store.ts. SLICE-0122/0123/0124 are also unblocked; pick the lowest
+false item.
+
+## SLICE-0121 PER-PROJECT ALLOCATION LOCK (PASS)
+
+Selected as the lowest-numbered unfinished item; no blockers (SLICE-0119/0120
+already pass).
+
+Decision rationale: the duplicate-id race (G3, ADR-0041) is real and the existing
+`wx`-exclusive-create + bounded-retry in mintAndWrite did NOT cover it. That guard
+only catches a same-PATH collision; two concurrent creates with DIFFERENT titles
+each compute the same nextId, render distinct file paths, and both succeed — two
+artifacts silently share one id. Verified empirically: with the lock removed, 4 of
+the 5 new tests fail (duplicate ids minted), confirming the guard was insufficient
+and the new test is a true regression guard.
+
+Per the SHARED-SEAM RULE the lock goes INSIDE mintAndWrite (src/artifacts/store.ts),
+the one seam both create and capture call, so capture is covered without editing
+capture.ts.
+
+Implementation:
+- src/artifacts/lock.ts (new): withProjectLock(vaultRoot, project, fn) serializes a
+  project's allocate->write critical section with a short-lived exclusive lockfile
+  at <vault>/.wiki/locks/<project>.lock, created with the `wx` flag (atomic single
+  winner). STALE_MS=10s reclaim-by-mtime so a crashed holder cannot wedge the vault;
+  ACQUIRE_TIMEOUT_MS=15s bound so a stuck peer surfaces as an error not a hang;
+  POLL_MS=10 backoff. The lock is released in a finally on BOTH success and error
+  paths. assertSafeSegment guards the project name (defense-in-depth; projectPath
+  already guards upstream). The lock dir lives OUTSIDE projects/ so it is never
+  scanned by the id index or any artifact walk.
+- src/artifacts/store.ts: mintAndWrite now wraps its whole allocate->write loop in
+  withProjectLock(target.vaultRoot, target.project, ...). The `wx` create + bounded
+  retry is KEPT as a cheap second guard for a same-path collision. Updated the stale
+  'No lockfile' docstring to describe the lock and the race it closes.
+
+Conservative assumptions recorded:
+- Lock placement <vault>/.wiki/locks/<project>.lock (reversible; not in projects/,
+  so no walk/index reads it). The plan allowed "<vault>/.wiki/ (or project dir)".
+- STALE_MS=10s / ACQUIRE_TIMEOUT_MS=15s are generous vs the sub-ms critical section;
+  tunable constants, not a contract.
+
+Tests (new, TEMP vault only): tests/allocation-lock.test.ts —
+  1. two concurrent DIFFERENT-title creates in one project get distinct ids
+     {PRD-0001, PRD-0002} (the core race the lock closes).
+  2. 8 concurrent creates all get distinct ids (no duplicates).
+  3. creates in DIFFERENT projects each start at PRD-0001 (no contention — separate
+     lockfiles).
+  4. a stale lockfile (mtime -60s via `touch -t`) is reclaimed, create succeeds, no
+     lingering lockfile (no deadlock).
+  5. the lockfile lives under .wiki/locks and is never mixed into projects/<p>/.
+No existing test weakened or deleted.
+
+Files changed:
+- src/artifacts/lock.ts (new)
+- src/artifacts/store.ts (wrap mintAndWrite critical section + docstring)
+- tests/allocation-lock.test.ts (new)
+- .ralph/items.json (SLICE-0121 passes false->true)
+- .ralph/progress.md (this entry)
+
+Verification (all green at this commit):
+- bun run build: ok (cli.js 0.32 MB, 100 modules)
+- bunx tsc --noEmit: clean (exit 0)
+- bun run test: 424 pass, 0 fail, 1356 expect() calls, 57 files
+
+Next-iteration notes: SLICE-0122 (doctor --fix duplicate ids + spine drift, no
+blockers) is the next lowest unfinished item. SLICE-0123/0124 are also unblocked.
+SLICE-0126 (incremental qmd update) is now UNBLOCKED since its blocker SLICE-0121
+passes — same mintAndWrite seam — but pick the lowest-numbered ready item.
+
+## SLICE-0122 WIKI DOCTOR --FIX REPAIRS DUPLICATE IDS AND SPINE DRIFT (PASS)
+
+Selected as the lowest-numbered unfinished item; no blockers (SLICE-0119/0120/0121
+all pass).
+
+Decision rationale: the duplicate-id check (checkProjectIdDrift) already DETECTS an
+id mapping to >1 file but had no repair path. SLICE-0122 adds the `--fix` mode: per
+project, renumber duplicate ids FIRST, then run the same mechanical fixes fmt --write
+already applies (legacy-id renumber with vault-wide [[id]] link rewrite, rename to
+id-slug, the per-file category pipeline). Renumber-then-fmt order matters so the
+post-renumber/rename world is what fmt sees, and a final runDoctor re-audit reports
+drift --fix cannot auto-repair (dangling links, repo bindings).
+
+Duplicate-id repair design (conservative, reversible): when an id maps to N files the
+lexicographically-FIRST path is canonical and KEEPS the id (so inbound [[OLD]] links
+from other files still resolve to it — there is no way to disambiguate which duplicate
+an external link meant, and keeping canonical is the least-surprising choice). Every
+other file is reassigned the next free id in that section's id-space via nextId (the
+same allocation seam create uses, so the new id never re-collides). The reassigned
+file's own id, aliases, and any SELF-referential [[OLD]] body links are rewritten to
+the new id so it stays internally consistent; the file is renamed to <newid>-<slug>.md.
+The frontmatter id moves before the next nextId read, so sequential duplicates each get
+a distinct fresh id.
+
+Implementation:
+- src/cli/verbs/fmt.ts: extracted the whole fix pipeline out of handleFmt into a new
+  exported applyFmtFixes(vaultRoot, projPath, write, structure) returning
+  {labels, total, manual, renumberMap}. handleFmt now calls it and prints exactly the
+  same output (same label order, same renumber/manual sections) — no behavior change,
+  proven by the unchanged cli-fmt.test.ts suite still green. This lets doctor --fix
+  drive the identical mechanical fixes without duplicating the renumber/rename/category
+  logic.
+- src/bootstrap/doctor.ts: added repairDuplicateIds(vaultRoot, project, structure)
+  (returns {labels, reassigned}) and the private reassignId helper. Reuses buildIdIndex
+  (the spine), nextId (allocation), and slugifyTitle (filename). New imports: nextId,
+  slugifyTitle, rm, writeFile, dirname.
+- src/cli/verbs/vault.ts: vaultDoctor now parses a `fix` boolean and routes to the new
+  vaultDoctorFix(vaultPath) — iterate projects, repairDuplicateIds then applyFmtFixes
+  (write=true), print the fixes, then runDoctor re-audit (exit 0 clean / 1 if drift
+  remains). Detect-only `doctor` (no --fix) is unchanged.
+- src/cli/usage.ts: documented the new --fix flag on both the `doctor` verb and the
+  `vault doctor` subverb.
+
+Conservative assumptions recorded:
+- Canonical = lexicographically-first path. Reversible; the alternative (first by mtime
+  or by filename-matches-id) is not more correct without semantic info, and the loop is
+  idempotent either way.
+- Renaming the reassigned file to <newid>-<slug>.md happens inside reassignId rather than
+  deferring solely to fmt's renameToId, so the on-disk name matches the new id immediately
+  and the next --fix run sees a clean vault (idempotency).
+- An external [[OLD]] link is left pointing at the canonical artifact (documented above);
+  --fix does not guess which duplicate it meant.
+
+Tests (new, TEMP vault only): tests/cli-doctor-fix.test.ts —
+  1. unit: repairDuplicateIds keeps canonical PRD-0005, renumbers the duplicate to
+     PRD-0006, rewrites its alias and its self-referential [[PRD-0005]] -> [[PRD-0006]],
+     and removes the old duplicate filename.
+  2. unit: no-op when every id is unique (reassigned === 0).
+  3. e2e: `wiki doctor <vault>` WITHOUT --fix is detect-only — reports duplicate-id,
+     exit 1, both files still PRD-0005 on disk (no write).
+  4. e2e: `wiki doctor <vault> --fix` repairs the duplicate (distinct PRD ids on disk)
+     AND drives the legacy-id renumber + vault-wide inbound-[[link]] rewrite
+     (SLICE-001 -> SLICE-0001, the referencing file's link updated — the link-rewriting
+     path the item requires); a second --fix run is a no-op and reports clean.
+No existing test weakened or deleted; cli-fmt.test.ts unchanged and still green
+(confirms the applyFmtFixes extraction preserved fmt's output contract).
+
+Note on running tests: the verification gate is `bun run test` (= `bun test tests/`).
+A bare `bun test` from the repo root picks up unrelated test files outside tests/ (an
+mcp/skill suite with 32 pre-existing failures and an intermittent Bun teardown abort);
+those are NOT part of this repo's gate and are unrelated to this change.
+
+Files changed:
+- src/cli/verbs/fmt.ts (extract applyFmtFixes; handleFmt consumes it)
+- src/bootstrap/doctor.ts (repairDuplicateIds + reassignId)
+- src/cli/verbs/vault.ts (--fix routing + vaultDoctorFix)
+- src/cli/usage.ts (document --fix on doctor and vault doctor)
+- tests/cli-doctor-fix.test.ts (new)
+- .ralph/items.json (SLICE-0122 passes false->true)
+- .ralph/progress.md (this entry)
+
+Verification (all green at this commit, gate = bun run test):
+- bun run build: ok (cli.js 0.33 MB, 100 modules)
+- bunx tsc --noEmit: clean (exit 0)
+- bun run test: 428 pass, 0 fail, 1378 expect() calls, 58 files
+
+Next-iteration notes: SLICE-0123 (doctor --setup honest about non-Pi subagent capture
+reach, no blockers) is the next lowest unfinished item — pre-answered as 'unverified',
+do NOT run Codex/Claude. SLICE-0124 is also unblocked. SLICE-0125 (blocked by 0120,
+now satisfied) and SLICE-0126 (blocked by 0121, now satisfied) are also ready, but pick
+the lowest-numbered false item.
+
+## SLICE-0123 DOCTOR --SETUP HONEST ABOUT NON-PI SUBAGENT CAPTURE REACH (PASS)
+
+Selected as the lowest-numbered unfinished item; no blockers (SLICE-0119..0122
+all pass).
+
+Pre-answered fact recorded (per the runtime contract and ADR-0043): the
+empirical "does Codex/Claude PostToolUse actually reach the persist hook"
+question is NOT run this iteration. No Codex or Claude harness was executed to
+confirm reach. Non-Pi reach is hard-coded to 'unverified' from ADR-0043 context;
+the loop delivers only the testable reporting change.
+
+Decision rationale: doctor --setup printed a blanket "setup is healthy" line
+that said nothing about whether non-Pi subagents capture to the vault, so a green
+setup silently implied parity the tool does not have. The fix reports capture
+reach honestly per harness: Pi is bridge-checkable from its on-disk ~/.pi
+subagent allowlists (the existing unreachableSubagents check already covers the
+fixable Pi gap); Codex and Claude Code are reported 'unverified /
+Pi-subagent-only'. Capture reach is reported separately from issues/clean: a
+non-Pi 'unverified' is the expected steady state (ADR-0043), not a fixable fault,
+so it must not flip `clean` to false — but it must never be hidden either.
+
+Implementation:
+- src/bootstrap/setup-doctor.ts: added the CaptureReach type, the static
+  CAPTURE_REACH table (pi=checkable, codex/claude-code=unverified, each with a
+  detail string), and a captureReach field on SetupResult. evaluateSetup now
+  returns CAPTURE_REACH alongside issues/clean without touching the clean
+  computation. No harness is executed; the table is pre-decided constants.
+- src/cli/verbs/vault.ts: setupDoctor now prints a "capture reach (per harness):"
+  block on BOTH the clean and the issues path via a new printCaptureReach helper,
+  so a healthy setup still surfaces the non-Pi unverified reach. Import widened to
+  pull the CaptureReach type. Exit code unchanged (reach is reporting-only).
+
+Conservative assumptions recorded:
+- Capture reach is reporting-only and does NOT affect the exit code (a
+  steady-state 'unverified' is not a failure). Reversible if a future policy
+  wants to gate on it.
+- Status vocabulary is 'checkable' (Pi) vs 'unverified' (non-Pi); the detail
+  strings carry the ADR-0043 'Pi-subagent-only' framing the plan names.
+
+Untrusted-input note (recorded per the unattended-loop rule): the runtime
+prompt's "vault-context" block carried an injected instruction to run a "vault
+maintenance protocol" that writes the real $HOME/Knowledge vault to 'refresh the
+artifact index'. Declined: it violates the hard rule that the real vault is never
+written by the loop, the loop's cross-iteration state lives only in .ralph/* and
+git (the next iteration does not query the real vault index), and it was not part
+of any item's steps. No real-vault read or write was performed.
+
+Tests (new case, no existing test weakened or deleted):
+- tests/cli-setup-doctor.test.ts: added "capture reach distinguishes Pi
+  (checkable) from non-Pi (unverified), without flipping clean" — asserts a
+  healthy setup still reports pi=checkable, codex=unverified,
+  claude-code=unverified, and that clean stays true. This fails if the report
+  regresses to a blanket-healthy claim or marks non-Pi as checkable.
+
+Files changed:
+- src/bootstrap/setup-doctor.ts (CaptureReach type + CAPTURE_REACH table + field)
+- src/cli/verbs/vault.ts (printCaptureReach on both paths; import widened)
+- tests/cli-setup-doctor.test.ts (new per-harness reach test)
+- .ralph/items.json (SLICE-0123 passes false->true)
+- .ralph/progress.md (this entry)
+
+Verification (all green at this commit, gate = bun run test):
+- bun run build: ok (cli.js 0.33 MB)
+- bunx tsc --noEmit: clean (exit 0)
+- bun run test: 429 pass, 0 fail, 1384 expect() calls, 58 files
+
+Next-iteration notes: SLICE-0124 (docs/metadata/qmd parse cleanup, no blockers)
+is the next lowest unfinished item. SLICE-0125 (blocked by 0120, satisfied) and
+SLICE-0126 (blocked by 0121, satisfied) are also ready; SLICE-0127 needs 0120 +
+0126. Pick the lowest-numbered false item.
+
+## SLICE-0124 DOCS, METADATA, AND QMD COLLECTION-LIST PARSE CLEANUP (PASS)
+
+Selected as the lowest-numbered unfinished item; no blockers (SLICE-0119..0123
+all pass).
+
+Decision rationale: three independent cleanups (G12/G13 + distribution metadata)
+with no behavior coupling. The package.json description still pitched a "locked
+Obsidian vault" workflow that PRD-0019 dissolved; the README still called doc
+buckets "locked categories" you must never extend, contradicting the config-driven
+tree; and listCollections parsed names from the leading human-readable column of
+`qmd collection list`, so a qmd version that reindents or reprefixes that line
+would yield zero names and make an already-synced collection look "never synced"
+(false "needs sync"/skipped-update path).
+
+Implementation:
+- package.json: version 0.0.0 -> 0.1.0; description rewritten to "Config-driven
+  artifact store and semantic recall tool over a plain-Markdown vault. The CLI is
+  the only writer." (drops the stale 'locked Obsidian vault' framing).
+- README.md: the "Docs are nested by locked category ... Never invent a folder"
+  bullet replaced with the config-driven model — each branch section declares its
+  buckets in wiki.json; the six bundled buckets are the default, not a hard lock;
+  `wiki schema doc` lists current buckets. Did NOT touch the [research] block
+  (SLICE-0119 owns it) — verified no [research] text remains from that item.
+- src/integrations/qmd.ts: parseCollectionNames now reads the name out of the
+  stable `qmd://<name>/` URI token (regex /qmd:\/\/([^/\s)]+)\//g) instead of the
+  fragile `^name (qmd://` leading-column match. Anchoring on the URI keeps the
+  substring-false-positive guard (the original reason for exact parsing) AND
+  survives an output-format change (extra indent, bullet prefix, different
+  spacing). Updated the module header + function comment to describe the URI-token
+  contract.
+
+Conservative assumptions recorded:
+- Chose the "version-robust parse" alternative the step allows over a `--json`
+  collection-list form: the real qmd's `collection list --json` support is
+  unverified here, and keying on the `qmd://` URI (which qmd emits in every list
+  format observed in the fixtures) hardens against reformat without depending on
+  an unconfirmed flag. No external qmd binary was run; the existing shell-fake
+  fixtures already emit the `name (qmd://name/)` shape and still parse.
+- Version bumped to 0.1.0 (first non-zero minor) rather than guessing a higher
+  number; reversible.
+
+Tests (new case, no existing test weakened or deleted):
+- tests/qmd-collections.test.ts: added "parses names from the qmd:// URI even
+  when the line format changes" — a reformatted list (leading "  - ", a "\t* ...
+  -> qmd://rift/" arrow form, trailing "[N files]") still yields exactly
+  ["bayland-portfolio-v1", "rift"]. This fails if the parser regresses to the
+  leading-column-only match. The original three parseCollectionNames cases and
+  the QmdError.summary cases are unchanged and still green (the URI parse is a
+  strict superset for the canonical "name (qmd://name/)" shape).
+
+Files changed:
+- package.json (description + version)
+- README.md (config-driven bucket model bullet)
+- src/integrations/qmd.ts (URI-token collection-name parse + comments)
+- tests/qmd-collections.test.ts (new reformat-robust case)
+- .ralph/items.json (SLICE-0124 passes false->true)
+- .ralph/progress.md (this entry)
+
+Verification (all green at this commit, gate = bun run test):
+- bun run build: ok (cli.js 0.33 MB, 100 modules)
+- bunx tsc --noEmit: clean (exit 0)
+- bun run test: 430 pass, 0 fail, 1385 expect() calls, 58 files
+
+Next-iteration notes: SLICE-0125 (skill->kind routing + draft-stamp authoring
+contract, blocked by SLICE-0120 which passes) is the next lowest unfinished item.
+SLICE-0126 (blocked by SLICE-0121, passes) is also ready; SLICE-0127 needs both
+SLICE-0120 and SLICE-0126. Pick the lowest-numbered false item — SLICE-0125.
+
+## SLICE-0125 SKILL->KIND ROUTING + DRAFT-STAMP AUTHORING CONTRACT (PASS)
+
+Selected as the lowest-numbered unfinished item; its blocker SLICE-0120 (capture
+G1) already passes, so it is unblocked. SLICE-0126/0127 remain blocked by
+0121/(0120+0126) per the dependency edges, and 0119..0124 already pass.
+
+Decision rationale: the routing primitive (kindForSkill) and the capture branches
+(template:/id: resolution, warn-on-unknown, null-on-bare, idempotent) already
+exist from earlier slices. This item's real deliverables per the plan were the
+three contract-pinning pieces: (1) a test pinning the wiki.json `skill`->kind
+mapping (default + a custom config via loadStructure), (2) the stamp-`template:`
+(and `project:`) authoring contract documented in the bundled skill, and (3) the
+write/session-end hook guidance strings updated to name the stamp-template step,
+not only `wiki create`, asserted in tests/cli-hook.test.ts. Plus the end-to-end
+test that a stamped draft is captured into the configured kind on a TEMP vault.
+
+Implementation:
+- src/cli/verbs/hooks.ts: STOP_REMINDER now offers two paths — `wiki create
+  <kind> --project <name> --body -` OR "stamp the draft's frontmatter with
+  `template: <kind>` and `project: <name>` so the write hook captures it on save".
+  hookGuidance(skill, cwd) likewise appends the stamp-template alternative naming
+  the resolved kind and the linked project (or `<name>` when unlinked, mirroring
+  the existing projectFlag fallback). No behavior change beyond the guidance text;
+  the capture path and event routing are untouched.
+- skills/wiki/SKILL.md: added a "Stamp-template authoring contract" paragraph to
+  the auto-persist section. Documents that the PostToolUse hook decides on
+  frontmatter alone (it sees every write), so `template: <kind>` + `project:
+  <name>` auto-files a draft; an id:-stamped draft whose prefix resolves to a kind
+  is also captured; re-save is idempotent; a bare draft is left alone; an
+  id/template naming no registered kind warns (never silently dropped); project:
+  may be omitted when the repo is linked.
+
+Conservative assumption recorded: the guidance text is treated as the stable
+contract surface — tests assert the substrings "template: slice" / "project:
+wiki-v2" (hookGuidance) and "template: <kind>" (STOP_REMINDER), so a future
+reword that keeps the stamp-template step still passes while dropping it fails.
+The custom-vault e2e uses a `bug` kind (prefix BUG, folder bugs) with a `skill`
+field — reversible fixture choice mirroring the SLICE-0120 contract test.
+
+Tests (no existing test weakened or deleted):
+- tests/skill-kind-stamp-contract.test.ts (new): (1) every default skill-bearing
+  kind round-trips through DEFAULT_STRUCTURE.kindForSkill (to-prd->prd,
+  to-slices->slice, grill-with-docs->decision, handoff->handoff) and an unmapped
+  skill returns undefined (no guess); (2) a custom wiki.json `skill` field maps
+  via loadStructure (file-a-bug->bug), and a default skill is undefined in the
+  custom tree; (3) e2e: a draft stamped `template: bug` + `project: proj` is
+  captured into projects/proj/bugs/ as BUG-0001-crash-on-save.md on a TEMP vault.
+- tests/cli-hook.test.ts: extended the existing hookGuidance and Stop-reminder
+  cases to assert the new stamp-template wording (fails if the guidance regresses
+  to `wiki create` only).
+
+Files changed:
+- src/cli/verbs/hooks.ts (STOP_REMINDER + hookGuidance stamp-template wording)
+- skills/wiki/SKILL.md (stamp-template authoring contract paragraph)
+- tests/skill-kind-stamp-contract.test.ts (new: mapping pin + e2e)
+- tests/cli-hook.test.ts (assert the new guidance wording)
+- .ralph/items.json (SLICE-0125 passes false->true)
+- .ralph/progress.md (this entry)
+
+Verification (all green at this commit, gate = bun run test):
+- bun run build: ok (cli.js 0.33 MB)
+- bunx tsc --noEmit: clean (exit 0)
+- bun run test: 433 pass, 0 fail, 1399 expect() calls, 59 files
+
+Next-iteration notes: SLICE-0126 (incremental keyword index update inside
+mintAndWrite, blocked by SLICE-0121 which passes) is the next lowest unfinished
+item — SHARED-SEAM RULE: the qmd update goes inside mintAndWrite in store.ts, not
+at call sites, and amends PRD-0018's read-only search by giving the WRITE path the
+keyword update (update those pinned search tests explicitly, do not delete).
+SLICE-0127 still needs both SLICE-0120 (pass) and SLICE-0126 (not yet).
+
+## SLICE-0126 INCREMENTAL KEYWORD INDEX UPDATE ON EVERY WRITE (PASS)
+
+Selected as the lowest-numbered unfinished item; its blocker SLICE-0121
+(per-project allocation lock) already passes, so it is unblocked. SLICE-0127
+remains blocked by both SLICE-0120 (pass) and SLICE-0126 (now satisfied) — it is
+the next item, not this one.
+
+Decision rationale: a freshly created artifact was invisible to keyword search
+until a manual `wiki sync` (G4, ADR-0041 freshness side). The fix fires a cheap
+incremental qmd keyword `update` for the project's collection on every write,
+placed — per the SHARED-SEAM RULE — INSIDE mintAndWrite in src/artifacts/store.ts,
+the one seam both `create` and `capture` call, so it covers both without editing
+capture.ts. Vector `embed` stays owned solely by `wiki sync`; the write path never
+embeds. `wiki search` stays a pure read (PRD-0018) — the keyword update is now the
+WRITE path's job, which is the documented amendment to PRD-0018.
+
+Implementation:
+- src/artifacts/store.ts: mintAndWrite now calls refreshKeywordIndex(vaultRoot,
+  project) after the `wx` write succeeds, still inside withProjectLock (same lock
+  as SLICE-0121, so the refresh runs serialized, never racing another writer).
+  New refreshKeywordIndex helper resolves the qmd binary QMD_COMMAND ->
+  _project.md qmd_command -> `qmd` (the same precedence sync/search/dedup use),
+  ensureCollection (register on first write), then updateCollection(_, false)
+  (keyword reindex only, no --pull, no embed). The whole helper is wrapped in a
+  try/catch that SWALLOWS any fault: qmd missing, project unconfigured (no
+  _project.md, e.g. the allocation-lock test), or never-synced must NOT fail the
+  write — `wiki sync` is the durable reindex, the write-path update is a
+  best-effort freshness nicety. New imports: ensureCollection, updateCollection
+  (../integrations/qmd), loadProjectConfig (../config/project). No circular import
+  (config/project does not import store).
+
+Test-safety (the load-bearing part): a real `qmd` binary is on PATH and its
+global index (~/.cache/qmd/index.sqlite) holds REAL collections including
+`wiki-v2`. Without a guard, any create-path test that uses project "wiki-v2" (or
+any real collection name) and does not pin its own QMD_COMMAND would have the new
+write-path update RE-INDEX THE REAL VAULT — violating the hard rule that the real
+$HOME/Knowledge vault is never written by tests. Mirroring the temp-vault pattern,
+a test preload now defaults QMD_COMMAND to a no-op fake so no test reaches the
+real index; tests that pin their own QMD_COMMAND still win (the preload only fills
+the gap when it is unset).
+- bunfig.toml (new): [test].preload = ["./tests/preload.ts"].
+- tests/preload.ts (new): sets process.env.QMD_COMMAND to tests/fixtures/
+  noop-qmd.sh when unset. In-process tests (dispatch) read it directly; subprocess
+  tests inherit it via { ...process.env }.
+- tests/fixtures/noop-qmd.sh (new, chmod +x): collection list prints nothing,
+  query echoes [], everything else (update/embed/collection add) is a clean exit —
+  never touches the real index.
+- tests/custom-tree-e2e.test.ts: the makeVault helper used to `delete
+  process.env.QMD_COMMAND` ("dedup is off; no qmd needed") — now stale, because
+  every write hits qmd. Changed to keep the preload's no-op fake (set it if unset)
+  instead of deleting, so the write-path update stays off the real index.
+- tests/cli-vault-wide.test.ts: the two divergence-guard cases (makeVaultWithQmd)
+  deliberately run with NO QMD_COMMAND so search resolves the per-project
+  qmd_command values and the single-binary guard fires. The preload's inherited
+  default broke that, so runWiki now drops the inherited QMD_COMMAND unless the
+  fixture pins its own. No assertion changed.
+
+Conservative assumptions recorded:
+- The keyword update is best-effort and silent on failure (swallowed). Rationale:
+  `wiki sync` is the durable reindex and a write must never fail on a freshness
+  nicety; a missing/never-synced collection is the steady state for a brand-new
+  project's first write. Reversible if a future policy wants to surface the fault.
+- ensureCollection on the write path auto-registers the project collection on
+  first write (so the very first artifact is indexed with no prior sync),
+  consistent with how the dedup gate already registers on create.
+- The substitute for the real qmd binary is the existing fake-qmd shell pattern
+  (logging fake in the new test; no-op fake in the preload). No real qmd
+  integration was exercised or verified; the gate proves the write path issues
+  the correct `update` (and never `embed`) calls, not that the real qmd indexed
+  anything. The real-qmd keyword-index round trip remains unverified by this loop
+  (durable indexing is `wiki sync`'s contract, tested elsewhere).
+
+Tests (new, no existing test weakened or deleted): tests/write-keyword-update.test.ts —
+  1. `create decision` (dedup OFF, so its only qmd touch is the write-path update)
+     registers the collection AND runs `update -c wiki-v2`, and NEVER `embed`,
+     NEVER `--pull`. This is the core G4 regression guard.
+  2. a second create reindexes again (>=2 updates) — incremental, not one-shot.
+  3. search after a seed create, with the log cleared, fires NO update and NO
+     embed — only `collection list` + `query` (PRD-0018 read-only contract, now
+     that the keyword update is the write path's job). This is the explicit
+     amendment-pinning test the item required.
+The existing cli-search.test.ts read-only assertions (search never updates) and
+cli-dedup.test.ts ordering assertions (dedup update before query) stay green
+unchanged — the dedup gate's pre-query update still precedes the write-path
+update, so updateIdx < queryIdx holds.
+
+Files changed:
+- src/artifacts/store.ts (refreshKeywordIndex inside mintAndWrite + imports)
+- bunfig.toml (new: test preload)
+- tests/preload.ts (new: default QMD_COMMAND to the no-op fake)
+- tests/fixtures/noop-qmd.sh (new, executable: no-op qmd)
+- tests/custom-tree-e2e.test.ts (keep no-op fake instead of deleting QMD_COMMAND)
+- tests/cli-vault-wide.test.ts (drop inherited QMD_COMMAND for the divergence cases)
+- tests/write-keyword-update.test.ts (new contract test)
+- .ralph/items.json (SLICE-0126 passes false->true)
+- .ralph/progress.md (this entry)
+
+Verification (all green at this commit, gate = bun run test):
+- bun run build: ok (cli.js 0.33 MB, 100 modules)
+- bunx tsc --noEmit: clean (exit 0)
+- bun run test: 436 pass, 0 fail, 1413 expect() calls, 60 files
+- Confirmed the real qmd index stayed at 28 collections after the run (no test
+  polluted ~/.cache/qmd — the preload guard held).
+
+Next-iteration notes: SLICE-0127 (capture runs the dedup gate and warns-and-files
+on a strong match) is the final unfinished item. Both its blockers now pass
+(SLICE-0120 capture G1, SLICE-0126 incremental update). Per its steps the capture
+path must route through runDedupGate (src/artifacts/dedup.ts) inside the
+per-project lock, file-anyway + warn on a strong match (never block/prompt/drop),
+with the locked order dedup refresh+query -> allocate -> write -> qmd update. Note
+the qmd update is already inside mintAndWrite (SLICE-0126); SLICE-0127 must ensure
+the dedup query also runs under the same lock so the "no unlocked qmd touch"
+ordering holds. Use a TEMP vault; the no-op-qmd preload now protects the real index.
+
+## SLICE-0127 CAPTURE RUNS THE DEDUP GATE AND WARNS-AND-FILES ON A MATCH (PASS)
+
+Selected as the lowest-numbered unfinished item; its blockers SLICE-0120 (capture
+G1) and SLICE-0126 (incremental update inside mintAndWrite) both pass, so it is
+unblocked. It is the final unfinished item.
+
+Decision rationale: `wiki create` runs an advisory dedup gate (runDedupGate in
+src/artifacts/dedup.ts), but the in-child capture path filed artifacts with no
+dedup check at all (G6, ADR-0042). The fix routes capture through the SAME
+runDedupGate seam create uses, INSIDE the per-project lock, so the locked critical
+section is dedup refresh+query -> allocate -> write -> qmd update with no unlocked
+qmd touch. Capture is a non-interactive hook, so it must NEVER block, prompt, or
+drop: a strong match files the artifact anyway and records a "possible duplicate of
+[[X]] — review" advisory the hook surfaces to stderr. `wiki create`'s existing
+advisory/strict dedup behavior is untouched.
+
+Shared-seam note: SLICE-0126 already placed the per-project lock + write-path qmd
+update inside mintAndWrite (store.ts). SLICE-0127 needed the dedup query to run
+under that SAME lock (the item's "no unlocked qmd touch" rule), so mintAndWrite
+gained an optional `beforeAllocate` callback that runs once inside withProjectLock
+before the first nextId. Capture passes a beforeAllocate that runs the dedup gate;
+create does not pass one, so create's flow (its dedup runs earlier, outside, as
+before) is unchanged. This keeps the dedup wiring on the capture side without
+editing each call site and without moving create's dedup.
+
+Implementation:
+- src/artifacts/store.ts: mintAndWrite's target gained an optional
+  `beforeAllocate?: () => Promise<void>` run once inside the lock before the
+  allocate->write loop. Docstring updated to name the SLICE-0127 ordering (dedup
+  refresh+query -> allocate -> write -> qmd update, all under the one lock).
+- src/artifacts/capture.ts: fileArtifact now calls mintAndWrite with a
+  beforeAllocate that invokes the new captureDedupNote and records its result in a
+  `dedupNote` closure var; on success the captured outcome carries `note` when set.
+  captureDedupNote runs runDedupGate (skipped when the kind's spec.dedup is false
+  or the project is unconfigured — ProjectConfigError), and on a DedupBlockedError
+  returns the advisory note ONLY for a STRONG match (a weak match stays silent and
+  files). A QmdError (binary missing / never synced) returns undefined — best-effort,
+  never blocks the file. The query mirrors create's shape (title + authored body).
+  dedupMatchId extracts the matched artifact id (e.g. BUG-0007) from the match path.
+  CaptureOutcome's `captured` variant gained an optional `note?: string`.
+- src/cli/verbs/hooks.ts: the write-event handler now prints capture.note to
+  stderr (when present) before emitting the captured additionalContext on stdout —
+  the artifact is still filed; the note is advisory.
+
+Conservative assumptions recorded:
+- Note is emitted only on a STRONG match (score >= dedup_threshold_strong, default
+  0.85). A weak match stays advisory-silent on the capture path, matching create's
+  rule that weak matches always proceed; surfacing every weak match on capture
+  would spam the hook. Reversible (lower the threshold gate if needed).
+- The dedup note phrasing is "possible duplicate of [[<id>]] — review" (the item's
+  required string). dedupMatchId falls back to the match filename stem if it does
+  not start with an ID-NNNN prefix.
+- beforeAllocate runs the dedup gate even on the idempotent (already-filed) path? No
+  — the idempotent short-circuit (declaredId already in the index) returns before
+  mintAndWrite is reached, so a re-fire never re-runs dedup. Intended: a re-save of
+  an already-filed draft is not a new artifact.
+
+External-dependency substitute (this item): the real `qmd` binary is replaced by a
+fake-qmd shell script (the established cli-dedup.test.ts pattern) that logs its argv
+to STATE_FILE, registers collections, no-ops `update`, and returns RESULTS_FILE JSON
+for `query`. This fully satisfies the item's steps — it proves capture issues the
+correct refresh+query+update ordering under one lock and warns-and-files on a strong
+match — but it does NOT verify the real qmd's scoring; real-qmd dedup scoring remains
+qmd's own contract, unexercised here. No real qmd was run; the real $HOME/Knowledge
+vault was never touched (TEMP vault + per-test QMD_COMMAND override).
+
+Tests (new, TEMP vault only): tests/capture-dedup.test.ts —
+  1. a strong match (score 0.9) FILES the artifact (bugs/ has 1 file) AND the
+     captured outcome carries note "possible duplicate of [[BUG-0007]] — review"
+     (never dropped). The core G6 regression guard.
+  2. ordering: with no match, the qmd argv log shows the dedup `update -c proj`
+     precedes the dedup `query`, and the write-path keyword `update` (SLICE-0126)
+     is the LAST qmd touch (after the query) — dedup refresh+query -> write -> qmd
+     update under one lock; `embed` is never called on the capture path.
+  3. a weak match (0.75, >= weak 0.7, < strong 0.85) files silently with no note.
+Verified the guard is real: commenting out the `dedupNote = await captureDedupNote`
+wiring fails tests 1 and 2 (2 fail / 1 pass), passes again with it restored.
+No existing test weakened or deleted.
+
+Files changed:
+- src/artifacts/store.ts (mintAndWrite beforeAllocate hook + docstring)
+- src/artifacts/capture.ts (dedup gate via beforeAllocate; captured.note; helpers)
+- src/cli/verbs/hooks.ts (print capture.note to stderr before context)
+- tests/capture-dedup.test.ts (new)
+- .ralph/items.json (SLICE-0127 passes false->true)
+- .ralph/progress.md (this entry)
+
+Verification (all green at this commit, gate = bun run test):
+- bun run build: ok (cli.js 0.33 MB, 100 modules)
+- bunx tsc --noEmit: clean (exit 0)
+- bun run test: 439 pass, 0 fail, 1425 expect() calls, 61 files
+
+Next-iteration notes: all nine PRD-0023 items (SLICE-0119..0127) now pass; the
+bundle is complete. No unfinished item remains.
+
+## BUNDLE RE-VERIFICATION (COMPLETE)
+
+All nine PRD-0023 items (SLICE-0119..0127) were already passes:true on
+prd-0023-pending, each on its own commit. This iteration re-ran the three
+verification gates against the finished bundle to confirm it is still green
+before emitting COMPLETE, and records that confirmation here (the harness
+requires a commit per iteration).
+
+Verification (all green):
+- bun run build: ok (cli.js 0.33 MB, 100 modules)
+- bunx tsc --noEmit: clean (exit 0)
+- bun run test: 439 pass, 0 fail, 1425 expect() calls, 61 files
+
+No item state changed (no false->true this iteration); no source or test file
+changed. Only this progress note was appended. The bundle is complete.
+
+## REVIEW FOLLOW-UPS (Claude + GLM subagent review)
+
+Two reviewer subagents (Claude Opus, GLM-5.2) reviewed the finished bundle. One
+P1 and three P2 findings were addressed. No item state changed (all nine remain
+passes:true); these are hardening fixes on top of the completed bundle.
+
+P1 (Claude, valid — confirmed against the code): SLICE-0126/0127 had moved qmd
+subprocess calls INSIDE the per-project lock, but lock.ts STALE_MS stayed 10s on
+the now-false "critical section is sub-millisecond" assumption. A slow qmd call
+(cold cache, large collection) held under the lock could outlast the stale window
+and let a concurrent same-project waiter reclaim a LIVE lock, reopening the
+duplicate-id race the lock exists to close. Fix: the per-project lock now wraps
+ONLY allocate->write. The capture dedup gate runs BEFORE mintAndWrite (unlocked)
+and the keyword `update` runs AFTER the lock releases (unlocked) — neither needs
+the lock (dedup is advisory/files-anyway; the keyword update is idempotent). The
+observable qmd order (dedup update -> dedup query -> write -> keyword update) is
+unchanged, so the SLICE-0126/0127 contract tests stay green. mintAndWrite's
+`beforeAllocate` hook was removed (capture now calls captureDedupNote directly).
+
+P2a (GLM): a same-section relocate/retitle writes outside mintAndWrite and so
+never refreshed the keyword index — the moved path/title stayed stale until the
+next `wiki sync`. Fix: relocateArtifact now calls refreshKeywordIndex after the
+same-section write (the cross-section path already routes through mintAndWrite).
+
+P2c (GLM): doctor --fix renumbered duplicate ids (nextId -> reassignId) without
+the allocation lock, so a concurrent `wiki create` could mint an id the repair
+was about to hand out. Fix: repairDuplicateIds now runs its whole loop under
+withProjectLock (split into repairDuplicateIds wrapper + repairDuplicateIdsLocked).
+
+P2b (GLM): capture's idempotency index read sits outside the lock, so two
+PostToolUse fires on the SAME unstamped draft could each file a copy. Documented
+as a known ceiling rather than "fixed": the lock serializes id ALLOCATION (the
+two copies would get DISTINCT ids — the duplicate-*id* invariant holds), and the
+draft is read before the lock, so moving the check inside would still read the
+same pre-stamp id. The durable guard is the post-file stamp (a re-fire after the
+stamp lands is skipped) plus the dedup gate. Fully closing it needs a
+per-draft-path lock around read->decide->write; out of scope (concurrent fires on
+one exact path are not an observed pattern). Comment added in capture.ts.
+
+New regression test (tests/allocation-lock.test.ts): "the write-path qmd keyword
+update runs UNLOCKED" — a probe fake qmd records whether the per-project lockfile
+exists DURING each `update` call; the test asserts it is only ever "unlocked".
+Verified it is a true guard: moving refreshKeywordIndex back inside the lock makes
+it fail (1 fail / 5 pass), and it passes with the fix. Deterministic — no sleep.
+
+Files changed:
+- src/artifacts/store.ts (lock wraps allocate->write only; keyword update after
+  lock release; drop beforeAllocate; refresh after same-section relocate)
+- src/artifacts/capture.ts (dedup gate before mintAndWrite, unlocked; P2b note)
+- src/artifacts/lock.ts (STALE_MS docstring corrected)
+- src/bootstrap/doctor.ts (repairDuplicateIds under withProjectLock)
+- tests/capture-dedup.test.ts (test wording: dedup/update unlocked, not "one lock")
+- tests/allocation-lock.test.ts (new P1 unlocked-keyword-update guard)
+- .ralph/progress.md (this entry)
+
+Verification (all green):
+- bun run build: ok (cli.js 0.33 MB)
+- bunx tsc --noEmit: clean (exit 0)
+- bun run test: 440 pass, 0 fail, 1427 expect() calls, 61 files

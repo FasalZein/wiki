@@ -37,17 +37,16 @@ describe("sync CLI", () => {
     );
   });
 
-  test("sync include-research also refreshes the research collection", async () => {
+  test("sync rejects the removed --include-research flag", async () => {
+    // SLICE-0119: research is now a doc/research bucket, not a separate qmd
+    // collection, so --include-research no longer exists. strict parseArgs rejects
+    // the unknown flag (exit 1) before any collection work.
     const fixture = await createSyncFixture("wiki-v2");
 
     const result = await runWiki(["sync", "--project", "wiki-v2", "--include-research"], fixture);
 
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe("");
-    expect(await readFile(fixture.stateFile, "utf8")).toBe(
-      `collection list\ncollection add ${fixture.projectPath} --name wiki-v2 --mask **/*.md\nupdate -c wiki-v2\nembed -c wiki-v2\n` +
-        `collection list\ncollection add ${fixture.researchPath} --name research --mask **/*.md\nupdate -c research\nembed -c research\n`,
-    );
+    expect(result.exitCode).toBe(1);
+    expect(await readFile(fixture.stateFile, "utf8").catch(() => "")).not.toContain("--name research");
   });
 
   test("sync skips collection add when the collection already exists", async () => {
@@ -211,7 +210,6 @@ describe("sync CLI", () => {
 type SyncFixture = {
   vaultRoot: string;
   projectPath: string;
-  researchPath: string;
   stateFile: string;
   env: Record<string, string>;
 };
@@ -263,11 +261,9 @@ async function createSyncFixture(project: string, options: SyncFixtureOptions = 
   await mkdir(join(projectPath, "adrs"));
   await mkdir(join(projectPath, "handoffs"));
   await mkdir(join(projectPath, "docs"));
-  const researchPath = join(root, "research");
-  await mkdir(researchPath);
   await writeFile(
     join(projectPath, "_project.md"),
-    `---\nrepo: /tmp/repo\ntest_command: bun test\nresearch_path: ${researchPath}\n---\n`,
+    `---\nrepo: /tmp/repo\ntest_command: bun test\n---\n`,
   );
 
   const stateFile = join(root, "qmd-state.log");
@@ -314,7 +310,6 @@ esac
   return {
     vaultRoot,
     projectPath,
-    researchPath,
     stateFile,
     env: {
       QMD_COMMAND: qmdCommand,

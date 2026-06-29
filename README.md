@@ -73,9 +73,6 @@ or `~/.config/wiki/config.toml`:
 ```toml
 [vault]
 root = "/Users/you/Knowledge"
-
-[research]
-sources = ["~/.claude/artifacts/research"]   # optional extra search sources
 ```
 
 **3. Create a project and bind your code repo to it.** Linking stamps a
@@ -175,8 +172,11 @@ Good to know:
   can opt into blocking strong matches with `dedup_strong_blocks: true`.
 - **`wiki search` does not re-embed.** Run `wiki sync` after writing, or new
   artifacts stay invisible to ranked search and the dedup gate.
-- **Docs are nested by locked category** — `architecture`, `research`,
-  `runbooks`, `specs`, `notes`, `legacy`. Never invent a folder.
+- **Docs are nested into config-driven buckets** — each branch section
+  (`doc` by default) declares its buckets in `wiki.json`. The bundled config
+  ships `architecture`, `research`, `runbooks`, `specs`, `notes`, and `legacy`,
+  but a vault can define its own; `wiki schema doc` lists the current buckets and
+  their selection criteria.
 
 ## Maintenance
 

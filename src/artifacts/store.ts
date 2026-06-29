@@ -8,8 +8,11 @@ import { validate } from "../schema/validate";
 import type { NormalizedRecord, Schema, ValidationError } from "../schema/types";
 import { type Structure } from "./registry";
 import { nextId } from "./id";
+import { withProjectLock } from "./lock";
 import { buildIdIndex } from "./id-index";
 import { artifactDirectory, assertSafeSegment, projectPath } from "./paths";
+import { ensureCollection, updateCollection } from "../integrations/qmd";
+import { loadProjectConfig } from "../config/project";
 import { isFileNotFound } from "../util";
 import { applyDefaults, orderBySchema, renderArtifact } from "./render";
 
@@ -205,28 +208,73 @@ type RenderedArtifact = { path: string; content: string; fields: NormalizedRecor
 /**
  * The canonical "allocate the next id and write the file exactly once" seam,
  * shared by {@link createArtifact} and the hook's in-child capture. The render
- * callback turns a freshly minted id into its target path + content; this loop
- * owns the one thing both callers must get right: the nextId read-then-write is
- * a TOCTOU race under parallel writers, so an exclusive create (`wx`) plus a
- * bounded retry recomputes the id on collision rather than clobbering or
- * throwing. No lockfile.
+ * callback turns a freshly minted id into its target path + content.
+ *
+ * SLICE-0121: the nextId read-then-write is a duplicate-id race under parallel
+ * writers — two creates with DIFFERENT titles each compute the same id, write
+ * distinct paths, and both succeed (the `wx` flag only catches a same-PATH
+ * clash). A per-project lockfile serializes the whole allocate->write section so
+ * the second writer sees the first file and mints the next id. The exclusive
+ * `wx` create + bounded retry stays as a cheap second guard for a same-path
+ * collision. Different projects use different lockfiles, so they never contend.
+ *
+ * SLICE-0126: after the write, fire a cheap incremental qmd keyword `update` for
+ * the project's collection so the new artifact is searchable with no manual `wiki
+ * sync`. Vector `embed` stays owned by `wiki sync`; the write path never embeds.
+ * Best-effort — a qmd fault (binary missing, not yet synced) must not fail the
+ * write, since `wiki sync` is the durable reindex.
+ *
+ * Review follow-up (P1): the lock wraps ONLY allocate->write. qmd is a subprocess
+ * that can take seconds (cold cache, large collection); a slow call held under the
+ * lock could outlast the stale-reclaim window and let a waiter reclaim a LIVE lock
+ * — reopening the duplicate-id race the lock exists to close. So the keyword update
+ * runs AFTER the lock releases, and the capture path's advisory dedup gate runs
+ * BEFORE this call (see capture.ts) — both unlocked. Neither needs the lock: dedup
+ * is advisory and files-anyway, the keyword update is idempotent.
  */
 export async function mintAndWrite(
   target: { type: TemplateType; vaultRoot: string; project: string; structure: Structure },
   render: (id: string) => RenderedArtifact,
 ): Promise<Artifact> {
-  const MAX_ATTEMPTS = 8;
-  for (let attempt = 0; ; attempt++) {
-    const id = await nextId(target.type, target.vaultRoot, target.project, target.structure);
-    const { path, content, fields } = render(id);
-    try {
-      await mkdir(dirname(path), { recursive: true }); // Bun.write auto-mkdirs; node writeFile does not
-      await writeFile(path, content, { flag: "wx" }); // fails if path already exists
-    } catch (error) {
-      if (isFileExists(error) && attempt < MAX_ATTEMPTS) continue; // collision — recompute nextId
-      throw error;
+  const artifact = await withProjectLock(target.vaultRoot, target.project, async () => {
+    const MAX_ATTEMPTS = 8;
+    for (let attempt = 0; ; attempt++) {
+      const id = await nextId(target.type, target.vaultRoot, target.project, target.structure);
+      const { path, content, fields } = render(id);
+      try {
+        await mkdir(dirname(path), { recursive: true }); // Bun.write auto-mkdirs; node writeFile does not
+        await writeFile(path, content, { flag: "wx" }); // fails if path already exists
+      } catch (error) {
+        if (isFileExists(error) && attempt < MAX_ATTEMPTS) continue; // collision — recompute nextId
+        throw error;
+      }
+      return { id, path, fields, body: content };
     }
-    return { id, path, fields, body: content };
+  });
+  await refreshKeywordIndex(target.vaultRoot, target.project); // unlocked — see above
+  return artifact;
+}
+
+/**
+ * SLICE-0126: fire a cheap incremental qmd keyword `update` for the project's
+ * collection so a freshly written artifact is in the keyword index without a
+ * manual `wiki sync`. Keyword-only: vector `embed` stays owned by `wiki sync`.
+ * Best-effort by design — qmd resolution rides QMD_COMMAND -> _project.md
+ * qmd_command -> `qmd`, and ANY fault (binary missing, project never synced) is
+ * swallowed so the write still succeeds. `wiki sync` remains the durable reindex.
+ */
+async function refreshKeywordIndex(vaultRoot: string, project: string): Promise<void> {
+  try {
+    let qmdCommand = process.env.QMD_COMMAND;
+    if (qmdCommand === undefined) {
+      qmdCommand = (await loadProjectConfig(projectPath(vaultRoot, project))).qmd_command;
+    }
+    const projPath = projectPath(vaultRoot, project);
+    await ensureCollection(qmdCommand, project, projPath); // register on first write
+    await updateCollection(qmdCommand, project, false); // keyword reindex only; no embed
+  } catch {
+    // qmd missing / project unconfigured / never synced — `wiki sync` is the
+    // durable reindex, so a write must never fail on the freshness best-effort.
   }
 }
 
@@ -301,6 +349,10 @@ export async function relocateArtifact(input: RelocateArtifactInput, structure: 
   if (destination !== existing.path) {
     await rm(existing.path, { force: true });
   }
+  // Review follow-up (P2): a same-section move/retitle writes outside mintAndWrite,
+  // so refresh the keyword index here too — otherwise the relocated artifact's new
+  // path/title stays stale in the keyword index until the next `wiki sync`.
+  await refreshKeywordIndex(input.vaultRoot, input.project);
   const parsed = matter(content);
   return { id: input.id, path: destination, fields: parsed.data, body: parsed.content.trimStart() };
 }

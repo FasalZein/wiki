@@ -103,13 +103,12 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
   },
   search: {
     summary: "Search artifacts by keyword. Vault-wide with no --project.",
-    usage: "wiki search <query> [--project <name>] [--type <type>] [--recent] [--since <date>] [--include-research] [--explain] [--no-refresh] [--json]",
+    usage: "wiki search <query> [--project <name>] [--type <type>] [--recent] [--since <date>] [--explain] [--no-refresh] [--json]",
     flags: {
       "--project": "narrow to one project (optional; default: all projects)",
       "--type": "filter by artifact type",
       "--recent": "order by last-modified (newest first) instead of relevance; a temporal query (e.g. 'what changed recently') triggers this too",
       "--since": "only artifacts modified at/after this date (e.g. 2026-06-01); implies --recent ordering",
-      "--include-research": "include research collection",
       "--explain": "include qmd's match explanation",
       "--no-refresh": "accepted for back-compat; search is read-only and never refreshes (no-op)",
       "--json": "emit a JSON array of {id,kind,title,path,score,snippet} hits ([] when empty)",
@@ -205,10 +204,13 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
     example: "wiki schema slice",
   },
   doctor: {
-    summary: "Check vault health (docs-structure and repo-binding drift). --setup checks distribution health (binary freshness, skill-bundle presence, hook install state).",
-    usage: "wiki doctor [--setup]",
-    flags: { "--setup": "check distribution health instead of vault drift (binary freshness, skill bundle, hook wiring)" },
-    example: "wiki doctor --setup",
+    summary: "Check vault health (docs-structure and repo-binding drift). --fix repairs duplicate ids and the mechanical drift fmt --write fixes. --setup checks distribution health (binary freshness, skill-bundle presence, hook install state).",
+    usage: "wiki doctor [--fix] [--setup]",
+    flags: {
+      "--fix": "repair duplicate ids (renumber in the section id-space) and apply the mechanical fmt fixes",
+      "--setup": "check distribution health instead of vault drift (binary freshness, skill bundle, hook wiring)",
+    },
+    example: "wiki doctor --fix",
   },
   fmt: {
     summary: "Format vault artifacts. Default mode is check: report format drift and exit 1 if any; --write applies the mechanical fixes idempotently (dates, frontmatter order, legacy-id renumber, and renaming files to <ID>-<slug>.md when id/slug drift from the filename — id preserved so links survive).",
@@ -221,10 +223,9 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
   },
   sync: {
     summary: "Re-index a project into the QMD search collections.",
-    usage: "wiki sync [--project <name>] [--include-research] [--pull] [--force-embed]",
+    usage: "wiki sync [--project <name>] [--pull] [--force-embed]",
     flags: {
       "--project": "project name (required if the repo isn't linked)",
-      "--include-research": "also sync the research collection",
       "--pull": "pull remote changes before indexing",
       "--force-embed": "re-embed all documents",
     },
@@ -241,10 +242,13 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
         example: "wiki vault init ~/Knowledge",
       },
       doctor: {
-        summary: "Report docs-structure and repo-binding drift. --setup reports distribution health (binary freshness, skill-bundle presence, hook install state).",
-        usage: "wiki vault doctor [--setup]",
-        flags: { "--setup": "check distribution health instead of vault drift" },
-        example: "wiki vault doctor --setup",
+        summary: "Report docs-structure and repo-binding drift. --fix repairs duplicate ids and mechanical drift. --setup reports distribution health (binary freshness, skill-bundle presence, hook install state).",
+        usage: "wiki vault doctor [--fix] [--setup]",
+        flags: {
+          "--fix": "repair duplicate ids and apply the mechanical fmt fixes",
+          "--setup": "check distribution health instead of vault drift",
+        },
+        example: "wiki vault doctor --fix",
       },
     },
   },

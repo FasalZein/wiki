@@ -120,22 +120,18 @@ describe("search CLI", () => {
     expect(log).toContain("lex: second");
   });
 
-  test("search include-research queries both pre-synced collections without registering or refreshing", async () => {
+  test("search rejects the removed --include-research flag", async () => {
+    // SLICE-0119: research is now an ordinary doc/research bucket, not a separate
+    // qmd collection, so --include-research no longer exists. strict parseArgs
+    // rejects the unknown flag (exit 1) instead of querying a research collection.
     const fixture = await createSearchFixture("wiki-v2");
-    // include-research only queries the research collection when it was already
-    // synced; pre-register it alongside the project.
-    await writeFile(fixture.registeredFile, `wiki-v2 (qmd://wiki-v2/)\nresearch (qmd://research/)\n`);
 
     const result = await runWiki(["search", "vault", "--project", "wiki-v2", "--include-research"], fixture);
 
-    expect(result.exitCode).toBe(0);
-    const log = await readFile(fixture.stateFile, "utf8");
-    // Read-only: no register, no refresh.
-    expect(log).not.toContain("collection add");
-    expect(log).not.toContain("update");
-    // Query includes both collections
-    expect(log).toContain("--collection wiki-v2");
-    expect(log).toContain("--collection research");
+    expect(result.exitCode).toBe(1);
+    const log = await readFile(fixture.stateFile, "utf8").catch(() => "");
+    // The flag is rejected before any qmd query; no research collection is touched.
+    expect(log).not.toContain("--collection research");
   });
 
   test("search --json emits a structured array of hits (SLICE-0088)", async () => {
@@ -268,7 +264,6 @@ describe("search CLI", () => {
 type SearchFixture = {
   vaultRoot: string;
   projectPath: string;
-  researchPath: string;
   stateFile: string;
   resultsFile: string;
   registeredFile: string;
@@ -310,11 +305,9 @@ async function createSearchFixture(project: string, options: SearchFixtureOption
   await mkdir(join(projectPath, "adrs"));
   await mkdir(join(projectPath, "handoffs"));
   await mkdir(join(projectPath, "docs"));
-  const researchPath = join(root, "research");
-  await mkdir(researchPath);
   await writeFile(
     join(projectPath, "_project.md"),
-    `---\nrepo: /tmp/repo\ntest_command: bun test\nresearch_path: ${researchPath}\n---\n`,
+    `---\nrepo: /tmp/repo\ntest_command: bun test\n---\n`,
   );
 
   const stateFile = join(root, "qmd-state.log");
@@ -368,7 +361,6 @@ esac
   return {
     vaultRoot,
     projectPath,
-    researchPath,
     stateFile,
     resultsFile,
     registeredFile,

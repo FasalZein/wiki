@@ -23,7 +23,8 @@ const PI_BRIDGE_PACKAGE = "@hsingjui/pi-hooks";
  */
 const STOP_REMINDER =
   "Session ending. If you authored a PRD, slice, decision, doc, or handoff this session, " +
-  "persist it to the vault now — don't leave it only in chat:\n  wiki create <kind> --project <name> --body -";
+  "persist it to the vault now — don't leave it only in chat. Either run\n  wiki create <kind> --project <name> --body -\n" +
+  "or stamp the draft's frontmatter with `template: <kind>` and `project: <name>` so the write hook captures it on save.";
 
 /**
  * Per-runtime install target. All three runtimes accept the same JSON `hooks`
@@ -152,6 +153,7 @@ async function hooksRun(): Promise<CliResult> {
       process.stdout.write("{}");
       return { code: 0 };
     }
+    if (capture.note !== undefined) console.error(capture.note); // SLICE-0127: advisory dedup note, filed anyway
     process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: capture.context } }));
     return { code: 0 };
   }
@@ -181,9 +183,11 @@ export async function hookGuidance(skill: string, cwd: string): Promise<string |
   if (kind === undefined) return null;
   const project = await readLinkedProject(cwd);
   const projectFlag = project === null ? "--project <name>" : `--project ${project}`;
+  const projectStamp = project === null ? "<name>" : project;
   return (
     `The ${skill} skill authors a wiki '${kind}' artifact. When it finishes, persist the ` +
-    `result to the vault — don't leave it only in chat:\n  wiki create ${kind} ${projectFlag} --body -`
+    `result to the vault — don't leave it only in chat:\n  wiki create ${kind} ${projectFlag} --body -\n` +
+    `or stamp the draft's frontmatter with \`template: ${kind}\` and \`project: ${projectStamp}\` so the write hook captures it on save.`
   );
 }
 

@@ -10,7 +10,7 @@ import { resolveProject } from "../resolve-project";
 import type { CliResult } from "../dispatch";
 
 export async function handleSync(args: string[]): Promise<CliResult> {
-  const parsed = parseCommand(args, ["project"], [], ["include-research", "pull", "force-embed"]);
+  const parsed = parseCommand(args, ["project"], [], ["pull", "force-embed"]);
   const project = await resolveProject(parsed);
   if (project === undefined) {
     console.error("missing required field: project (pass --project or link the repo with wiki project link)");
@@ -46,9 +46,6 @@ export async function handleSync(args: string[]): Promise<CliResult> {
     const config = await loadProjectConfig(projPath);
     const qmdCommand = process.env.QMD_COMMAND ?? config.qmd_command;
     const targets = [{ name: project, path: projPath }];
-    if (booleanValue(parsed.values, "include-research")) {
-      targets.push({ name: "research", path: config.research_path });
-    }
 
     for (const target of targets) {
       await ensureCollection(qmdCommand, target.name, target.path);
