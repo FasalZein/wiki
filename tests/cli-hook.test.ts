@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import matter from "gray-matter";
@@ -212,6 +212,23 @@ describe("wiki hooks run (write-signal capture, ADR-0038)", () => {
     const captured = await readFile(join(vaultRoot, "projects", "wiki-v2", "prds", filed[0]!), "utf8");
     expect(matter(captured).data.project).toBe("wiki-v2");
   });
+
+  test("a filesystem fault stamping a read-only draft warns and never crashes the stdout contract", async () => {
+    const vaultRoot = await fixtureVault("wiki-v2");
+    const dir = await tmpDir();
+    const file = join(dir, "draft.md");
+    await writeFile(file, "---\ntemplate: slice\nproject: wiki-v2\ntitle: Locked Draft\n---\n# Locked Draft\n");
+    await chmod(file, 0o444); // read-only: the post-capture id stamp write will fault
+    const { stdout, stderr, exitCode } = await runWiki(["hooks", "run"], {
+      vaultRoot,
+      stdin: JSON.stringify({ hook_event_name: "PostToolUse", tool_input: { file_path: file } }),
+    });
+    await chmod(file, 0o644); // restore so afterEach cleanup can remove it
+    // The hook must hold its contract: clean exit, stdout is still valid JSON ({}), the fault is on stderr.
+    expect(exitCode).toBe(0);
+    expect(stdout).toBe("{}");
+    expect(stderr).toContain("authored but not captured");
+  });
 });
 
 describe("wiki hooks install", () => {
@@ -227,6 +244,10 @@ describe("wiki hooks install", () => {
     expect(first.hooks.PreToolUse[0].matcher).toBe("Skill");
     expect(first.hooks.PreToolUse[0].hooks[0].command).toBe("wiki hooks run");
 
+    // the PostToolUse capture entry is wired with a write-tool matcher (the in-child capture trigger)
+    expect(first.hooks.PostToolUse[0].matcher).toBe("^(?:Write|Edit|MultiEdit)$");
+    expect(first.hooks.PostToolUse[0].hooks[0].command).toBe("wiki hooks run");
+
     // a Stop entry is written alongside the skill entry
     expect(first.hooks.Stop[0].hooks[0].command).toBe("wiki hooks run");
 
@@ -234,7 +255,29 @@ describe("wiki hooks install", () => {
     await runWiki(["hooks", "install", "--runtime", "claude-code", "--global"], { home });
     const second = JSON.parse(await readFile(settings, "utf8"));
     expect(second.hooks.PreToolUse).toHaveLength(1);
+    expect(second.hooks.PostToolUse).toHaveLength(1);
     expect(second.hooks.Stop).toHaveLength(1);
+  });
+
+  test("the PostToolUse capture hook is installed and uninstalled per runtime (write-signal reaches the bridge)", async () => {
+    for (const [runtime, file, matcher] of [
+      ["claude-code", ".claude/settings.json", "^(?:Write|Edit|MultiEdit)$"],
+      ["codex", ".codex/hooks.json", "^(?:write|edit)$"],
+      ["pi", ".pi/agent/settings.json", "^(?:write|edit)$"],
+    ] as const) {
+      const home = await mkdtemp(join(tmpdir(), "wiki-home-"));
+      tempPaths.push(home);
+      await runWiki(["hooks", "install", "--runtime", runtime, "--global"], { home });
+      const config = JSON.parse(await readFile(join(home, file), "utf8"));
+      // Without this entry the bridge never calls the hook on a write, so capture is dead in production.
+      expect(config.hooks.PostToolUse[0].matcher).toBe(matcher);
+      expect(config.hooks.PostToolUse[0].hooks[0].command).toBe("wiki hooks run");
+
+      // uninstall must remove the capture entry too, leaving no wiki hook behind
+      await runWiki(["hooks", "uninstall", "--runtime", runtime, "--global"], { home });
+      const after = JSON.parse(await readFile(join(home, file), "utf8"));
+      expect(JSON.stringify(after)).not.toContain("wiki hooks run");
+    }
   });
 
   test("a Stop entry is written per runtime", async () => {

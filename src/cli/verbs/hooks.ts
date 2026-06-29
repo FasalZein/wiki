@@ -3,13 +3,8 @@ import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
-import { DEFAULT_STRUCTURE, loadStructure } from "../../artifacts/registry";
-import { artifactDirectory } from "../../artifacts/paths";
-import { nextId } from "../../artifacts/id";
-import { buildIdIndex } from "../../artifacts/id-index";
-import { slugifyTitle } from "../../artifacts/store";
-import { getVaultRoot } from "../../config/vault";
-import type { TemplateType } from "../../schema/load";
+import { captureArtifact, type CaptureOutcome } from "../../artifacts/capture";
+import { DEFAULT_STRUCTURE } from "../../artifacts/registry";
 import { readLinkedProject } from "../repo-link";
 import { unknownMessage } from "../usage";
 import { booleanValue, parseCommand, stringValue } from "../parse";
@@ -32,27 +27,49 @@ const STOP_REMINDER =
 
 /**
  * Per-runtime install target. All three runtimes accept the same JSON `hooks`
- * schema and the same stdin/stdout contract; only the file and the events differ,
- * because each surfaces a skill invocation through a different signal:
- *  - Claude Code: a dedicated `Skill` tool      → PreToolUse, matcher "Skill"
- *  - Codex / pi:  no skill tool — a slash-command in the prompt → UserPromptSubmit
- *
- * `stop` is a second, stateless entry fired at session end: a blanket reminder to
- * persist any authored artifact. It cannot detect whether persistence happened —
- * it has no session state — so it reminds unconditionally.
+ * schema and the same stdin/stdout contract; only the file and the events
+ * differ. Each runtime wires the same three event roles, surfaced through
+ * whatever signal that runtime provides:
+ *  - skill invocation: Claude Code's dedicated `Skill` tool (PreToolUse, matcher
+ *    "Skill"); Codex / pi have no skill tool, so a slash-command in the prompt
+ *    (UserPromptSubmit).
+ *  - artifact write: a file-write tool (PostToolUse, matched to the runtime's
+ *    write/edit tool names) — the in-child capture trigger (ADR-0038).
+ *  - session end: a stateless blanket persist reminder (Stop / SessionEnd). It
+ *    has no session state, so it reminds unconditionally.
  */
-interface RuntimeSpec {
+interface HookTarget {
   event: string;
+  /** Tool-name regex the runtime tests against; absent means "every event". */
   matcher?: string;
-  stop: string;
+}
+
+interface RuntimeSpec {
+  events: HookTarget[];
   global: string;
   project: string;
 }
 
+/** Write-tool name matchers, anchored so they don't match e.g. `rewrite`. */
+const CLAUDE_WRITE = "^(?:Write|Edit|MultiEdit)$";
+const POSIX_WRITE = "^(?:write|edit)$";
+
 const RUNTIMES: Record<string, RuntimeSpec> = {
-  "claude-code": { event: "PreToolUse", matcher: "Skill", stop: "Stop", global: ".claude/settings.json", project: ".claude/settings.json" },
-  codex: { event: "UserPromptSubmit", stop: "SessionEnd", global: ".codex/hooks.json", project: ".codex/hooks.json" },
-  pi: { event: "UserPromptSubmit", stop: "SessionEnd", global: ".pi/agent/settings.json", project: ".pi/settings.json" },
+  "claude-code": {
+    events: [{ event: "PreToolUse", matcher: "Skill" }, { event: "PostToolUse", matcher: CLAUDE_WRITE }, { event: "Stop" }],
+    global: ".claude/settings.json",
+    project: ".claude/settings.json",
+  },
+  codex: {
+    events: [{ event: "UserPromptSubmit" }, { event: "PostToolUse", matcher: POSIX_WRITE }, { event: "SessionEnd" }],
+    global: ".codex/hooks.json",
+    project: ".codex/hooks.json",
+  },
+  pi: {
+    events: [{ event: "UserPromptSubmit" }, { event: "PostToolUse", matcher: POSIX_WRITE }, { event: "SessionEnd" }],
+    global: ".pi/agent/settings.json",
+    project: ".pi/settings.json",
+  },
 };
 
 /** Events that fire at session end — the run callback emits a blanket persist reminder for these. */
@@ -78,145 +95,6 @@ interface HookInput {
 
 /** Events that follow a tool call — the run callback inspects artifact writes for these. */
 const WRITE_EVENT = "PostToolUse";
-
-/**
- * Inspecting a PostToolUse write yields one of three outcomes: `captured` (the
- * written file is an authoring artifact and the hook filed it into the vault
- * itself — `context` is injected so the model need not run `wiki create`),
- * `warn` (it looks like an artifact but cannot be captured — surfaced on stderr,
- * never a silent drop and never a wrong-kind write), or null (an unrelated write).
- */
-type CaptureOutcome =
-  | { outcome: "captured"; context: string }
-  | { outcome: "warn"; warning: string }
-  | null;
-
-/**
- * The kind a written file declares in its OWN frontmatter, resolved via the
- * registry (ADR-0038): a `template:` field naming a kind, or an `id:` whose
- * prefix resolves to one (e.g. PRD-0099 → prd). Null when nothing it declares
- * maps to a registered kind — the caller never guesses.
- */
-function resolveKind(data: Record<string, unknown>): TemplateType | null {
-  const template = typeof data.template === "string" ? data.template : undefined;
-  if (template !== undefined && DEFAULT_STRUCTURE.kinds[template] !== undefined) return template;
-  const id = typeof data.id === "string" ? data.id : undefined;
-  if (id !== undefined) {
-    const kind = DEFAULT_STRUCTURE.typeForId(id);
-    if (kind !== undefined) return kind;
-  }
-  return null;
-}
-
-/**
- * Inspect a PostToolUse write and, when the written file is an authoring
- * artifact, file it into the env-resolved vault itself (ADR-0038 in-child
- * capture). The bridge payload carries no injected-skill identity, so the kind
- * comes from the written file's own frontmatter. A markdown write whose
- * frontmatter carries an `id`/`template` but no recognizable kind is
- * artifact-shaped-but-uncapturable: warn. Anything else (no path, unreadable,
- * no artifact frontmatter) is null.
- */
-async function captureWrittenArtifact(input: HookInput): Promise<CaptureOutcome> {
-  const path = input.tool_input?.file_path ?? input.tool_input?.path;
-  if (path === undefined) return null;
-  let content: string;
-  try {
-    content = await readFile(path, "utf8");
-  } catch {
-    return null; // not readable — nothing to capture
-  }
-  let data: Record<string, unknown>;
-  let body: string;
-  try {
-    const parsed = matter(content);
-    data = parsed.data;
-    body = parsed.content;
-  } catch {
-    return null; // not parseable frontmatter
-  }
-  const declaredId = typeof data.id === "string" ? data.id : undefined;
-  const declaredTemplate = typeof data.template === "string" ? data.template : undefined;
-  // Not artifact-shaped (no id/template frontmatter) — an ordinary write, stay silent.
-  if (declaredId === undefined && declaredTemplate === undefined) return null;
-
-  const kind = resolveKind(data);
-  if (kind === null) {
-    const declared = declaredTemplate !== undefined ? `template '${declaredTemplate}'` : `id '${declaredId}'`;
-    return {
-      outcome: "warn",
-      warning:
-        `authored but not captured: ${basename(path)} declares ${declared}, which maps to no ` +
-        `registered wiki kind — file it manually with 'wiki create <kind>'.`,
-    };
-  }
-  return fileArtifact({ path, data, body, kind, declaredId, cwd: input.cwd ?? process.cwd() });
-}
-
-/**
- * File a detected artifact into the vault via the registry path: resolve the
- * vault + project, mint the next id, write the artifact verbatim under its kind's
- * folder, and stamp the source draft with the assigned id. Idempotent — a draft
- * whose declared id is already indexed in the vault is reported `captured`
- * without a second write. Kind-agnostic: it files whatever kind the frontmatter
- * declares, no hard-coded kind list beyond the registry. Warns (never throws)
- * when the vault/project cannot be resolved.
- */
-async function fileArtifact(args: {
-  path: string;
-  data: Record<string, unknown>;
-  body: string;
-  kind: TemplateType;
-  declaredId: string | undefined;
-  cwd: string;
-}): Promise<CaptureOutcome> {
-  const { path, data, body, kind, declaredId, cwd } = args;
-  let vaultRoot: string;
-  try {
-    vaultRoot = await getVaultRoot();
-  } catch (error) {
-    return { outcome: "warn", warning: `authored but not captured: ${basename(path)} — ${(error as Error).message}` };
-  }
-  const project =
-    typeof data.project === "string" && data.project.length > 0 ? data.project : (await readLinkedProject(cwd)) ?? undefined;
-  if (project === undefined) {
-    return {
-      outcome: "warn",
-      warning: `authored but not captured: ${basename(path)} — no project (set frontmatter 'project' or link the repo).`,
-    };
-  }
-  const structure = await loadStructure(vaultRoot);
-  if (structure.kinds[kind] === undefined) {
-    return { outcome: "warn", warning: `authored but not captured: ${basename(path)} — vault defines no '${kind}' kind.` };
-  }
-
-  // Idempotent: a declared id already indexed in the vault means this draft is
-  // already filed — report captured without a duplicate write.
-  if (declaredId !== undefined && (await buildIdIndex(vaultRoot, project, structure)).has(declaredId)) {
-    return { outcome: "captured", context: captureContext(kind, declaredId, true) };
-  }
-
-  const directory = artifactDirectory(kind, vaultRoot, project, structure);
-  await mkdir(directory, { recursive: true }); // nextId reads this dir; create it first
-  const id = await nextId(kind, vaultRoot, project, structure);
-  const title = typeof data.title === "string" && data.title.length > 0 ? data.title : id;
-  const today = new Date().toISOString().slice(0, 10);
-  const aliases = Array.isArray(data.aliases) ? [...new Set([id, ...data.aliases.map(String)])] : [id];
-  const fields = { ...data, id, project, aliases, created: data.created ?? today, updated: today };
-  const filePath = join(directory, `${id}-${slugifyTitle(title)}.md`);
-  await writeFile(filePath, matter.stringify(body, fields), { flag: "wx" });
-
-  // Stamp the source draft with the assigned id so a re-fire is idempotent.
-  await writeFile(path, matter.stringify(body, { ...data, id, project }));
-  return { outcome: "captured", context: captureContext(kind, id, false) };
-}
-
-/** Context injected after a capture so the model knows the artifact is filed. */
-function captureContext(kind: TemplateType, id: string, existed: boolean): string {
-  return existed
-    ? `A wiki '${kind}' artifact (${id}) is already filed in the vault — no action needed.`
-    : `Captured a wiki '${kind}' artifact into the vault as ${id} — no need to run 'wiki create'.`;
-}
 
 /**
  * The skill being invoked, drawn from whichever signal the runtime provides:
@@ -263,7 +141,8 @@ async function hooksRun(): Promise<CliResult> {
   }
   const event = input.hook_event_name ?? "PreToolUse";
   if (event === WRITE_EVENT) {
-    const capture = await captureWrittenArtifact(input);
+    const path = input.tool_input?.file_path ?? input.tool_input?.path;
+    const capture = path === undefined ? null : await captureArtifact({ path, cwd: input.cwd ?? process.cwd() });
     if (capture === null) {
       process.stdout.write("{}");
       return { code: 0 };
@@ -337,7 +216,7 @@ function isWired(list: HookEntry[] | undefined): boolean {
   return list?.some((entry) => entry.hooks?.some((h) => h.command === HOOK_COMMAND)) ?? false;
 }
 
-/** Merge the skill + stop hook entries into a runtime's native config (create/merge, never clobber). */
+/** Merge this runtime's hook entries into its native config (create/merge, never clobber). */
 async function hooksInstall(args: string[]): Promise<CliResult> {
   const target = resolveTarget(args);
   if (!("spec" in target)) return target;
@@ -347,13 +226,8 @@ async function hooksInstall(args: string[]): Promise<CliResult> {
   const config = await readConfig(file);
   config.hooks ??= {};
 
-  // Two entries: the skill-invocation hook and the stateless session-end reminder.
-  const targets: { event: string; matcher?: string }[] = [
-    { event: spec.event, matcher: spec.matcher },
-    { event: spec.stop },
-  ];
   let added = false;
-  for (const t of targets) {
+  for (const t of spec.events) {
     const list = (config.hooks[t.event] ??= []);
     if (isWired(list)) continue;
     list.push({
@@ -364,7 +238,7 @@ async function hooksInstall(args: string[]): Promise<CliResult> {
   }
 
   if (!added) {
-    console.error(`already installed: ${spec.event}/${spec.stop} hooks in ${file}`);
+    console.error(`already installed: ${spec.events.map((t) => t.event).join("/")} hooks in ${file}`);
     return { code: 0 };
   }
 
@@ -430,7 +304,7 @@ async function hooksUninstall(args: string[]): Promise<CliResult> {
   }
 
   let removed = 0;
-  for (const event of [spec.event, spec.stop]) {
+  for (const { event } of spec.events) {
     const list = config.hooks[event];
     if (list === undefined) continue;
     for (const entry of list) {
@@ -455,10 +329,14 @@ async function hooksUninstall(args: string[]): Promise<CliResult> {
 /**
  * Per-subagent bridge reachability. Each pi subagent definition
  * (`~/.pi/agent/agents/<name>.md`) declares its enabled extensions in an
- * `extensions:` frontmatter field; a subagent's persist hook can only fire when
- * that allowlist carries the EXACT `@hsingjui/pi-hooks` bridge. We inspect those
- * files (read-only — never edited here) and report, per agent, whether the bridge
- * is reachable. A lookalike does not satisfy it (reuses `isPiBridge`).
+ * `extensions:` frontmatter field, which is a RESTRICTIVE allowlist: a subagent
+ * loads only the extensions it lists (every shipped agent re-lists its full set,
+ * which only makes sense if listing is required), so its persist hook can fire
+ * only when that allowlist carries the EXACT `@hsingjui/pi-hooks` bridge. We
+ * inspect those files (read-only — never edited here) and report, per agent,
+ * whether the bridge is reachable. A lookalike does not satisfy it (reuses
+ * `isPiBridge`). An agent explicitly `enabled: false` is skipped — it never runs,
+ * so it is not a gap.
  */
 type AgentReach = { name: string; reachable: boolean };
 
@@ -470,7 +348,7 @@ function agentExtensions(data: Record<string, unknown>): string[] {
   return [];
 }
 
-/** Inspect each subagent definition's allowlist for the exact bridge (read-only). */
+/** Inspect each enabled subagent definition's allowlist for the exact bridge (read-only). */
 async function agentReachability(home: string): Promise<AgentReach[]> {
   const dir = join(home, ".pi", "agent", "agents");
   let names: string[];
@@ -487,6 +365,7 @@ async function agentReachability(home: string): Promise<AgentReach[]> {
     } catch {
       continue; // unparseable agent file — skip
     }
+    if (data.enabled === false) continue; // disabled agent never runs — not a reachability gap
     const name = typeof data.name === "string" ? data.name : basename(file, ".md");
     out.push({ name, reachable: agentExtensions(data).some(isPiBridge) });
   }
@@ -507,7 +386,7 @@ async function hooksReport(): Promise<CliResult> {
     ] as const) {
       const file = scope === "global" ? join(homedir(), rel) : join(process.cwd(), rel);
       const config = await readConfig(file);
-      const events = [spec.event, spec.stop].filter((e) => isWired(config.hooks?.[e]));
+      const events = spec.events.map((t) => t.event).filter((e) => isWired(config.hooks?.[e]));
       const state = events.length > 0 ? `wired (${events.join(", ")})` : "not wired";
       console.log(`${runtime} ${scope}: ${state}  ${file}`);
     }
@@ -529,7 +408,7 @@ export async function anyHookWired(cwd: string = process.cwd()): Promise<boolean
   for (const spec of Object.values(RUNTIMES)) {
     for (const file of [join(homedir(), spec.global), join(cwd, spec.project)]) {
       const config = await readConfig(file);
-      if ([spec.event, spec.stop].some((e) => isWired(config.hooks?.[e]))) return true;
+      if (spec.events.some((t) => isWired(config.hooks?.[t.event]))) return true;
     }
   }
   return false;

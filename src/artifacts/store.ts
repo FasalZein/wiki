@@ -183,25 +183,39 @@ export async function createArtifact(input: CreateArtifactInput): Promise<Artifa
     }
   }
 
-  // ponytail: read-then-write on nextId is a TOCTOU race under parallel creates.
-  // Exclusive create (flag 'wx') + bounded retry is the cheap fix — no lockfile.
-  const MAX_ATTEMPTS = 8;
-  for (let attempt = 0; ; attempt++) {
-    const id = await nextId(input.type, input.vaultRoot, input.project, structure);
+  return mintAndWrite({ type: input.type, vaultRoot: input.vaultRoot, project: input.project, structure }, (id) => {
     const aliases = suppliedAliases.includes(id) ? suppliedAliases : [id, ...suppliedAliases];
-    const fields = applyDefaults(schema, template, {
-      ...input.fields,
-      id,
-      aliases,
-      project: input.project,
-    });
+    const fields = applyDefaults(schema, template, { ...input.fields, id, aliases, project: input.project });
     const result = validate(schema, fields);
     if (!result.ok) {
       throw new ArtifactValidationError(result.errors);
     }
-
     const content = renderArtifact(template, orderBySchema(schema, result.value), bodySections);
     const path = artifactPath(input.type, input.vaultRoot, input.project, id, String(result.value.title ?? id), structure, input.category);
+    return { path, content, fields: result.value };
+  });
+}
+
+/** What a {@link mintAndWrite} render callback returns for a minted id. */
+type RenderedArtifact = { path: string; content: string; fields: NormalizedRecord };
+
+/**
+ * The canonical "allocate the next id and write the file exactly once" seam,
+ * shared by {@link createArtifact} and the hook's in-child capture. The render
+ * callback turns a freshly minted id into its target path + content; this loop
+ * owns the one thing both callers must get right: the nextId read-then-write is
+ * a TOCTOU race under parallel writers, so an exclusive create (`wx`) plus a
+ * bounded retry recomputes the id on collision rather than clobbering or
+ * throwing. No lockfile.
+ */
+export async function mintAndWrite(
+  target: { type: TemplateType; vaultRoot: string; project: string; structure: Structure },
+  render: (id: string) => RenderedArtifact,
+): Promise<Artifact> {
+  const MAX_ATTEMPTS = 8;
+  for (let attempt = 0; ; attempt++) {
+    const id = await nextId(target.type, target.vaultRoot, target.project, target.structure);
+    const { path, content, fields } = render(id);
     try {
       await mkdir(dirname(path), { recursive: true }); // Bun.write auto-mkdirs; node writeFile does not
       await writeFile(path, content, { flag: "wx" }); // fails if path already exists
@@ -209,13 +223,7 @@ export async function createArtifact(input: CreateArtifactInput): Promise<Artifa
       if (isFileExists(error) && attempt < MAX_ATTEMPTS) continue; // collision — recompute nextId
       throw error;
     }
-
-    return {
-      id,
-      path,
-      fields: result.value,
-      body: content,
-    };
+    return { id, path, fields, body: content };
   }
 }
 
