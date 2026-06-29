@@ -74,7 +74,6 @@ describe("SLICE-0112: create by bucket/leaf name", () => {
       "--project", "p",
       "--title", "Evidence-first architecture",
       "--summary", "Evidence-first architecture overview.",
-      "--type", "reference",
     ]);
 
     expect(result.code).toBe(0);
@@ -115,7 +114,6 @@ describe("SLICE-0112: create by bucket/leaf name", () => {
       "--project", "p",
       "--title", "Deploy runbook for prod",
       "--summary", "Deploy runbook for prod summary.",
-      "--type", "reference",
       "--category", "research",
     ]);
 
@@ -131,7 +129,6 @@ describe("SLICE-0112: create by bucket/leaf name", () => {
       "--project", "p",
       "--title", "Some valid title here",
       "--summary", "Some valid summary here.",
-      "--type", "reference",
       "--category", "blueprints",
     ]);
     expect(result.code).toBe(1);

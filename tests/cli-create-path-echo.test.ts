@@ -57,7 +57,7 @@ describe("create echoes destination path", () => {
 
   test("create doc prints the docs/<category>/ path", async () => {
     const cap = capture();
-    const result = await dispatch(["create", "doc", "--project", "p", "--title", "Deploy runbook for prod", "--type", "runbook", "--summary", "Deploy runbook for prod summary."]);
+    const result = await dispatch(["create", "doc", "--project", "p", "--title", "Deploy runbook for prod", "--category", "runbooks", "--summary", "Deploy runbook for prod summary."]);
     cap.restore();
     expect(result.code).toBe(0);
     const all = cap.out() + cap.err();

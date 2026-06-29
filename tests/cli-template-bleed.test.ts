@@ -45,7 +45,7 @@ describe("templates carry no bleed markers (SLICE-0074)", () => {
     ["prds", ["create", "prd", "--project", "p", "--title", "Some requirement", "--summary", "A requirement summary line."]],
     ["slices", ["create", "slice", "--project", "p", "--title", "Some slice", "--summary", "A slice summary line."]],
     ["adrs", ["create", "decision", "--project", "p", "--title", "Some decision", "--summary", "A decision summary line."]],
-    ["docs", ["create", "doc", "--project", "p", "--title", "Some runbook", "--type", "runbook", "--summary", "A runbook summary line."]],
+    ["docs", ["create", "doc", "--project", "p", "--title", "Some runbook", "--category", "runbooks", "--summary", "A runbook summary line."]],
     ["handoffs", ["create", "handoff", "--project", "p", "--phase", "plan", "--summary", "A handoff summary line."]],
   ];
 

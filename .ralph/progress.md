@@ -640,3 +640,108 @@ Next-iteration notes: SLICE-0117 (capstone deletion of DOC_CATEGORIES / isDocCat
 unfinished item. Its blockers 0112/0113/0114/0115 all pass and capture no longer
 imports the doc-category machinery, so grep should show only registry.ts (the owner /
 exporter) still referencing it. SLICE-0118 remains after 0117.
+
+## SLICE-0117 DELETE DEAD DOC-CATEGORY MACHINERY (PASS)
+
+Selected as the lowest-numbered unfinished item; its blockers 0112/0113/0114/0115
+all pass. Pre-flight grep confirmed only registry.ts (the owner/exporter) and two
+test COMMENTS still referenced the machinery — every runtime consumer (store.ts,
+doctor.ts, create.ts, doc.ts, capture.ts) was already migrated by the earlier
+slices, so the deletion had no un-migrated importer to break.
+
+Decision rationale: capstone of PRD-0019's three-vocabularies cleanup. Remove the
+hardcoded DOC_CATEGORIES / DocCategory / isDocCategory / defaultCategoryForDocType
+from registry.ts and the doc `type` enum from templates/doc.md, so a doc no longer
+carries BOTH a `type` field and a `category` folder that can disagree. The
+config-declared bucket model (SLICE-0110..0116) supersedes ADR-0028's locked
+categories.
+
+Implementation:
+- src/artifacts/registry.ts: deleted the DOC_CATEGORIES const, the DocCategory
+  type, isDocCategory(), and defaultCategoryForDocType(). Kept the `export {
+  buildStructure }` that sat between them. The remaining lone reference is a
+  descriptive comment on DEFAULT_BUCKETS noting the buckets reproduce "today's
+  locked DOC_CATEGORIES (ADR-0028)" — left as historical provenance, references no
+  deleted symbol.
+- templates/doc.md: removed the `type: { type: enum, required: true, values:
+  [runbook, research, guide, learning, reference] }` schema field and the
+  `· {{type}}` fragment from the body header line (now `> {{id}} · {{project}}`).
+  A doc has no `type` field at all anymore.
+- src/cli/verbs/create.ts: removed the legacy defaultDocBucket() helper (it mapped
+  the now-gone doc `type` enum to a bucket). A bare `wiki create doc` with no
+  --category now defaults to the `notes` bucket (the catch-all) so it still files
+  into a declared bucket, not loose in docs/. Explicit --category still validates
+  against the loaded section's bucket names; create-by-bucket-name (SLICE-0112) is
+  unchanged.
+- src/cli/usage.ts: updated the `wiki create doc` help (dropped the --type flag,
+  reworded --category as the bucket subfolder defaulting to notes). No test pins
+  this string.
+- src/bootstrap/doctor.ts: the CONTEXT.md drift remediation message now says
+  `wiki create doc --project <p> --category notes` instead of `--type reference`
+  (the bootstrap-doctor-repo-binding test only asserts the message contains "wiki
+  create doc", which still holds).
+
+Conservative assumptions recorded:
+- A bare `wiki create doc` (no bucket name, no --category) defaults to `notes`.
+  Rationale: the old code already routed every unmapped `type` to `notes`, and a
+  loose doc in docs/ would now be flagged by doctor (SLICE-0113). `notes` is the
+  documented catch-all, a reversible default, and keeps `wiki create doc` working
+  without inventing a new fallback.
+- `type: research`/`type: runbook` still appearing in tests/artifacts.test.ts
+  createArtifact `fields` is now a harmless unknown frontmatter field: validate()
+  only checks declared schema fields and render preserves extras, so those path/id
+  assertions stay green untouched. Not migrated because nothing asserts on the
+  field there.
+
+Tests (no test deleted or weakened; every type-enum assertion was rewritten to the
+new contract explicitly):
+- tests/cli-doc.test.ts: the basic-create case now asserts the file has NO `type:`
+  field. Replaced "derives the category from type" with "no --category defaults to
+  the notes bucket". Removed the now-meaningless "routes an unmapped type to notes"
+  (the type enum is gone) — folded into the notes-default case. Replaced "exits 1
+  when type is missing" with "no longer requires --type and creates with no type
+  field" (exit 0, no type field). Replaced "exits 1 for invalid type enum value"
+  with "rejects the removed --type flag" (--type is now an unknown flag -> nonzero
+  exit). Dropped --type from the tags case (and its `type: research` assertion),
+  the unknown-category case, the increments-IDs case, and the createArgs() helper
+  (now files via --category runbooks to keep the docs/runbooks/ path assertions).
+- Dropped the stale --type arg from tests/cli-create-path-echo.test.ts (->
+  --category runbooks), tests/cli-template-bleed.test.ts (-> --category runbooks),
+  tests/cli-one-shot-create.test.ts (-> --category research),
+  tests/cli-dedup.test.ts (-> --category notes), and the three --type reference
+  args in tests/create-by-bucket.test.ts (removed; --category drives the folder).
+
+Verified the new "creates with no type field" assertion is a real deletion guard:
+manually created a doc against a TEMP fixture vault (never the real $HOME/Knowledge)
+— it filed into docs/notes/DOC-0001-*.md with frontmatter carrying no `type` key and
+a clean body header `> DOC-0001 · p` (no literal {{type}}).
+
+Files changed:
+- src/artifacts/registry.ts (delete DOC_CATEGORIES/DocCategory/isDocCategory/
+  defaultCategoryForDocType)
+- templates/doc.md (remove the `type` enum field + `· {{type}}` body fragment)
+- src/cli/verbs/create.ts (remove defaultDocBucket; bare doc defaults to notes)
+- src/cli/usage.ts (doc create help: drop --type, reword --category)
+- src/bootstrap/doctor.ts (drift message: --type reference -> --category notes)
+- tests/cli-doc.test.ts, tests/cli-create-path-echo.test.ts,
+  tests/cli-template-bleed.test.ts, tests/cli-one-shot-create.test.ts,
+  tests/cli-dedup.test.ts, tests/create-by-bucket.test.ts (migrate off --type)
+- .ralph/items.json (SLICE-0117 passes false->true)
+- .ralph/progress.md (this entry)
+
+ADR-0028 (locked doc categories) is superseded by the config-declared bucket model
+introduced across SLICE-0110..0116; doctor's no-loose-files invariant is now
+expressed against the per-vault config tree (SLICE-0113) rather than the deleted
+DOC_CATEGORIES enum.
+
+Verification (all green at this commit):
+- bun run build: ok (cli.js 0.32 MB, bundled 99 modules)
+- bunx tsc --noEmit: clean (exit 0)
+- bun run test: 409 pass, 0 fail, 1310 expect() calls, 54 files
+
+Next-iteration notes: SLICE-0118 (custom tree end-to-end + criteria) is the only
+remaining unfinished item; its blockers 0110/0111/0112/0113 all pass. It should
+build a TEMP vault with a custom wiki.json (a bugs bucket + an architecture section
+with buckets), prove create/doctor/nextId drive entirely from config, surface each
+bucket's `criteria` via `wiki create <bucket> --help` and `wiki schema <bucket>`,
+and update the wiki skill doc for the create-by-bucket syntax.

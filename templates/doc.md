@@ -8,7 +8,6 @@ schema:
   summary:      { type: string,    required: true,  min: 10, max: 200, description: "One-line scannable summary, rendered atop the body" }
   group:        { type: string,    description: "Optional section heading for this artifact in the generated index.md" }
   project:      { type: string,    required: true,  description: "Project name; must match project folder" }
-  type:         { type: enum,      required: true,  values: [runbook, research, guide, learning, reference], description: "Knowledge artifact type" }
   tags:         { type: list,      default: [], description: "Cross-cutting topic tags for filtering" }
   related:      { type: link_list, default: [], description: "Links to related docs, PRDs, or decisions" }
   source_url:   { type: string,    description: "Source URL for research docs sourced from web" }
@@ -18,7 +17,7 @@ schema:
 ---
 # {{title}}
 
-> {{id}} · {{project}} · {{type}}
+> {{id}} · {{project}}
 
 {{summary}}
 

@@ -330,17 +330,6 @@ export async function loadStructure(vaultRoot: string): Promise<Structure> {
   return buildStructure(parseKinds(rawKinds), parseBuckets(rawKinds));
 }
 
-/**
- * Locked vocabulary of doc category subfolders. Docs live in docs/<category>/.
- * Agents cannot invent new categories; every doc maps into exactly one of these.
- */
-export const DOC_CATEGORIES = ["architecture", "research", "runbooks", "specs", "notes", "legacy"] as const;
-export type DocCategory = (typeof DOC_CATEGORIES)[number];
-
-export function isDocCategory(value: string): value is DocCategory {
-  return (DOC_CATEGORIES as readonly string[]).includes(value);
-}
-
 export { buildStructure };
 
 /**
@@ -362,18 +351,4 @@ export function parentBacklink(
   const parentSpec = structure.kinds[parentType];
   if (parentSpec?.child_list === undefined) return undefined;
   return { parentType, parentField: `parent_${parentType}`, childListField: parentSpec.child_list };
-}
-
-/** Default doc category derived from the doc's `type` enum when none is given.
- *  Unmapped types fall to `notes` — the intended catch-all — not `specs`, so `specs`
- *  stays "specifications" rather than an accidental junk drawer (ADR-0028). */
-export function defaultCategoryForDocType(docType: string | undefined): DocCategory {
-  switch (docType) {
-    case "runbook":
-      return "runbooks";
-    case "research":
-      return "research";
-    default:
-      return "notes";
-  }
 }

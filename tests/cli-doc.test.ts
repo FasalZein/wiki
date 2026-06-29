@@ -23,7 +23,8 @@ describe("doc CLI", () => {
     expect(file).toContain("id: DOC-0001");
     expect(file).toContain("title: Pre-deploy checklist for Kamal services");
     expect(file).toContain("project: test-project");
-    expect(file).toContain("type: runbook");
+    // SLICE-0117: the doc `type` enum is gone; docs carry no type field.
+    expect(file).not.toContain("type:");
   });
 
   test("doc create places the file under docs/<category> when --category is given", async () => {
@@ -34,7 +35,6 @@ describe("doc CLI", () => {
       "--title", "Evidence-first architecture",
       "--summary", "Evidence-first architecture overview.",
       "--project", "test-project",
-      "--type", "reference",
       "--category", "architecture",
     ], vaultRoot);
 
@@ -43,25 +43,16 @@ describe("doc CLI", () => {
     expect(await readFile(path, "utf8")).toContain("id: DOC-0001");
   });
 
-  test("doc create derives the category from type when --category is omitted", async () => {
+  test("doc create with no --category defaults to the notes bucket (SLICE-0117)", async () => {
     const vaultRoot = await createFixtureVault("test-project");
 
-    await runWiki(createArgs(), vaultRoot); // type runbook -> docs/runbooks/
-
-    const path = join(vaultRoot, "projects", "test-project", "docs", "runbooks", "DOC-0001-pre-deploy-checklist-for-kamal-services.md");
-    expect(await readFile(path, "utf8")).toContain("id: DOC-0001");
-  });
-
-  test("doc create routes an unmapped type to notes (the catch-all), not specs", async () => {
-    const vaultRoot = await createFixtureVault("test-project");
-
-    // `reference` has no explicit category mapping -> should land in notes/, not specs/.
+    // With the doc `type` enum removed, a bare create files into notes/, the
+    // catch-all bucket, not loose in docs/.
     await runWiki([
       "create", "doc",
       "--title", "Some reference doc title",
       "--summary", "A reference doc for routing test.",
       "--project", "test-project",
-      "--type", "reference",
     ], vaultRoot);
 
     const notesPath = join(vaultRoot, "projects", "test-project", "docs", "notes", "DOC-0001-some-reference-doc-title.md");
@@ -75,7 +66,6 @@ describe("doc CLI", () => {
       "create", "doc",
       "--title", "Some valid title here",
       "--project", "test-project",
-      "--type", "reference",
       "--category", "blueprints",
     ], vaultRoot);
 
@@ -91,13 +81,12 @@ describe("doc CLI", () => {
       "--title", "AWS migration research",
       "--summary", "Research on the AWS migration.",
       "--project", "test-project",
-      "--type", "research",
+      "--category", "research",
       "--tags", "aws,migration,infra",
     ], vaultRoot);
 
     expect(result.exitCode).toBe(0);
     const file = await readDoc(vaultRoot, "DOC-0001");
-    expect(file).toContain("type: research");
     expect(file).toContain("aws");
     expect(file).toContain("migration");
   });
@@ -108,38 +97,40 @@ describe("doc CLI", () => {
     const result = await runWiki([
       "create", "doc",
       "--project", "test-project",
-      "--type", "runbook",
     ], vaultRoot);
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("title");
   });
 
-  test("doc create exits 1 when type is missing", async () => {
+  test("doc create no longer requires --type and creates with no type field (SLICE-0117)", async () => {
     const vaultRoot = await createFixtureVault("test-project");
 
     const result = await runWiki([
       "create", "doc",
-      "--title", "Some doc",
+      "--title", "Some doc title here",
+      "--summary", "A doc with no type field.",
       "--project", "test-project",
     ], vaultRoot);
 
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("type");
+    expect(result.exitCode).toBe(0);
+    const file = await readDoc(vaultRoot, "DOC-0001");
+    expect(file).not.toContain("type:");
   });
 
-  test("doc create exits 1 for invalid type enum value", async () => {
+  test("doc create rejects the removed --type flag (SLICE-0117)", async () => {
     const vaultRoot = await createFixtureVault("test-project");
 
+    // The doc `type` enum is gone, so --type is an unknown flag and fails parsing.
     const result = await runWiki([
       "create", "doc",
       "--title", "Some valid title here",
+      "--summary", "A doc summary line here.",
       "--project", "test-project",
       "--type", "blog-post",
     ], vaultRoot);
 
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("type");
+    expect(result.exitCode).not.toBe(0);
   });
 
   test("doc create increments IDs", async () => {
@@ -151,7 +142,6 @@ describe("doc CLI", () => {
       "--title", "Another knowledge doc here",
       "--summary", "Another knowledge doc for IDs.",
       "--project", "test-project",
-      "--type", "guide",
       "--force-new", "Testing sequential ID generation for doc artifacts",
     ], vaultRoot);
 
@@ -253,7 +243,7 @@ describe("doc CLI", () => {
 });
 
 function createArgs(): string[] {
-  return ["create", "doc", "--title", "Pre-deploy checklist for Kamal services", "--summary", "Pre-deploy checklist for Kamal.", "--project", "test-project", "--type", "runbook"];
+  return ["create", "doc", "--title", "Pre-deploy checklist for Kamal services", "--summary", "Pre-deploy checklist for Kamal.", "--project", "test-project", "--category", "runbooks"];
 }
 
 type CommandResult = {

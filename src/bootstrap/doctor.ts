@@ -232,7 +232,7 @@ async function checkRepoContractDrift(project: string, repoPath: string): Promis
   if (await exists(join(repoPath, "CONTEXT.md"))) {
     issues.push({
       type: "contract-drift",
-      message: `${project}: repo '${repoPath}' contains CONTEXT.md — glossary terms belong in the vault. Recreate each term via 'wiki create doc --project ${project} --type reference', then delete the repo file.`,
+      message: `${project}: repo '${repoPath}' contains CONTEXT.md — glossary terms belong in the vault. Recreate each term via 'wiki create doc --project ${project} --category notes', then delete the repo file.`,
     });
   }
 

@@ -130,7 +130,7 @@
         "Fix any residual reference so build + typecheck are clean; ensure a doc no longer carries a type/category that can disagree.",
         "Note ADR-0028 superseded in progress. Add/adjust a test proving the doc-category machinery is gone and docs still create/validate. Run all gates green and commit."
       ],
-      "passes": false,
+      "passes": true,
       "regression_notes": ""
     },
     {

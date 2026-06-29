@@ -147,9 +147,9 @@ async function createGeneric(kind: TemplateType, args: string[], presetCategory?
 
   // The bucket subfolder. SLICE-0112: a bucket/leaf name passed as the create-name
   // resolves to a section + subfolder (presetCategory). Otherwise --category names
-  // a bucket of this section, validated against the loaded tree (no DocCategory
-  // enum). For `doc` only, an omitted bucket falls back to the legacy --type map
-  // so `wiki create doc --type runbook` still files into docs/runbooks/.
+  // a bucket of this section, validated against the loaded tree. SLICE-0117: with the
+  // doc `type` enum gone, a bare `wiki create doc` with no bucket defaults to `notes`
+  // (the catch-all) so it files into a declared bucket, not loose in docs/.
   const section = structure.sections.find((s) => s.name === kind);
   const bucketNames = section?.buckets.map((b) => b.name) ?? [];
   const explicitCategory = stringValue(parsed.values, "category");
@@ -160,7 +160,7 @@ async function createGeneric(kind: TemplateType, args: string[], presetCategory?
   }
   const category = presetCategory
     ?? explicitCategory
-    ?? (kind === "doc" ? defaultDocBucket(stringValue(parsed.values, "type")) : undefined);
+    ?? (kind === "doc" ? "notes" : undefined);
 
   // Dedup query: title plus every authored body section the user supplied, in
   // template order — a uniform signal across kinds (no per-kind composition).
@@ -180,21 +180,6 @@ async function createGeneric(kind: TemplateType, args: string[], presetCategory?
     vaultRoot,
     structure,
   });
-}
-
-/** Legacy back-compat for `wiki create doc --type <t>` with no explicit bucket:
- *  map the doc `type` enum to its default bucket. Unmapped types fall to `notes`
- *  (the catch-all), not `specs`. Superseded by `wiki create <bucket>` (SLICE-0112);
- *  the doc `type` enum itself is removed in SLICE-0117. */
-function defaultDocBucket(docType: string | undefined): string {
-  switch (docType) {
-    case "runbook":
-      return "runbooks";
-    case "research":
-      return "research";
-    default:
-      return "notes";
-  }
 }
 
 type CreateRequest = {
