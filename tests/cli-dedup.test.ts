@@ -201,9 +201,9 @@ describe("advisory dedup", () => {
     // docs have no `superseded_by` field, so superseding one fails AFTER the new
     // doc is written — exercising the rollback that prevents orphan + id-gap.
     const fixture = await createDedupFixture("wiki-v2");
-    await runWiki(["create", "doc", "--title", "Old reference doc", "--summary", "An old reference doc.", "--project", "wiki-v2", "--type", "reference", "--force-new", "Seeding a doc to attempt superseding"], fixture);
+    await runWiki(["create", "doc", "--title", "Old reference doc", "--summary", "An old reference doc.", "--project", "wiki-v2", "--category", "notes", "--force-new", "Seeding a doc to attempt superseding"], fixture);
 
-    const result = await runWiki(["create", "doc", "--title", "New reference doc", "--summary", "A new reference doc.", "--project", "wiki-v2", "--type", "reference", "--supersedes", "DOC-0001"], fixture);
+    const result = await runWiki(["create", "doc", "--title", "New reference doc", "--summary", "A new reference doc.", "--project", "wiki-v2", "--category", "notes", "--supersedes", "DOC-0001"], fixture);
 
     expect(result.exitCode).not.toBe(0);
     const remaining = await listMarkdownRecursive(join(fixture.projectPath, "docs"));

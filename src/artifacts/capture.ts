@@ -5,7 +5,7 @@ import { basename } from "node:path";
 import { getVaultRoot } from "../config/vault";
 import { readLinkedProject } from "../cli/repo-link";
 import type { TemplateType } from "../schema/load";
-import { DEFAULT_STRUCTURE, loadStructure } from "./registry";
+import { loadStructure, type Structure } from "./registry";
 import { buildIdIndex } from "./id-index";
 import { mintAndWrite, slugifyTitle } from "./store";
 import { artifactDirectory } from "./paths";
@@ -26,16 +26,19 @@ export type CaptureOutcome =
 
 /**
  * The kind a written file declares in its OWN frontmatter, resolved via the
- * registry (ADR-0038): a `template:` field naming a kind, or an `id:` whose
- * prefix resolves to one (e.g. PRD-0099 → prd). Null when nothing it declares
- * maps to a registered kind — the caller never guesses.
+ * PER-VAULT structure (ADR-0038, SLICE-0116): a `template:` field naming a kind,
+ * or an `id:` whose prefix resolves to one (e.g. PRD-0099 → prd). Resolved
+ * against the SAME structure the write step uses (loadStructure(vaultRoot)), so a
+ * vault's custom kind is recognized — not the bundled default, which would miss
+ * any kind a custom wiki.json adds. Null when nothing it declares maps to a kind
+ * the vault registers — the caller never guesses.
  */
-function resolveKind(data: Record<string, unknown>): TemplateType | null {
+function resolveKind(data: Record<string, unknown>, structure: Structure): TemplateType | null {
   const template = typeof data.template === "string" ? data.template : undefined;
-  if (template !== undefined && DEFAULT_STRUCTURE.kinds[template] !== undefined) return template;
+  if (template !== undefined && structure.kinds[template] !== undefined) return template;
   const id = typeof data.id === "string" ? data.id : undefined;
   if (id !== undefined) {
-    const kind = DEFAULT_STRUCTURE.typeForId(id);
+    const kind = structure.typeForId(id);
     if (kind !== undefined) return kind;
   }
   return null;
@@ -83,14 +86,30 @@ export async function captureArtifact(input: { path: string; cwd: string }): Pro
   // Not artifact-shaped (no id/template frontmatter) — an ordinary write, stay silent.
   if (declaredId === undefined && declaredTemplate === undefined) return null;
 
-  const kind = resolveKind(data);
+  // Resolve the vault and load ITS structure up front, so kind resolution rides
+  // the same per-vault tree the write step uses (SLICE-0116): a custom-tree vault
+  // recognizes its own custom kind, where the bundled default would not.
+  let vaultRoot: string;
+  try {
+    vaultRoot = await getVaultRoot();
+  } catch (error) {
+    return warn(path, (error as Error).message);
+  }
+  let structure: Structure;
+  try {
+    structure = await loadStructure(vaultRoot);
+  } catch (error) {
+    return warn(path, (error as Error).message);
+  }
+
+  const kind = resolveKind(data, structure);
   if (kind === null) {
     const declared = declaredTemplate !== undefined ? `template '${declaredTemplate}'` : `id '${declaredId}'`;
     return warn(path, `declares ${declared}, which maps to no registered wiki kind — file it manually with 'wiki create <kind>'.`);
   }
 
   try {
-    return await fileArtifact({ path, data, body, kind, declaredId, cwd });
+    return await fileArtifact({ path, data, body, kind, declaredId, cwd, vaultRoot, structure });
   } catch (error) {
     // A filesystem fault (read-only draft, permissions, races past the retry)
     // must not crash the caller — surface it as a warning, never a silent drop.
@@ -98,7 +117,8 @@ export async function captureArtifact(input: { path: string; cwd: string }): Pro
   }
 }
 
-/** Resolve vault + project + structure, then file the artifact via the shared seam. */
+/** File the artifact via the shared seam, resolving the project from frontmatter
+ *  or the linked repo. Vault + structure are already loaded by the caller. */
 async function fileArtifact(args: {
   path: string;
   data: Record<string, unknown>;
@@ -106,22 +126,14 @@ async function fileArtifact(args: {
   kind: TemplateType;
   declaredId: string | undefined;
   cwd: string;
+  vaultRoot: string;
+  structure: Structure;
 }): Promise<CaptureOutcome> {
-  const { path, data, body, kind, declaredId, cwd } = args;
-  let vaultRoot: string;
-  try {
-    vaultRoot = await getVaultRoot();
-  } catch (error) {
-    return warn(path, (error as Error).message);
-  }
+  const { path, data, body, kind, declaredId, cwd, vaultRoot, structure } = args;
   const project =
     typeof data.project === "string" && data.project.length > 0 ? data.project : (await readLinkedProject(cwd)) ?? undefined;
   if (project === undefined) {
     return warn(path, "no project (set frontmatter 'project' or link the repo).");
-  }
-  const structure = await loadStructure(vaultRoot);
-  if (structure.kinds[kind] === undefined) {
-    return warn(path, `vault defines no '${kind}' kind.`);
   }
 
   // Idempotent: a declared id already indexed in the vault means this draft is

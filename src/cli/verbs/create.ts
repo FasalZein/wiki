@@ -21,7 +21,7 @@ import {
 } from "../../artifacts/store";
 import { authoredSections } from "../../artifacts/body";
 import { projectPath } from "../../artifacts/paths";
-import { DEFAULT_STRUCTURE, defaultCategoryForDocType, DOC_CATEGORIES, isDocCategory, loadStructure, type DocCategory, type Structure } from "../../artifacts/registry";
+import { DEFAULT_STRUCTURE, loadStructure, parentBacklink, type Structure } from "../../artifacts/registry";
 import { assertProjectStructure, loadProjectConfig, ProjectConfigError } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import { loadTemplate, normalizeInlineMaps, resolveTemplatePath, type TemplateType } from "../../schema/load";
@@ -32,12 +32,51 @@ import { resolveProject } from "../resolve-project";
 import { unknownMessage } from "../usage";
 
 export async function handleCreate(args: string[]): Promise<CliResult> {
-  const [kind, ...rest] = args;
-  if (kind === undefined || DEFAULT_STRUCTURE.kinds[kind] === undefined) {
-    console.error(unknownMessage("artifact type", kind ?? "", Object.keys(DEFAULT_STRUCTURE.kinds)));
-    return { code: 1 };
+  const [name, ...rest] = args;
+  // SLICE-0112: the create-name is a section kind (e.g. `doc`) OR a bucket/leaf
+  // name in the tree (e.g. `architecture`, which files into the doc section's
+  // docs/architecture/ with a DOC id). Resolve it synchronously against the
+  // bundled default tree so an unknown name fails before any vault load (the
+  // `create bogus` contract runs with no vault configured).
+  if (name !== undefined && DEFAULT_STRUCTURE.kinds[name] !== undefined) {
+    return createGeneric(name as TemplateType, rest);
   }
-  return createGeneric(kind, rest);
+  const defaultResolved = name === undefined ? undefined : DEFAULT_STRUCTURE.bucketFor(name);
+  if (defaultResolved !== undefined) {
+    return createGeneric(defaultResolved.section.name, rest, presetFor(defaultResolved));
+  }
+  // SLICE-0118: the name isn't in the bundled default tree — it may be a kind or
+  // a bucket declared only in this vault's custom wiki.json. Load the per-vault
+  // structure and resolve against it so `wiki create <custom-bucket>` works with
+  // zero code change. A vault-load fault (unconfigured) keeps the default error.
+  const structure = await tryLoadStructure();
+  if (structure !== undefined && name !== undefined) {
+    if (structure.kinds[name] !== undefined) return createGeneric(name as TemplateType, rest);
+    const resolved = structure.bucketFor(name);
+    if (resolved !== undefined) return createGeneric(resolved.section.name, rest, presetFor(resolved));
+  }
+  const kinds = Object.keys(structure?.kinds ?? DEFAULT_STRUCTURE.kinds);
+  console.error(unknownMessage("artifact type", name ?? "", kinds));
+  return { code: 1 };
+}
+
+/** A branch bucket carries an explicit subfolder; a leaf bucket (name === its
+ *  section) files straight into the section folder, so no preset category. */
+function presetFor(resolved: { section: { tree: "leaf" | "branch" }; bucket: { name: string } }): string | undefined {
+  return resolved.section.tree === "branch" ? resolved.bucket.name : undefined;
+}
+
+/** Load the per-vault structure, or undefined when no vault is configured (so the
+ *  `create bogus` contract still fails with the bundled kinds). A malformed
+ *  wiki.json still throws — a present-but-broken config is a real error. */
+async function tryLoadStructure(): Promise<Structure | undefined> {
+  let vaultRoot: string;
+  try {
+    vaultRoot = await getVaultRoot();
+  } catch {
+    return undefined;
+  }
+  return loadStructure(vaultRoot);
 }
 
 /** Snake-case schema/placeholder name -> kebab CLI flag (e.g. parent_prd -> parent-prd). */
@@ -72,7 +111,7 @@ const NON_FLAG_FIELDS: ReadonlySet<string> = new Set([
  * pass through as `fields`; schema fields are validated, placeholders fall through
  * untouched and fill their `{{...}}` section.
  */
-async function createGeneric(kind: TemplateType, args: string[]): Promise<CliResult> {
+async function createGeneric(kind: TemplateType, args: string[], presetCategory?: string): Promise<CliResult> {
   const schema = await loadTemplate(kind);
   const template = await Bun.file(resolveTemplatePath(`${kind}.md`)).text();
   const schemaNames = new Set(schema.fields.map((field) => field.name));
@@ -117,6 +156,9 @@ async function createGeneric(kind: TemplateType, args: string[]): Promise<CliRes
   if (missing) return missing;
   if (project === undefined) return { code: 1 };
 
+  const vaultRoot = await getVaultRoot();
+  const structure = await loadStructure(vaultRoot);
+
   const fields: Record<string, unknown> = {};
   for (const spec of flagSpecs) {
     if (spec.kind === "list") {
@@ -130,15 +172,27 @@ async function createGeneric(kind: TemplateType, args: string[]): Promise<CliRes
     }
   }
 
-  // Category is a doc subfolder, not a schema field: validate it, and for doc
-  // default it from --type. Ignored by kinds that don't nest (only doc does).
+  // The bucket subfolder. SLICE-0112: a bucket/leaf name passed as the create-name
+  // resolves to a section + subfolder (presetCategory). Otherwise --category names
+  // a bucket of this section, validated against the loaded tree. SLICE-0117: with the
+  // doc `type` enum gone, a bare create on a BRANCH section files into a default
+  // bucket so it lands in a declared folder, not loose in the section dir.
+  const section = structure.sections.find((s) => s.name === kind);
+  const bucketNames = section?.buckets.map((b) => b.name) ?? [];
   const explicitCategory = stringValue(parsed.values, "category");
-  if (explicitCategory !== undefined && !isDocCategory(explicitCategory)) {
+  if (explicitCategory !== undefined && !bucketNames.includes(explicitCategory)) {
     console.error(`unknown category: ${explicitCategory}`);
-    console.error(`category must be one of: ${DOC_CATEGORIES.join(", ")}`);
+    console.error(`category must be one of: ${bucketNames.join(", ")}`);
     return { code: 1 };
   }
-  const category = explicitCategory ?? (kind === "doc" ? defaultCategoryForDocType(stringValue(parsed.values, "type")) : undefined);
+  // Section-shape-driven default (no kind name hardcoded): a branch section with no
+  // preset/explicit bucket defaults to its `notes` bucket if declared, else its first
+  // declared bucket — always a real bucket of THIS vault's tree. A leaf section files
+  // directly into the section folder (no subfolder), so its default stays undefined.
+  const defaultBucket = section?.tree === "branch"
+    ? (bucketNames.includes("notes") ? "notes" : bucketNames[0])
+    : undefined;
+  const category = presetCategory ?? explicitCategory ?? defaultBucket;
 
   // Dedup query: title plus every authored body section the user supplied, in
   // template order — a uniform signal across kinds (no per-kind composition).
@@ -155,6 +209,8 @@ async function createGeneric(kind: TemplateType, args: string[]): Promise<CliRes
     rawValues: parsed.values,
     category,
     body,
+    vaultRoot,
+    structure,
   });
 }
 
@@ -164,17 +220,17 @@ type CreateRequest = {
   dedupQuery: string;
   fields: Record<string, unknown>;
   rawValues: Record<string, string | string[] | boolean | undefined>;
-  category?: DocCategory;
+  category?: string;
   body?: string;
+  vaultRoot: string;
+  structure: Structure;
 };
 
 async function createWithSupersede(req: CreateRequest): Promise<CliResult> {
-  const { type, project, dedupQuery, fields, rawValues, category, body } = req;
+  const { type, project, dedupQuery, fields, rawValues, category, body, vaultRoot, structure } = req;
   const override = parseOverride(rawValues);
   if (typeof override === "string") { console.error(override); return { code: 1 }; }
 
-  const vaultRoot = await getVaultRoot();
-  const structure = await loadStructure(vaultRoot);
   const projPath = projectPath(vaultRoot, project);
   await assertProjectStructure(projPath, structure);
   try {
@@ -186,10 +242,15 @@ async function createWithSupersede(req: CreateRequest): Promise<CliResult> {
       ? await readArtifact({ type, vaultRoot, project, id: override.id }, structure)
       : null;
     const supersededSnapshot = supersededBefore ? await Bun.file(supersededBefore.path).text() : null;
-    // Pre-flight the parent PRD before any write, mirroring backlinkParentPrd's
-    // guard, so a missing/garbage --parent-prd fails before supersede runs.
-    if (type === "slice" && typeof fields.parent_prd === "string" && fields.parent_prd.length > 0) {
-      await readArtifact({ type: "prd", vaultRoot, project, id: fields.parent_prd }, structure);
+    // Pre-flight the parent before any write, mirroring backlinkParent's guard,
+    // so a missing/garbage parent id fails before supersede runs. The parent
+    // relationship is config-declared (SLICE-0114), not a slice/prd special.
+    const backlink = parentBacklink(structure, type);
+    if (backlink !== undefined) {
+      const parentId = fields[backlink.parentField];
+      if (typeof parentId === "string" && parentId.length > 0) {
+        await readArtifact({ type: backlink.parentType, vaultRoot, project, id: parentId }, structure);
+      }
     }
     const dedupBlock = await advisoryDedup(type, project, projPath, dedupQuery, override, structure);
     if (dedupBlock !== null) return dedupBlock;
@@ -210,7 +271,7 @@ async function createWithSupersede(req: CreateRequest): Promise<CliResult> {
       if (override.kind === "supersedes") {
         await supersedeArtifact({ type, vaultRoot, project, id: override.id, by: artifact.id }, structure);
       }
-      await backlinkParentPrd(type, vaultRoot, project, artifact.id, fields, structure);
+      await backlinkParent(type, vaultRoot, project, artifact.id, fields, structure);
     } catch (postWriteError) {
       await removeArtifactFile(artifact.path);
       if (supersededBefore && supersededSnapshot !== null) {
@@ -287,28 +348,31 @@ async function advisoryDedup(type: TemplateType, project: string, projectPath: s
 }
 
 /**
- * SLICE-0054 backlink: when a slice is created with --parent-prd, append its id to
- * the parent PRD's `slices` list. `slices` is in NON_FLAG_FIELDS, so create never
- * populates it from the slice side — this is the only place the backlink is written.
- * Dedup-safe (no double-add), create-if-absent (setField writes the list whether or
- * not the PRD already had one). Runs in createWithSupersede's rollback try block, so
- * a missing/invalid parent PRD rolls back the slice rather than orphaning it.
+ * SLICE-0114 generic backlink (was the SLICE-0054 PRD<->slice special): when a
+ * child kind that declares `parent: <kind>` is created with a `parent_<kind>` id,
+ * append the child's id to the parent's config-declared `child_list` field. That
+ * field is in NON_FLAG_FIELDS, so create never populates it from the child side —
+ * this is the only place the backlink is written. Dedup-safe (no double-add),
+ * create-if-absent (setField writes the list whether or not the parent had one).
+ * Runs in createWithSupersede's rollback try block, so a missing/invalid parent
+ * rolls back the child rather than orphaning it.
  */
-async function backlinkParentPrd(
+async function backlinkParent(
   type: TemplateType,
   vaultRoot: string,
   project: string,
-  sliceId: string,
+  childId: string,
   fields: Record<string, unknown>,
   structure: Structure,
 ): Promise<void> {
-  if (type !== "slice") return;
-  const parentPrd = fields.parent_prd;
-  if (typeof parentPrd !== "string" || parentPrd.length === 0) return;
-  const prd = await readArtifact({ type: "prd", vaultRoot, project, id: parentPrd }, structure);
-  const current = Array.isArray(prd.fields.slices) ? prd.fields.slices.map(String) : [];
-  if (current.includes(sliceId)) return;
-  await setField({ type: "prd", vaultRoot, project, id: parentPrd, field: "slices", value: [...current, sliceId] }, structure);
+  const backlink = parentBacklink(structure, type);
+  if (backlink === undefined) return;
+  const parentId = fields[backlink.parentField];
+  if (typeof parentId !== "string" || parentId.length === 0) return;
+  const parent = await readArtifact({ type: backlink.parentType, vaultRoot, project, id: parentId }, structure);
+  const current = Array.isArray(parent.fields[backlink.childListField]) ? (parent.fields[backlink.childListField] as unknown[]).map(String) : [];
+  if (current.includes(childId)) return;
+  await setField({ type: backlink.parentType, vaultRoot, project, id: parentId, field: backlink.childListField, value: [...current, childId] }, structure);
 }
 
 function parseOverride(values: Record<string, string | string[] | boolean | undefined>) {
@@ -349,4 +413,28 @@ function missingFields(fields: Record<string, unknown>): CliResult | null {
 async function stdinOrValue(value: string | undefined): Promise<string | undefined> {
   if (value === "-") return Bun.stdin.text();
   return value;
+}
+
+/**
+ * SLICE-0118: render `wiki create <bucket> --help` for a bucket/leaf that has no
+ * curated USAGE_REGISTRY entry, surfacing its config-declared `criteria` (the
+ * what-goes-where signal) read from the per-vault loaded Structure. Returns null
+ * when the name resolves to no bucket, so dispatch falls back to generic help.
+ */
+export async function renderBucketCreateHelp(name: string): Promise<string | null> {
+  const structure = (await tryLoadStructure()) ?? DEFAULT_STRUCTURE;
+  const resolved = structure.bucketFor(name);
+  if (resolved === undefined) return null;
+  const { section, bucket } = resolved;
+  const lines: string[] = [];
+  lines.push(`Create a ${section.name} artifact in the '${bucket.name}' bucket (files into ${bucket.folder}/, id prefix ${section.prefix}).`);
+  lines.push("");
+  lines.push(`usage: wiki create ${bucket.name} --project <name> --title <title> [--body -]`);
+  if (bucket.criteria !== undefined) {
+    lines.push("");
+    lines.push(`Criteria: ${bucket.criteria}`);
+  }
+  lines.push("");
+  lines.push(`Run 'wiki schema ${bucket.name}' for this bucket's fields.`);
+  return lines.join("\n");
 }

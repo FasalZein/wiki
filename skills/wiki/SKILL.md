@@ -33,8 +33,12 @@ Creation is one-shot: pass the authored body via `--body -` (stdin) so the
 artifact is complete in a single schema-validated command.
 
 - `wiki create <kind> …` — kinds come from the vault's `wiki.json`; `wiki create --help`
-  lists them and `wiki create <kind> --help` gives the fields (`decision` = ADR). Docs
-  land in a locked category subfolder.
+  lists them and `wiki create <kind> --help` gives the fields (`decision` = ADR). A
+  branch section's buckets are also create-names: `wiki create <bucket>` files into that
+  bucket's subfolder (e.g. `wiki create architecture` → `docs/architecture/`), and
+  `wiki create <bucket> --help` shows the bucket's `criteria` (the what-goes-where signal).
+  Equivalently, pass `--category <bucket>` to a section kind (`wiki create doc --category
+  architecture`). Buckets are config-declared in `wiki.json`, not hardcoded.
 - Every kind requires a one-line `--summary` — the headline the **roster** and search
   lead with. Write it last, once the body is settled; omitting it fails validation.
 
@@ -56,7 +60,8 @@ One validated `wiki` call per intent — never hand-edit frontmatter:
 - `wiki supersede <oldId> --by <newId>` — links an existing artifact to its replacement.
 - `wiki retitle <id> --title <t>` — retitle any kind, re-slugging the filename; the id (and `[[id]]` links) survive. `doc recategorize` stays the doc-only category move.
 - `wiki delete <id> [--force]` — remove an artifact; refuses (listing the referrers) when other artifacts link to it unless `--force`. `wiki sync` owns search-index cleanup, so re-sync after deleting.
-- `wiki schema <type>` — discover fields/enums before guessing a value.
+- `wiki schema <kind|bucket>` — discover fields/enums before guessing a value; a bucket
+  also prints its `criteria`.
 - `wiki path <id>` — resolve an id to its file path (filenames are `ID-slug.md`).
 - `wiki links <id>` — outbound links + inbound backlinks for an artifact (pure vault read, no qmd).
 - `--json` is universal: mutation verbs and `create`/`next-id` give `{id,…}` on stdout
@@ -74,11 +79,15 @@ One validated `wiki` call per intent — never hand-edit frontmatter:
   matches (`dedup_strong_blocks: true`); create then exits non-zero until you choose.
 - After creating, run `wiki sync` — it regenerates each project's `index.md` **roster**
   (incrementally — only changed files are re-read) plus a vault-root `index.md` linking
-  every project, and re-embeds for ranked search. Plain `search` updates only the keyword index, so
-  new artifacts stay invisible to ranked search and dedup until a sync.
-- Docs live only in the locked `docs/<category>/` folders (architecture, research,
-  runbooks, specs, notes, legacy) — never invent a folder; an unfit doc goes in the
-  closest locked one. `wiki doctor` flags rogue folders or loose files under `docs/`.
+  every project, and re-embeds for ranked search. `search` is a pure read against the
+  last `wiki sync`: it neither refreshes nor embeds, so new artifacts stay invisible to
+  search and dedup until a sync. Search warns and skips any project collection that was
+  never synced.
+- Docs live in the config-declared `docs/<bucket>/` subfolders the vault's `wiki.json`
+  declares (default buckets: architecture, research, runbooks, specs, notes, legacy) —
+  never invent a folder; an unfit doc goes in the closest declared bucket. `wiki create
+  <bucket> --help` (or `wiki schema <bucket>`) shows each bucket's criteria. `wiki doctor`
+  flags undeclared folders or loose files under a branch section.
   `wiki doctor --setup` checks distribution health instead of vault drift: binary freshness (source changed since the last `bun run build`), skill-bundle presence, and whether the persist hook is wired in any runtime.
 - `wiki fmt` reports format drift (exit 1); `wiki fmt --write` applies mechanical fixes (dates, frontmatter order, legacy-id renumber, and renaming files to `<ID>-<slug>.md` when id/slug drift from the filename, keeping the id so links survive). Both `wiki fmt` (flag-only) and `wiki validate <file>` report missing/unknown required H2 body sections, so the create-time structure contract is enforced after edits too.
 

@@ -4,7 +4,7 @@ import {
   ArtifactValidationError,
   relocateArtifact,
 } from "../../artifacts/store";
-import { DOC_CATEGORIES, isDocCategory, loadStructure, type DocCategory } from "../../artifacts/registry";
+import { loadStructure } from "../../artifacts/registry";
 import { assertProjectStructure, ProjectConfigError } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import { emitJson, jsonEnabled } from "../output";
@@ -41,19 +41,25 @@ async function recategorizeDoc(args: string[]): Promise<CliResult> {
     console.error("missing required field: <DOC-NNNN>, --project, --category");
     return { code: 1 };
   }
-  if (!isDocCategory(category)) {
-    console.error(`unknown category: ${category}`);
-    console.error(`category must be one of: ${DOC_CATEGORIES.join(", ")}`);
-    return { code: 1 };
-  }
-  return relocate(project, id, { category });
+  return relocate(project, id, { bucket: category });
 }
 
-async function relocate(project: string, id: string, change: { title?: string; category?: DocCategory }): Promise<CliResult> {
+async function relocate(project: string, id: string, change: { title?: string; bucket?: string }): Promise<CliResult> {
   const vaultRoot = await getVaultRoot();
   const projPath = projectPath(vaultRoot, project);
   try {
     const structure = await loadStructure(vaultRoot);
+    // Validate a recategorize target against the doc section's declared buckets so
+    // an unknown category fails with the category vocabulary, before any move.
+    if (change.bucket !== undefined) {
+      const docSection = structure.sections.find((section) => section.name === "doc");
+      const bucketNames = docSection?.buckets.map((bucket) => bucket.name) ?? [];
+      if (!bucketNames.includes(change.bucket)) {
+        console.error(`unknown category: ${change.bucket}`);
+        console.error(`category must be one of: ${bucketNames.join(", ")}`);
+        return { code: 1 };
+      }
+    }
     await assertProjectStructure(projPath, structure);
     const artifact = await relocateArtifact({ type: "doc", vaultRoot, project, id, ...change }, structure);
     if (jsonEnabled()) emitJson({ id: artifact.id, path: artifact.path });

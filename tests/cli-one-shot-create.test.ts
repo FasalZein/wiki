@@ -82,7 +82,7 @@ describe("one-shot create with --body", () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
 
     const result = await runWiki(
-      ["create", "doc", "--title", "Research findings", "--summary", "The research findings summary.", "--project", "wiki-v2", "--type", "research", "--body", "-"],
+      ["create", "doc", "--title", "Research findings", "--summary", "The research findings summary.", "--project", "wiki-v2", "--category", "research", "--body", "-"],
       vaultRoot,
       "## Content\n\nThe findings are extensive.\n",
     );

@@ -40,9 +40,11 @@ describe("search CLI", () => {
     );
     expect(result.stderr).toContain("wiki vault:");
     const log = await readFile(fixture.stateFile, "utf8");
+    // PRD-0018: search is read-only — it lists membership and queries, but never
+    // registers (collection add) or refreshes (update) a collection.
     expect(log).toContain("collection list");
-    expect(log).toContain(`collection add ${fixture.projectPath} --name wiki-v2 --mask **/*.md`);
-    expect(log).toContain("update -c wiki-v2");
+    expect(log).not.toContain("collection add");
+    expect(log).not.toContain("update");
     expect(log).toContain("query");
     expect(log).toContain("lex: vault");
   });
@@ -103,35 +105,34 @@ describe("search CLI", () => {
     ]);
   });
 
-  test("search registers the project collection only once across repeated calls", async () => {
+  test("search never registers or refreshes the project collection across repeated calls", async () => {
     const fixture = await createSearchFixture("wiki-v2");
 
     expect((await runWiki(["search", "first", "--project", "wiki-v2"], fixture)).exitCode).toBe(0);
     expect((await runWiki(["search", "second", "--project", "wiki-v2"], fixture)).exitCode).toBe(0);
 
     const log = await readFile(fixture.stateFile, "utf8");
-    // First call registers the collection, second call does not
-    const addLines = log.split("\n").filter((line) => line.startsWith("collection add"));
-    expect(addLines).toHaveLength(1);
-    // Both calls run update (auto-refresh) and query
-    const updateLines = log.split("\n").filter((line) => line.startsWith("update"));
-    expect(updateLines).toHaveLength(2);
+    // PRD-0018: read-only search never registers or refreshes — it queries the
+    // pre-synced collection on each call.
+    expect(log.split("\n").filter((line) => line.startsWith("collection add"))).toHaveLength(0);
+    expect(log.split("\n").filter((line) => line.startsWith("update"))).toHaveLength(0);
     expect(log).toContain("lex: first");
     expect(log).toContain("lex: second");
   });
 
-  test("search include-research registers and queries both collections", async () => {
+  test("search include-research queries both pre-synced collections without registering or refreshing", async () => {
     const fixture = await createSearchFixture("wiki-v2");
+    // include-research only queries the research collection when it was already
+    // synced; pre-register it alongside the project.
+    await writeFile(fixture.registeredFile, `wiki-v2 (qmd://wiki-v2/)\nresearch (qmd://research/)\n`);
 
     const result = await runWiki(["search", "vault", "--project", "wiki-v2", "--include-research"], fixture);
 
     expect(result.exitCode).toBe(0);
     const log = await readFile(fixture.stateFile, "utf8");
-    expect(log).toContain(`collection add ${fixture.projectPath} --name wiki-v2 --mask **/*.md`);
-    expect(log).toContain(`collection add ${fixture.researchPath} --name research --mask **/*.md`);
-    // Both collections get auto-refreshed
-    expect(log).toContain("update -c wiki-v2");
-    expect(log).toContain("update -c research");
+    // Read-only: no register, no refresh.
+    expect(log).not.toContain("collection add");
+    expect(log).not.toContain("update");
     // Query includes both collections
     expect(log).toContain("--collection wiki-v2");
     expect(log).toContain("--collection research");
@@ -270,6 +271,7 @@ type SearchFixture = {
   researchPath: string;
   stateFile: string;
   resultsFile: string;
+  registeredFile: string;
   env: Record<string, string>;
 };
 
@@ -320,6 +322,10 @@ async function createSearchFixture(project: string, options: SearchFixtureOption
   const resultsFile = join(root, "qmd-results.json");
   const qmdCommand = join(root, "fake-qmd");
   await writeFile(resultsFile, "[]");
+  // PRD-0018: read-only search queries only collections already present in
+  // `qmd collection list`, so pre-register the project collection (the state a
+  // prior `wiki sync` would have left behind).
+  await writeFile(registeredFile, `${project} (qmd://${project}/)\n`);
   await writeFile(
     qmdCommand,
     `#!/usr/bin/env bash
@@ -365,6 +371,7 @@ esac
     researchPath,
     stateFile,
     resultsFile,
+    registeredFile,
     env: {
       QMD_COMMAND: qmdCommand,
       STATE_FILE: stateFile,
