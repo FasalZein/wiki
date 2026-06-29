@@ -13,6 +13,13 @@ export interface ArtifactSpec {
   dedup: boolean;
   /** Skill that authors this kind, if any; read by per-runtime hooks to route output. */
   skill?: string;
+  /** Parent kind this child backlinks to (SLICE-0114). On create, the child's id
+   *  is appended to the parent's `child_list` field. The parent id is read from
+   *  the child's `parent_<parent>` field (e.g. parent: "prd" -> field parent_prd). */
+  parent?: TemplateType;
+  /** List field on THIS kind that receives child ids when a child declares it as
+   *  `parent` (e.g. prd's "slices"). Generic backlink target (SLICE-0114). */
+  child_list?: string;
 }
 
 /**
@@ -95,11 +102,19 @@ function parseKinds(raw: unknown): Record<TemplateType, ArtifactSpec> {
     if (typeof s.prefix !== "string" || typeof s.folder !== "string" || typeof s.dedup !== "boolean") {
       throw new Error(`wiki.json: kind '${name}' needs a string prefix, string folder, and boolean dedup`);
     }
+    if (s.parent !== undefined && typeof s.parent !== "string") {
+      throw new Error(`wiki.json: kind '${name}' field 'parent' must be a string`);
+    }
+    if (s.child_list !== undefined && typeof s.child_list !== "string") {
+      throw new Error(`wiki.json: kind '${name}' field 'child_list' must be a string`);
+    }
     kinds[name] = {
       prefix: s.prefix,
       folder: s.folder,
       dedup: s.dedup,
       ...(typeof s.skill === "string" ? { skill: s.skill } : {}),
+      ...(typeof s.parent === "string" ? { parent: s.parent } : {}),
+      ...(typeof s.child_list === "string" ? { child_list: s.child_list } : {}),
     };
   }
   return kinds;
@@ -262,8 +277,8 @@ function buildStructure(
  * the repo-root `wiki.json` doc, which stays as the human-readable reference.
  */
 const DEFAULT_KINDS: Record<TemplateType, ArtifactSpec> = {
-  prd: { prefix: "PRD", folder: "prds", dedup: true, skill: "to-prd" },
-  slice: { prefix: "SLICE", folder: "slices", dedup: true, skill: "to-slices" },
+  prd: { prefix: "PRD", folder: "prds", dedup: true, skill: "to-prd", child_list: "slices" },
+  slice: { prefix: "SLICE", folder: "slices", dedup: true, skill: "to-slices", parent: "prd" },
   decision: { prefix: "ADR", folder: "adrs", dedup: true, skill: "grill-with-docs" },
   doc: { prefix: "DOC", folder: "docs", dedup: true },
   handoff: { prefix: "HANDOFF", folder: "handoffs", dedup: false, skill: "handoff" },
@@ -327,6 +342,27 @@ export function isDocCategory(value: string): value is DocCategory {
 }
 
 export { buildStructure };
+
+/**
+ * Resolve the config-declared parent backlink for a child kind (SLICE-0114),
+ * replacing the hardcoded PRD<->slice special. A child kind declares `parent:
+ * <parent-kind>`; the parent declares `child_list: <field>`. The parent id is
+ * read from the child's `parent_<parent>` frontmatter field. Returns undefined
+ * when the kind has no parent, the parent kind is unknown, or the parent declares
+ * no child_list (a config-incomplete relationship backlinks nothing rather than
+ * throwing). Pure — the caller does the I/O (pre-flight read + append).
+ */
+export function parentBacklink(
+  structure: Structure,
+  childType: TemplateType,
+): { parentType: TemplateType; parentField: string; childListField: string } | undefined {
+  const childSpec = structure.kinds[childType];
+  const parentType = childSpec?.parent;
+  if (parentType === undefined) return undefined;
+  const parentSpec = structure.kinds[parentType];
+  if (parentSpec?.child_list === undefined) return undefined;
+  return { parentType, parentField: `parent_${parentType}`, childListField: parentSpec.child_list };
+}
 
 /** Default doc category derived from the doc's `type` enum when none is given.
  *  Unmapped types fall to `notes` — the intended catch-all — not `specs`, so `specs`

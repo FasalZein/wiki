@@ -21,7 +21,7 @@ import {
 } from "../../artifacts/store";
 import { authoredSections } from "../../artifacts/body";
 import { projectPath } from "../../artifacts/paths";
-import { DEFAULT_STRUCTURE, loadStructure, type Structure } from "../../artifacts/registry";
+import { DEFAULT_STRUCTURE, loadStructure, parentBacklink, type Structure } from "../../artifacts/registry";
 import { assertProjectStructure, loadProjectConfig, ProjectConfigError } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import { loadTemplate, normalizeInlineMaps, resolveTemplatePath, type TemplateType } from "../../schema/load";
@@ -225,10 +225,15 @@ async function createWithSupersede(req: CreateRequest): Promise<CliResult> {
       ? await readArtifact({ type, vaultRoot, project, id: override.id }, structure)
       : null;
     const supersededSnapshot = supersededBefore ? await Bun.file(supersededBefore.path).text() : null;
-    // Pre-flight the parent PRD before any write, mirroring backlinkParentPrd's
-    // guard, so a missing/garbage --parent-prd fails before supersede runs.
-    if (type === "slice" && typeof fields.parent_prd === "string" && fields.parent_prd.length > 0) {
-      await readArtifact({ type: "prd", vaultRoot, project, id: fields.parent_prd }, structure);
+    // Pre-flight the parent before any write, mirroring backlinkParent's guard,
+    // so a missing/garbage parent id fails before supersede runs. The parent
+    // relationship is config-declared (SLICE-0114), not a slice/prd special.
+    const backlink = parentBacklink(structure, type);
+    if (backlink !== undefined) {
+      const parentId = fields[backlink.parentField];
+      if (typeof parentId === "string" && parentId.length > 0) {
+        await readArtifact({ type: backlink.parentType, vaultRoot, project, id: parentId }, structure);
+      }
     }
     const dedupBlock = await advisoryDedup(type, project, projPath, dedupQuery, override, structure);
     if (dedupBlock !== null) return dedupBlock;
@@ -249,7 +254,7 @@ async function createWithSupersede(req: CreateRequest): Promise<CliResult> {
       if (override.kind === "supersedes") {
         await supersedeArtifact({ type, vaultRoot, project, id: override.id, by: artifact.id }, structure);
       }
-      await backlinkParentPrd(type, vaultRoot, project, artifact.id, fields, structure);
+      await backlinkParent(type, vaultRoot, project, artifact.id, fields, structure);
     } catch (postWriteError) {
       await removeArtifactFile(artifact.path);
       if (supersededBefore && supersededSnapshot !== null) {
@@ -326,28 +331,31 @@ async function advisoryDedup(type: TemplateType, project: string, projectPath: s
 }
 
 /**
- * SLICE-0054 backlink: when a slice is created with --parent-prd, append its id to
- * the parent PRD's `slices` list. `slices` is in NON_FLAG_FIELDS, so create never
- * populates it from the slice side — this is the only place the backlink is written.
- * Dedup-safe (no double-add), create-if-absent (setField writes the list whether or
- * not the PRD already had one). Runs in createWithSupersede's rollback try block, so
- * a missing/invalid parent PRD rolls back the slice rather than orphaning it.
+ * SLICE-0114 generic backlink (was the SLICE-0054 PRD<->slice special): when a
+ * child kind that declares `parent: <kind>` is created with a `parent_<kind>` id,
+ * append the child's id to the parent's config-declared `child_list` field. That
+ * field is in NON_FLAG_FIELDS, so create never populates it from the child side —
+ * this is the only place the backlink is written. Dedup-safe (no double-add),
+ * create-if-absent (setField writes the list whether or not the parent had one).
+ * Runs in createWithSupersede's rollback try block, so a missing/invalid parent
+ * rolls back the child rather than orphaning it.
  */
-async function backlinkParentPrd(
+async function backlinkParent(
   type: TemplateType,
   vaultRoot: string,
   project: string,
-  sliceId: string,
+  childId: string,
   fields: Record<string, unknown>,
   structure: Structure,
 ): Promise<void> {
-  if (type !== "slice") return;
-  const parentPrd = fields.parent_prd;
-  if (typeof parentPrd !== "string" || parentPrd.length === 0) return;
-  const prd = await readArtifact({ type: "prd", vaultRoot, project, id: parentPrd }, structure);
-  const current = Array.isArray(prd.fields.slices) ? prd.fields.slices.map(String) : [];
-  if (current.includes(sliceId)) return;
-  await setField({ type: "prd", vaultRoot, project, id: parentPrd, field: "slices", value: [...current, sliceId] }, structure);
+  const backlink = parentBacklink(structure, type);
+  if (backlink === undefined) return;
+  const parentId = fields[backlink.parentField];
+  if (typeof parentId !== "string" || parentId.length === 0) return;
+  const parent = await readArtifact({ type: backlink.parentType, vaultRoot, project, id: parentId }, structure);
+  const current = Array.isArray(parent.fields[backlink.childListField]) ? (parent.fields[backlink.childListField] as unknown[]).map(String) : [];
+  if (current.includes(childId)) return;
+  await setField({ type: backlink.parentType, vaultRoot, project, id: parentId, field: backlink.childListField, value: [...current, childId] }, structure);
 }
 
 function parseOverride(values: Record<string, string | string[] | boolean | undefined>) {

@@ -395,3 +395,83 @@ next is SLICE-0114: replace the hardcoded PRD<->slice backlink in
 src/cli/verbs/create.ts (both the pre-flight parent read and backlinkParentPrd write)
 with a config-declared parent + child_list relationship, with no-double-add and
 create-if-absent.
+
+## SLICE-0114 GENERIC PARENT BACKLINK (PASS)
+
+Selected as the lowest-numbered unfinished item; its blockers SLICE-0110 and
+SLICE-0112 are both passes:true.
+
+Decision rationale: replace the hardcoded PRD<->slice backlink with a
+config-declared parent + child_list relationship so no kind name is hardcoded in
+the create path. The PRD<->slice link is now pure config.
+
+Implementation:
+- src/artifacts/registry.ts: added two optional ArtifactSpec fields — `parent`
+  (the parent kind a child backlinks to) and `child_list` (the list field on a
+  parent that receives child ids). parseKinds validates both as optional strings.
+  DEFAULT_KINDS now declares prd.child_list = "slices" and slice.parent = "prd".
+  Added a pure helper `parentBacklink(structure, childType)` that resolves the
+  parent kind, the child's parent-id field (convention: `parent_<parent>`, e.g.
+  parent: "prd" -> field parent_prd), and the parent's child_list field. Returns
+  undefined when the kind has no parent, the parent kind is unknown, or the parent
+  declares no child_list — a config-incomplete relationship backlinks nothing
+  rather than throwing. The helper does no I/O; the caller owns the reads/writes.
+- wiki.json: the repo-root reference config now declares the same prd.child_list /
+  slice.parent so a real vault loading wiki.json gets the relationship from config.
+- src/cli/verbs/create.ts: replaced BOTH prd/slice specials. The pre-flight parent
+  read (was `if (type === "slice" && fields.parent_prd...)`) now resolves
+  parentBacklink(structure, type) and pre-flights whatever parent kind/field config
+  declares. The backlinkParentPrd write was renamed/rewritten as the generic
+  backlinkParent: it resolves the same backlink, reads the parent artifact, and
+  appends the child id to the config-declared child_list field — no-double-add
+  (skips when the id is already present) and create-if-absent (setField writes the
+  list whether or not the parent had one). Both run inside createWithSupersede's
+  rollback try block, so a missing/invalid parent still rolls back the child.
+  Imported parentBacklink; no kind name (prd/slice) appears in create.ts anymore.
+
+Conservative assumptions recorded:
+- The child's parent-id field name is derived by convention as `parent_<parent>`
+  (slice's existing `parent_prd` field), not a third config field. This keeps the
+  one-seam rule and matches the existing template field; a genuinely different
+  field name is out of scope until a slice demands it.
+- A config-incomplete relationship (child declares parent, but the parent declares
+  no child_list) is inert (backlinks nothing) rather than a hard error, so a
+  partially-configured tree still creates artifacts. Reversible.
+- "slices" stays in create.ts NON_FLAG_FIELDS (unchanged): the child-side list
+  field is still CLI-owned, exactly as before.
+
+Tests:
+- tests/parent-backlink.test.ts (new — 4 cases): parentBacklink resolves a child's
+  parent kind, parent-id field, and child_list field from config under ARBITRARY
+  kind names (epic/task, no prd/slice hardcode); a kind with no parent and a parent
+  kind both backlink nothing; a child whose parent declares no child_list is inert
+  (no throw); and the default prd<->slice relationship is carried as config.
+- tests/cli-slice.test.ts (unchanged, still green): the three pinned e2e cases
+  (backlink appends without clobbering; create-if-absent when the parent lacks the
+  list; optional parent) now exercise the generic config-driven path end-to-end.
+- tests/registry-config.test.ts: extended the pinned default-shape assertion to the
+  new contract (prd carries child_list: "slices"; added slice.parent === "prd" and
+  prd.child_list === "slices" assertions). No test deleted or weakened.
+
+Files changed:
+- src/artifacts/registry.ts (parent/child_list fields, parseKinds validation,
+  DEFAULT_KINDS, parentBacklink helper)
+- src/cli/verbs/create.ts (generic pre-flight + backlinkParent; drop prd/slice
+  hardcode)
+- wiki.json (declare prd.child_list / slice.parent in the reference config)
+- tests/parent-backlink.test.ts (new)
+- tests/registry-config.test.ts (pinned shape updated to the new contract)
+- .ralph/items.json (SLICE-0114 passes false->true)
+- .ralph/progress.md (this entry)
+
+Verification (all green at this commit):
+- bun run build: ok (cli.js 0.32 MB, bundled 99 modules)
+- bunx tsc --noEmit: clean
+- bun run test: 404 pass, 0 fail, 1288 expect() calls, 52 files
+
+Next-iteration notes: SLICE-0115 (relocation preserves identity) is unblocked
+(blockers 0111 + 0112 both pass), as is SLICE-0116 (0111 + 0112). Lowest-numbered
+next is SLICE-0115: generalize relocateArtifact / doc recategorize
+(src/artifacts/store.ts, src/cli/verbs/doc.ts) into a section-agnostic move-to-bucket
+(same-section keeps id, cross-section re-mints), migrating store.ts relocation off
+DocCategory/isDocCategory.

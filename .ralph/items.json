@@ -95,7 +95,7 @@
         "Replace both hardcoded specials with the generic path; keep the PRD<->slice link working purely from config.",
         "Add tests: a child declaring parent gets its id appended to the parent's child_list on create; no double-add; create-if-absent. Run all gates green and commit."
       ],
-      "passes": false,
+      "passes": true,
       "regression_notes": ""
     },
     {
