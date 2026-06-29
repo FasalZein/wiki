@@ -106,3 +106,77 @@ Verification (all green at this commit):
 
 Next-iteration notes: PRD-0018 is complete (0108 + 0109). The next unblocked item
 is SLICE-0110 (Structure tree skeleton, no blockers) — the start of PRD-0019.
+
+## SLICE-0110 STRUCTURE TREE SKELETON (PASS)
+
+Selected as the lowest-numbered unfinished item; it has no blockers and starts
+PRD-0019.
+
+Decision rationale: extend the per-vault method-based `Structure` from a flat
+kind map into a one-level section/bucket tree, as a walking skeleton — the type
+and loader carry the tree end-to-end and validate it; create/doctor/relocation
+behavior changes land in later slices. The bundled default tree must reproduce
+today's five kinds + six doc categories byte-for-byte so an unconfigured vault
+is unaffected.
+
+Implementation (src/artifacts/registry.ts only — no consumer migration this slice):
+- Added two tree types: SectionSpec (a top-level folder owning a prefix and a
+  single shared id-space, tagged tree:"leaf"|"branch", with a non-empty buckets
+  array) and BucketSpec (name, folder, template, optional criteria).
+- Structure gained a `sections` field; every existing method (specFor, typeForId,
+  artifactTypeForVaultPath, kindForSkill) and `folders`/`kinds` are unchanged and
+  still derive from the flat kind map, so default-vault behavior is byte-identical.
+- buildStructure(kinds, bucketsByKind?) now also calls buildSections to expand the
+  flat kinds + per-kind declared buckets into the tree. A kind with no declared
+  buckets becomes a LEAF (one self-named bucket filing into the section folder);
+  a kind with declared buckets becomes a BRANCH (each bucket files into
+  <folder>/<bucket>). The branch-XOR-leaf invariant and globally-unique bucket
+  names are validated here, throwing loudly.
+- parseBuckets reads the optional per-kind `buckets` map from config: each bucket
+  entry is an object with optional criteria/template strings; a bucket may not
+  declare nested `buckets` (one-level tree). Malformed shapes throw before any
+  write.
+- DEFAULT_BUCKETS models `doc` as the one default BRANCH with six buckets
+  (architecture/research/runbooks/specs/notes/legacy) reproducing the locked
+  DOC_CATEGORIES (ADR-0028) exactly — each files into docs/<category>/, shares
+  the DOC prefix and id-space, uses the doc template, and carries a criteria
+  string. DEFAULT_KINDS is unchanged (byte-compatible). DOC_CATEGORIES /
+  isDocCategory / defaultCategoryForDocType are left in place for now (their
+  deletion is SLICE-0117, after consumers migrate).
+- loadStructure threads parseBuckets(rawKinds) into buildStructure so a custom
+  wiki.json declaring buckets produces a branch section, and a config with no
+  buckets stays all-leaf.
+
+Conservative assumptions recorded:
+- "branch-and-leaf node" is enforced two ways: a section with an empty `buckets`
+  object (neither branch nor leaf) errors, and a bucket that itself declares
+  `buckets` (a second tree level) errors. Both are reversible config-shape rules.
+- The default doc bucket criteria strings are descriptive paraphrases of the
+  locked-category intent; they are informational metadata surfaced in a later
+  slice and do not affect behavior.
+
+Tests (tests/structure-tree.test.ts, new — 9 cases): default exposes one section
+per kind; the four artifact kinds are leaf sections with a self-named bucket;
+doc is the one branch with six DOC-prefixed buckets filing into docs/<category>/;
+existing flat lookups are byte-identical; the loader carries the default tree and
+a custom branch tree end-to-end; and three malformed-tree cases (duplicate bucket
+name, empty buckets, nested buckets) hard-error at load. No existing test was
+weakened.
+
+Files changed:
+- src/artifacts/registry.ts (tree types, buildSections, parseBuckets, default
+  doc-branch buckets, loadStructure wiring)
+- tests/structure-tree.test.ts (new)
+- .ralph/items.json (SLICE-0110 passes false->true)
+- .ralph/progress.md (this entry)
+
+Verification (all green at this commit):
+- bun run build: ok (cli.js 0.32 MB)
+- bunx tsc --noEmit: clean
+- bun run test: 386 pass, 0 fail, 1255 expect() calls, 48 files
+
+Next-iteration notes: SLICE-0111 (per-section id allocation) is now unblocked.
+It should generalize src/artifacts/id.ts nextId() and the id-index builder to key
+on the SECTION (so buckets under one branch share one increasing id-space keyed
+on the section prefix) while keeping the default tree's single-bucket kinds on
+their current sequences. The section model it needs is now on Structure.sections.

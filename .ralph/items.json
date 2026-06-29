@@ -47,7 +47,7 @@
         "Make config load validate the tree and hard-error (writing nothing) on a duplicate bucket name or a branch-and-leaf node, with a clear message.",
         "Add tests: no-config falls back to default and existing paths are unchanged; a malformed tree fails at load. Run all gates green and commit."
       ],
-      "passes": false,
+      "passes": true,
       "regression_notes": ""
     },
     {
