@@ -57,14 +57,15 @@ async function vaultInit(args: string[]): Promise<CliResult> {
 }
 
 async function vaultDoctor(args: string[]): Promise<CliResult> {
-  const parsed = parseCommand(args, [], [], ["setup", "fix"]);
+  const parsed = parseCommand(args, ["project"], [], ["setup", "fix"]);
   if (parsed.values.setup === true) return setupDoctor();
   const rawPath = parsed.positionals[0] ?? ".";
   const vaultPath = resolve(rawPath);
+  const scopeProject = typeof parsed.values.project === "string" ? parsed.values.project : undefined;
 
-  if (parsed.values.fix === true) return vaultDoctorFix(vaultPath);
+  if (parsed.values.fix === true) return vaultDoctorFix(vaultPath, scopeProject);
 
-  const result = await runDoctor(vaultPath);
+  const result = await runDoctor(vaultPath, scopeProject);
 
   if (jsonEnabled()) {
     emitJson({ vault: vaultPath, clean: result.clean, issues: result.issues });
@@ -93,12 +94,14 @@ async function vaultDoctor(args: string[]): Promise<CliResult> {
  * A final `runDoctor` reports any drift `--fix` cannot auto-repair (e.g. dangling
  * links, repo bindings); a second `--fix` run is a no-op (idempotent).
  */
-async function vaultDoctorFix(vaultPath: string): Promise<CliResult> {
+async function vaultDoctorFix(vaultPath: string, scopeProject?: string): Promise<CliResult> {
   const structure = await loadStructure(vaultPath);
   let changed = 0;
   const renumbered: { from: string; to: string }[] = [];
   const json = jsonEnabled();
-  for (const project of await listVaultProjects(vaultPath)) {
+  const projects = await listVaultProjects(vaultPath);
+  const targets = scopeProject !== undefined ? projects.filter((p) => p === scopeProject) : projects;
+  for (const project of targets) {
     const repair = await repairDuplicateIds(vaultPath, project, structure);
     changed += repair.reassigned;
     if (!json) for (const label of repair.labels) console.log(`fixed ${label}`);
@@ -120,7 +123,7 @@ async function vaultDoctorFix(vaultPath: string): Promise<CliResult> {
 
   if (!json && changed > 0) console.log(`applied ${changed} fix(es)`);
 
-  const result = await runDoctor(vaultPath);
+  const result = await runDoctor(vaultPath, scopeProject);
   if (json) {
     emitJson({ vault: vaultPath, fixed: changed, renumbered, clean: result.clean, remaining: result.issues });
     return { code: result.clean ? 0 : 1 };

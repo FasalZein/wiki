@@ -197,7 +197,7 @@ describe("doctor repo-binding checks", () => {
 // a CONTEXT.md or docs/adr/ in a bound repo. Doctor is the detection net.
 
 describe("doctor contract-drift checks", () => {
-  test("flags a CONTEXT.md at the root of a bound repo with a migration hint", async () => {
+  test("flags a CONTEXT.md at the root of a bound repo with a structure-derived migration hint", async () => {
     const repoDir = await makeTempDir();
     const block = buildPointerBlock("acme");
     await writeFile(join(repoDir, "CONTEXT.md"), "# Glossary\n\nOrder: a thing.\n");
@@ -213,7 +213,9 @@ describe("doctor contract-drift checks", () => {
     const drift = result.issues.filter((i) => i.type === "contract-drift");
     expect(drift).toHaveLength(1);
     expect(drift[0]?.message).toContain("CONTEXT.md");
-    expect(drift[0]?.message).toContain("wiki create doc");
+    // Default structure has doc kind with notes bucket → suggests `wiki create notes`
+    expect(drift[0]?.message).toContain("wiki create notes");
+    expect(drift[0]?.message).toContain("--project acme");
   });
 
   test("flags markdown files under docs/adr/ in a bound repo with a migration hint", async () => {
@@ -266,5 +268,115 @@ describe("doctor contract-drift checks", () => {
     const result = await runDoctor(vaultRoot);
 
     expect(result.issues.filter((i) => i.type === "contract-drift")).toHaveLength(0);
+  });
+});
+
+// --- CONTEXT.md remediation is structure-derived (not hardcoded) ---
+
+describe("doctor contract-drift remediation derives from structure", () => {
+  test("uses generic <kind> when vault has no notes bucket or notes kind", async () => {
+    const repoDir = await makeTempDir();
+    const block = buildPointerBlock("acme");
+    await writeFile(join(repoDir, "CONTEXT.md"), "# Glossary\n");
+    const vaultRoot = await makeVaultWithLinkedRepo({
+      projectName: "acme",
+      repoDir,
+      agentsMd: block + "\n",
+      claudeMd: block + "\n",
+    });
+    // Write a wiki.json that has no doc/notes at all — only prd and decision
+    await writeFile(
+      join(vaultRoot, "wiki.json"),
+      JSON.stringify({
+        kinds: {
+          prd: { prefix: "PRD", folder: "prds", dedup: true },
+          decision: { prefix: "ADR", folder: "adrs", dedup: true },
+        },
+      }),
+    );
+
+    const result = await runDoctor(vaultRoot);
+
+    const drift = result.issues.filter((i) => i.type === "contract-drift");
+    expect(drift).toHaveLength(1);
+    expect(drift[0]?.message).toContain("wiki create <kind> --project acme");
+  });
+
+  test("suggests 'wiki create notes' when notes is a top-level kind", async () => {
+    const repoDir = await makeTempDir();
+    const block = buildPointerBlock("acme");
+    await writeFile(join(repoDir, "CONTEXT.md"), "# Glossary\n");
+    const vaultRoot = await makeVaultWithLinkedRepo({
+      projectName: "acme",
+      repoDir,
+      agentsMd: block + "\n",
+      claudeMd: block + "\n",
+    });
+    // Write a wiki.json with notes as a top-level kind (10-kind migration)
+    await writeFile(
+      join(vaultRoot, "wiki.json"),
+      JSON.stringify({
+        kinds: {
+          notes: { prefix: "NOTE", folder: "notes", dedup: false },
+          decision: { prefix: "ADR", folder: "adrs", dedup: true },
+        },
+      }),
+    );
+
+    const result = await runDoctor(vaultRoot);
+
+    const drift = result.issues.filter((i) => i.type === "contract-drift");
+    expect(drift).toHaveLength(1);
+    expect(drift[0]?.message).toContain("wiki create notes --project acme");
+  });
+});
+
+// --- `runDoctor` scoped to a single project via scopeProject param ---
+
+describe("doctor --project scoping", () => {
+  test("scoped run only reports issues for the named project", async () => {
+    const vaultRoot = await makeTempDir();
+    const today = new Date().toISOString().slice(0, 10);
+
+    // Create two projects, both with a CONTEXT.md drift issue
+    for (const name of ["alpha", "beta"]) {
+      const projDir = join(vaultRoot, "projects", name);
+      await mkdir(projDir, { recursive: true });
+      const repoDir = await makeTempDir();
+      await writeFile(join(repoDir, "CONTEXT.md"), "# Glossary\n");
+      const block = buildPointerBlock(name);
+      await writeFile(join(repoDir, "AGENTS.md"), block + "\n");
+      await writeFile(join(repoDir, "CLAUDE.md"), block + "\n");
+      await writeFile(
+        join(projDir, "_project.md"),
+        `---\nproject: ${name}\nstatus: planning\ncreated: ${today}\nlinked_repos:\n  - ${repoDir}\n---\n# ${name}\n`,
+      );
+    }
+
+    // Full run sees both projects
+    const full = await runDoctor(vaultRoot);
+    const fullDrift = full.issues.filter((i) => i.type === "contract-drift");
+    expect(fullDrift).toHaveLength(2);
+
+    // Scoped to alpha
+    const scoped = await runDoctor(vaultRoot, "alpha");
+    const scopedDrift = scoped.issues.filter((i) => i.type === "contract-drift");
+    expect(scopedDrift).toHaveLength(1);
+    expect(scopedDrift[0]?.message).toContain("alpha");
+  });
+
+  test("scoped run for nonexistent project reports no issues (clean)", async () => {
+    const vaultRoot = await makeTempDir();
+    const projDir = join(vaultRoot, "projects", "exists");
+    await mkdir(projDir, { recursive: true });
+    const today = new Date().toISOString().slice(0, 10);
+    await writeFile(
+      join(projDir, "_project.md"),
+      `---\nproject: exists\nstatus: planning\ncreated: ${today}\n---\n# exists\n`,
+    );
+
+    const result = await runDoctor(vaultRoot, "nonexistent");
+    expect(result.clean).toBe(true);
+    expect(result.issues).toHaveLength(0);
   });
 });

@@ -36,12 +36,14 @@ export type DoctorResult = {
  *  - repo-binding: every linked repo carries a current-version wiki block (and no
  *    contract-drift artifacts like a local CONTEXT.md / docs/adr/).
  */
-export async function runDoctor(vaultPath: string): Promise<DoctorResult> {
+export async function runDoctor(vaultPath: string, scopeProject?: string): Promise<DoctorResult> {
   const issues: DriftIssue[] = [];
   const structure = await loadStructure(vaultPath);
-  for (const project of await listVaultProjects(vaultPath)) {
+  const projects = await listVaultProjects(vaultPath);
+  const targets = scopeProject !== undefined ? projects.filter((p) => p === scopeProject) : projects;
+  for (const project of targets) {
     issues.push(...(await checkProjectDocsStructure(vaultPath, project, structure)));
-    issues.push(...(await checkProjectRepoBindings(vaultPath, project)));
+    issues.push(...(await checkProjectRepoBindings(vaultPath, project, structure)));
     issues.push(...(await checkProjectIdDrift(vaultPath, project, structure)));
   }
   return { issues, clean: issues.length === 0 };
@@ -225,7 +227,7 @@ const WIKI_BLOCK_FILES = ["AGENTS.md", "CLAUDE.md"] as const;
  * have a current-version wiki block. Returns DriftIssues for any missing, stale, or
  * unreadable bindings.
  */
-export async function checkProjectRepoBindings(vaultPath: string, project: string): Promise<DriftIssue[]> {
+export async function checkProjectRepoBindings(vaultPath: string, project: string, structure: Structure): Promise<DriftIssue[]> {
   const issues: DriftIssue[] = [];
   const projectMdPath = join(vaultPath, "projects", project, "_project.md");
 
@@ -295,7 +297,7 @@ export async function checkProjectRepoBindings(vaultPath: string, project: strin
       }
     }
 
-    issues.push(...(await checkRepoContractDrift(project, repoPath)));
+    issues.push(...(await checkRepoContractDrift(project, repoPath, structure)));
   }
 
   return issues;
@@ -306,13 +308,32 @@ export async function checkProjectRepoBindings(vaultPath: string, project: strin
  * upstream skills try to write locally — a root CONTEXT.md (glossary) or docs/adr/.
  * Prevention via guidance is probabilistic; this is the detection net.
  */
-async function checkRepoContractDrift(project: string, repoPath: string): Promise<DriftIssue[]> {
+
+/** Derive the remediation command for a CONTEXT.md contract-drift issue.
+ *  If the structure has a `doc` kind with a `notes` bucket, use the legacy
+ *  phrasing; if there's a top-level `notes` kind, use that; otherwise fall
+ *  back to a generic placeholder. */
+function contextMdRemediationCmd(project: string, structure: Structure): string {
+  // Check if there's a doc kind with a notes bucket (legacy 5-kind layout)
+  const docBucket = structure.bucketFor("notes");
+  if (docBucket !== undefined && docBucket.section.name === "doc") {
+    return `wiki create notes --project ${project}`;
+  }
+  // Check if "notes" is a top-level kind (post-migration 10-kind layout)
+  if (structure.kinds["notes"] !== undefined) {
+    return `wiki create notes --project ${project}`;
+  }
+  return `wiki create <kind> --project ${project}`;
+}
+
+async function checkRepoContractDrift(project: string, repoPath: string, structure: Structure): Promise<DriftIssue[]> {
   const issues: DriftIssue[] = [];
 
   if (await exists(join(repoPath, "CONTEXT.md"))) {
+    const createCmd = contextMdRemediationCmd(project, structure);
     issues.push({
       type: "contract-drift",
-      message: `${project}: repo '${repoPath}' contains CONTEXT.md — glossary terms belong in the vault. Recreate each term via 'wiki create doc --project ${project} --category notes', then delete the repo file.`,
+      message: `${project}: repo '${repoPath}' contains CONTEXT.md — glossary terms belong in the vault. Recreate each term via '${createCmd}', then delete the repo file.`,
     });
   }
 
