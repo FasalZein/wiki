@@ -7,6 +7,7 @@ import { loadStructure } from "../../artifacts/registry";
 import { checkProjectDocsStructure } from "../../bootstrap/doctor";
 import { booleanValue, parseCommand } from "../parse";
 import { resolveProject } from "../resolve-project";
+import { emitJson, emitJsonError, jsonEnabled } from "../output";
 import type { CliResult } from "../dispatch";
 
 export async function handleSync(args: string[]): Promise<CliResult> {
@@ -51,14 +52,16 @@ export async function handleSync(args: string[]): Promise<CliResult> {
       await ensureCollection(qmdCommand, target.name, target.path);
       await updateCollection(qmdCommand, target.name, booleanValue(parsed.values, "pull"));
       await embedCollection(qmdCommand, target.name, booleanValue(parsed.values, "force-embed"));
-      console.error(`synced collection ${target.name}`);
+      if (!jsonEnabled()) console.error(`synced collection ${target.name}`);
     }
     await writeProjectIndex(vaultRoot, project, structure);
     await writeVaultIndex(vaultRoot);
+    if (jsonEnabled()) emitJson({ project, synced: targets.map((t) => t.name) });
     return { code: 0 };
   } catch (error) {
     if (error instanceof QmdError) {
-      console.error(error.summary);
+      if (jsonEnabled()) emitJsonError({ error: error.summary });
+      else console.error(error.summary);
       return { code: 10 };
     }
     throw error;

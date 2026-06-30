@@ -34,6 +34,17 @@ export async function listProjects(vaultRoot: string): Promise<string[]> {
   }
 }
 
+/** True when a project exists in the vault — keyed on its `_project.md` marker,
+ *  the same file `wiki project create` writes and `assertProjectStructure` requires. */
+export async function projectExists(vaultRoot: string, project: string): Promise<boolean> {
+  try {
+    await stat(join(vaultRoot, "projects", project, "_project.md"));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Build an actionable message for a project-resolution failure: a nonexistent
  * project (suggest `wiki project create`), listing the projects that do exist.

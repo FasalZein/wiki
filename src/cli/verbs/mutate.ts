@@ -11,6 +11,8 @@ import {
   ArtifactValidationError,
   readArtifact,
   relocateArtifact,
+  scrubInboundLinks,
+  type ScrubResult,
   setField,
   supersedeArtifact,
 } from "../../artifacts/store";
@@ -204,10 +206,37 @@ export async function handleDelete(args: string[]): Promise<CliResult> {
     );
   }
 
+  // On --force, scrub the deleted id out of every inbound artifact's frontmatter
+  // link fields first, so a forced delete does not manufacture the dangling-link
+  // drift doctor exists to catch. Body prose `[[id]]` mentions are author content
+  // (not auto-rewritten) — reported so the user knows what doctor will still flag.
+  let scrub: ScrubResult | undefined;
+  if (inbound.length > 0) {
+    const inboundPaths = inbound.flatMap((refId) => index.get(refId) ?? []);
+    scrub = await scrubInboundLinks(inboundPaths, target.id);
+  }
+
   // sync owns search-index cleanup — delete only removes the file; re-run wiki sync to drop it from search.
   await rm(artifactPath, { force: true });
-  if (jsonEnabled()) emitJson({ id: target.id, deleted: artifactPath, inbound });
-  else console.log(`deleted ${target.id}${inbound.length > 0 ? ` (forced past ${inbound.length} inbound reference(s))` : ""}`);
+  if (jsonEnabled()) {
+    emitJson({
+      id: target.id,
+      deleted: artifactPath,
+      inbound,
+      scrubbed: scrub?.scrubbedFiles ?? [],
+      bodyMentions: scrub?.bodyMentions ?? [],
+    });
+  } else {
+    console.log(`deleted ${target.id}${inbound.length > 0 ? ` (forced past ${inbound.length} inbound reference(s))` : ""}`);
+    if (scrub !== undefined && scrub.scrubbedFiles.length > 0) {
+      console.log(`scrubbed ${target.id} from ${scrub.scrubbedFiles.length} inbound frontmatter link field(s)`);
+    }
+    if (scrub !== undefined && scrub.bodyMentions.length > 0) {
+      console.log(
+        `note: ${scrub.bodyMentions.length} file(s) still mention ${target.id} in body text — edit the prose by hand: ${scrub.bodyMentions.map((p) => p.split("/").pop()).join(", ")}`,
+      );
+    }
+  }
   return { code: 0 };
 }
 

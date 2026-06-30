@@ -10,6 +10,7 @@ import { type Structure } from "./registry";
 import { nextId } from "./id";
 import { withProjectLock } from "./lock";
 import { buildIdIndex } from "./id-index";
+import { bareIdOf } from "./references";
 import { artifactDirectory, assertSafeSegment, projectPath } from "./paths";
 import { ensureCollection, updateCollection } from "../integrations/qmd";
 import { loadProjectConfig } from "../config/project";
@@ -168,6 +169,64 @@ export async function removeArtifactFile(path: string): Promise<void> {
   await rm(path, { force: true });
 }
 
+/** Outcome of scrubbing one deleted id out of the vault's inbound links. */
+export type ScrubResult = {
+  /** Files whose frontmatter link fields were rewritten to drop the id. */
+  scrubbedFiles: string[];
+  /** Files that still mention the id in BODY prose (`[[id]]`) — author content,
+   *  not auto-rewritten; reported so the caller can surface what doctor will flag. */
+  bodyMentions: string[];
+};
+
+/**
+ * Remove a deleted artifact's `id` from every other artifact's FRONTMATTER link
+ * fields (string values equal to the id, and array items equal to it, matched via
+ * {@link bareIdOf} so `[[id]]`, `id|alias`, `id#h` all count). Used by
+ * `wiki delete --force` so a forced delete does not manufacture the dangling-link
+ * drift doctor exists to catch. Body `[[id]]` prose mentions are NOT rewritten
+ * (lossy author content) — they are reported in {@link ScrubResult.bodyMentions}.
+ *
+ * Each rewrite is a NARROWED write (matter.stringify of the existing body +
+ * pruned frontmatter): it does not re-validate the referrer against today's
+ * schema, so a schema-stale referrer can still be scrubbed (same relaxation
+ * {@link supersedeArtifact} uses — pruning a link is not the moment to enforce an
+ * unrelated field). `paths` is the inbound set the caller already computed.
+ */
+export async function scrubInboundLinks(paths: string[], id: string): Promise<ScrubResult> {
+  const scrubbedFiles: string[] = [];
+  const bodyMentions: string[] = [];
+  for (const path of paths) {
+    let content: string;
+    try {
+      content = await readFile(path, "utf8");
+    } catch {
+      continue;
+    }
+    const parsed = matter(content);
+    const data = parsed.data as Record<string, unknown>;
+    let changed = false;
+    for (const [name, value] of Object.entries(data)) {
+      if (name === "id") continue;
+      if (typeof value === "string" && bareIdOf(value) === id) {
+        delete data[name];
+        changed = true;
+      } else if (Array.isArray(value)) {
+        const kept = value.filter((item) => !(typeof item === "string" && bareIdOf(item) === id));
+        if (kept.length !== value.length) {
+          data[name] = kept;
+          changed = true;
+        }
+      }
+    }
+    if (changed) {
+      await writeArtifact(path, matter.stringify(parsed.content, data));
+      scrubbedFiles.push(path);
+    }
+    if (new RegExp(`\\[\\[${id}(?=[\\]|#])`).test(parsed.content)) bodyMentions.push(path);
+  }
+  return { scrubbedFiles, bodyMentions };
+}
+
 export async function createArtifact(input: CreateArtifactInput): Promise<Artifact> {
   const structure = input.structure;
   const schema = await loadTemplate(input.type);
@@ -318,8 +377,13 @@ export async function relocateArtifact(input: RelocateArtifactInput, structure: 
           title: nextTitle,
           updated: new Date().toISOString().slice(0, 10),
         };
+        // Rewrite the moved artifact's OWN `[[OLD-ID]]` self-references to the new
+        // id so the re-minted file stays internally consistent (mirrors doctor's
+        // reassignId). Inbound links from OTHER files are still not rewritten — the
+        // settled cross-section rule; doctor flags those as the documented ceiling.
+        const body = existing.body.replace(new RegExp(`\\[\\[${existing.id}(?=[\\]|#])`, "g"), `[[${id}`);
         const path = join(projectPath(input.vaultRoot, input.project), resolved.bucket.folder, `${id}-${slugifyTitle(nextTitle)}.md`);
-        return { path, content: matter.stringify(existing.body, fields), fields };
+        return { path, content: matter.stringify(body, fields), fields };
       },
     );
     await rm(existing.path, { force: true });
@@ -406,6 +470,7 @@ function artifactPath(type: TemplateType, vaultRoot: string, project: string, id
   const directory = artifactDirectory(type, vaultRoot, project, structure);
   const fileName = `${id}-${slugifyTitle(title)}.md`;
   if (category !== undefined && category.length > 0) {
+    assertSafeSegment(category, "category"); // defense-in-depth: createArtifact is a public API
     return join(directory, category, fileName);
   }
   return join(directory, fileName);

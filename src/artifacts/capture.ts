@@ -1,6 +1,6 @@
 import matter from "gray-matter";
 import { readFile, writeFile } from "node:fs/promises";
-import { basename, relative } from "node:path";
+import { basename } from "node:path";
 
 import { getVaultRoot } from "../config/vault";
 import { readLinkedProject } from "../cli/repo-link";

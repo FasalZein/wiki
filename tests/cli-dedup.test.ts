@@ -130,11 +130,14 @@ describe("advisory dedup", () => {
 
   test("related-to bypasses the gate and records the link", async () => {
     const fixture = await createDedupFixture("wiki-v2");
+    // Seed the related target so the --related-to preflight (a typo'd id fails before
+    // the write) is satisfied; --force-new seeds it without tripping the dedup gate.
+    await runWiki(["create", "prd", "--title", "Related target", "--summary", "The related target PRD.", "--project", "wiki-v2", "--force-new", "Seeding the related target PRD for the link test"], fixture);
 
-    const result = await runWiki(["create", "prd", "--title", "Core wiki CLI", "--summary", "The core wiki CLI surface.", "--project", "wiki-v2", "--related-to", "PRD-0007"], fixture);
+    const result = await runWiki(["create", "prd", "--title", "Core wiki CLI", "--summary", "The core wiki CLI surface.", "--project", "wiki-v2", "--related-to", "PRD-0001"], fixture);
 
     expect(result.exitCode).toBe(0);
-    expect(await readFile(join(fixture.projectPath, "prds", "PRD-0001-core-wiki-cli.md"), "utf8")).toContain("related:\n  - PRD-0007");
+    expect(await readFile(join(fixture.projectPath, "prds", "PRD-0002-core-wiki-cli.md"), "utf8")).toContain("related:\n  - PRD-0001");
   });
 
   test("supersedes bypasses the gate and updates the old same-type artifact", async () => {

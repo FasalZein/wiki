@@ -15,6 +15,10 @@ const GITIGNORE_CONTENT = [
   ".obsidian/workspace.json",
   ".obsidian/workspace-mobile.json",
   ".smart-env/",
+  // Machine-local wiki state — never committed: per-project allocation lockfiles
+  // and the incremental id-index cache are derived/transient, not vault content.
+  ".wiki/locks/",
+  "**/.index-cache.json",
 ].join("\n") + "\n";
 
 export async function initVault(vaultPath: string): Promise<VaultInitResult> {

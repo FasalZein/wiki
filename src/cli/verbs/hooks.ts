@@ -8,6 +8,7 @@ import { DEFAULT_STRUCTURE } from "../../artifacts/registry";
 import { readLinkedProject } from "../repo-link";
 import { unknownMessage } from "../usage";
 import { booleanValue, parseCommand, stringValue } from "../parse";
+import { emitJson, jsonEnabled } from "../output";
 import type { CliResult } from "../dispatch";
 
 /** The command the installed native hooks invoke (assumes `wiki` is on PATH). */
@@ -242,13 +243,15 @@ async function hooksInstall(args: string[]): Promise<CliResult> {
   }
 
   if (!added) {
-    console.error(`already installed: ${spec.events.map((t) => t.event).join("/")} hooks in ${file}`);
+    if (jsonEnabled()) emitJson({ runtime, file, installed: false, alreadyInstalled: true });
+    else console.error(`already installed: ${spec.events.map((t) => t.event).join("/")} hooks in ${file}`);
     return { code: 0 };
   }
 
   await mkdir(dirname(file), { recursive: true });
   await writeFile(file, JSON.stringify(config, null, 2) + "\n");
-  console.log(file);
+  if (jsonEnabled()) emitJson({ runtime, file, installed: true, events: spec.events.map((t) => t.event) });
+  else console.log(file);
   if (runtime === "pi") await warnPiBridge();
   return { code: 0 };
 }
@@ -303,7 +306,8 @@ async function hooksUninstall(args: string[]): Promise<CliResult> {
 
   const config = await readConfig(file);
   if (config.hooks === undefined) {
-    console.error(`nothing to uninstall in ${file}`);
+    if (jsonEnabled()) emitJson({ file, uninstalled: false, removed: 0 });
+    else console.error(`nothing to uninstall in ${file}`);
     return { code: 0 };
   }
 
@@ -322,11 +326,13 @@ async function hooksUninstall(args: string[]): Promise<CliResult> {
   }
 
   if (removed === 0) {
-    console.error(`no wiki hook found in ${file}`);
+    if (jsonEnabled()) emitJson({ file, uninstalled: false, removed: 0 });
+    else console.error(`no wiki hook found in ${file}`);
     return { code: 0 };
   }
   await writeFile(file, JSON.stringify(config, null, 2) + "\n");
-  console.log(file);
+  if (jsonEnabled()) emitJson({ file, uninstalled: true, removed });
+  else console.log(file);
   return { code: 0 };
 }
 
@@ -383,6 +389,8 @@ export async function unreachableSubagents(home: string = homedir()): Promise<st
 
 /** Report which runtimes/scopes have the wiki hook wired (shared by `list` and `status`). */
 async function hooksReport(): Promise<CliResult> {
+  const json = jsonEnabled();
+  const runtimes: { runtime: string; scope: string; wired: boolean; events: string[]; file: string }[] = [];
   for (const [runtime, spec] of Object.entries(RUNTIMES)) {
     for (const [scope, rel] of [
       ["global", spec.global],
@@ -391,19 +399,26 @@ async function hooksReport(): Promise<CliResult> {
       const file = scope === "global" ? join(homedir(), rel) : join(process.cwd(), rel);
       const config = await readConfig(file);
       const events = spec.events.map((t) => t.event).filter((e) => isWired(config.hooks?.[e]));
-      const state = events.length > 0 ? `wired (${events.join(", ")})` : "not wired";
-      console.log(`${runtime} ${scope}: ${state}  ${file}`);
+      runtimes.push({ runtime, scope, wired: events.length > 0, events, file });
+      if (!json) {
+        const state = events.length > 0 ? `wired (${events.join(", ")})` : "not wired";
+        console.log(`${runtime} ${scope}: ${state}  ${file}`);
+      }
     }
   }
   // Per-subagent reachability: a subagent's hook fires only if its allowlist
   // carries the exact bridge. Naming the ones that can't fire is the honest
   // signal a single global "wired" hides.
-  for (const agent of await agentReachability(homedir())) {
-    const state = agent.reachable
-      ? `reachable (${PI_BRIDGE_PACKAGE} in allowlist)`
-      : `cannot fire (${PI_BRIDGE_PACKAGE} missing from allowlist)`;
-    console.log(`subagent ${agent.name}: ${state}`);
+  const subagents = await agentReachability(homedir());
+  if (!json) {
+    for (const agent of subagents) {
+      const state = agent.reachable
+        ? `reachable (${PI_BRIDGE_PACKAGE} in allowlist)`
+        : `cannot fire (${PI_BRIDGE_PACKAGE} missing from allowlist)`;
+      console.log(`subagent ${agent.name}: ${state}`);
+    }
   }
+  if (json) emitJson({ runtimes, subagents });
   return { code: 0 };
 }
 

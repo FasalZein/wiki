@@ -13,6 +13,7 @@ import { getVaultRoot } from "../../config/vault";
 import { loadTemplate, normalizeInlineMaps, resolveTemplatePath, type TemplateType } from "../../schema/load";
 import { booleanValue, parseCommand } from "../parse";
 import { resolveProject } from "../resolve-project";
+import { emitJson, jsonEnabled } from "../output";
 import type { CliResult } from "../dispatch";
 
 /**
@@ -50,10 +51,26 @@ export async function handleFmt(args: string[]): Promise<CliResult> {
 
   const write = booleanValue(parsed.values, "write");
   const result = await applyFmtFixes(vaultRoot, projPath, write, structure);
+  const { total, manual, renumberMap } = result;
+
+  if (jsonEnabled()) {
+    const clean = total === 0 && manual.length === 0;
+    emitJson({
+      project,
+      mode: write ? "write" : "check",
+      clean,
+      fixed: write ? total : 0,
+      pending: write ? 0 : total,
+      manual,
+      renumbered: [...renumberMap].map(([from, to]) => ({ from, to })),
+    });
+    // check-mode with outstanding drift is a non-zero exit even in json mode.
+    return { code: !write && !clean ? 1 : 0 };
+  }
+
   for (const label of result.labels) {
     console.log(write ? `fixed ${label}` : label);
   }
-  const { total, manual, renumberMap } = result;
 
   if (total === 0 && manual.length === 0) {
     console.log("clean");

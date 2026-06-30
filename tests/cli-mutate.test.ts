@@ -168,18 +168,28 @@ describe("mutation verbs", () => {
     expect(files.some((file) => file.startsWith(`${target}-`))).toBe(true);
   });
 
-  test("wiki delete --force removes an artifact despite inbound references", async () => {
+  test("wiki delete --force removes an artifact and scrubs the deleted id from inbound link fields", async () => {
     const f = await fixture();
     const target = await seedSlice(f);
     const referrer = await seedSlice(f);
     expect((await runWiki(["block", referrer, "--on", target, "--project", "wiki-v2"], f)).exitCode).toBe(0);
+    // referrer now has blocked_by: [[target]] — a forced delete must not leave it dangling.
+    expect(await readSlice(f, referrer)).toContain(target);
 
     const result = await runWiki(["delete", target, "--force", "--project", "wiki-v2", "--json"], f);
 
     expect(result.exitCode).toBe(0);
-    expect(JSON.parse(result.stdout).id).toBe(target);
+    const out = JSON.parse(result.stdout);
+    expect(out.id).toBe(target);
     const files = await readdir(join(f.projectPath, "slices"));
     expect(files.some((file) => file.startsWith(`${target}-`))).toBe(false);
+    // The referrer's blocked_by no longer mentions the deleted id (scrubbed)...
+    expect(await readSlice(f, referrer)).not.toContain(target);
+    // ...and the JSON reports which files were scrubbed.
+    expect(out.scrubbed.length).toBeGreaterThan(0);
+    // doctor finds no dangling-link drift afterwards.
+    const doctor = await runWiki(["doctor", f.vaultRoot], f);
+    expect(doctor.stdout + doctor.stderr).not.toContain(`references ${target}`);
   });
 
   test("wiki delete removes an unreferenced artifact without --force", async () => {

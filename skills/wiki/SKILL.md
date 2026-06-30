@@ -68,7 +68,11 @@ One validated `wiki` call per intent — never hand-edit frontmatter:
   and `{error,field,expected}` on stderr; `validate --json` gives
   `{ok,type,errors:[{field,reason,expected}]}`; `doc retitle/recategorize --json` give
   `{id,path}`; `search --json` gives a JSON array of `{id,kind,title,path,score,snippet}` hits
-  (one per artifact) — detect
+  (one per artifact). The vault/upkeep verbs are JSON-aware too: `sync` gives
+  `{project,synced}`, `fmt` gives `{project,mode,clean,fixed,pending,manual,renumbered}`,
+  `doctor` gives `{clean,issues}` (`--fix` adds `{fixed,renumbered,remaining}`,
+  `--setup` adds `{captureReach}`), `project list/create/link` give `{projects}`/`{project,path,repo}`,
+  and `hooks install/uninstall/list` give `{file,installed|uninstalled,…}` — detect
   success/failure and read results without scraping prose.
 
 ## Gates and upkeep

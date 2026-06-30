@@ -68,7 +68,7 @@ describe("create echoes destination path", () => {
     // handoff never had a bespoke create fn; it is creatable purely from its
     // wiki.json entry + template, proving the full collapse needs no per-kind code.
     const cap = capture();
-    const result = await dispatch(["create", "handoff", "--project", "p", "--phase", "plan", "--summary", "Plan-phase handoff summary."]);
+    const result = await dispatch(["create", "handoff", "--project", "p", "--phase", "plan", "--title", "Plan-phase handoff", "--summary", "Plan-phase handoff summary."]);
     cap.restore();
     expect(result.code).toBe(0);
     const all = cap.out() + cap.err();

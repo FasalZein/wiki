@@ -252,6 +252,17 @@ async function createWithSupersede(req: CreateRequest): Promise<CliResult> {
         await readArtifact({ type: backlink.parentType, vaultRoot, project, id: parentId }, structure);
       }
     }
+    // Pre-flight --related-to the same way --supersedes is read above, so a typo'd
+    // `--related-to PRD-9999` fails before the write instead of filing a dangling
+    // link. The related id is resolved against its own kind (inferred from the id).
+    if (override.kind === "related-to") {
+      const relatedType = structure.typeForId(override.id);
+      if (relatedType === undefined) {
+        console.error(`--related-to: cannot infer artifact type from id: ${override.id}`);
+        return { code: 1 };
+      }
+      await readArtifact({ type: relatedType, vaultRoot, project, id: override.id }, structure);
+    }
     const dedupBlock = await advisoryDedup(type, project, projPath, dedupQuery, override, structure);
     if (dedupBlock !== null) return dedupBlock;
     const artifact = await createArtifact({
