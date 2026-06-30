@@ -14,8 +14,9 @@ import { handleValidate } from "./verbs/validate";
 import { handleVault } from "./verbs/vault";
 import { USAGE_REGISTRY, renderHelp, renderVerbList, unknownMessage, wantsHelp } from "./usage";
 import { setJsonMode } from "./output";
-import { resolveVaultRootForDisplay } from "../config/vault";
+import { getVaultRoot, resolveVaultRootForDisplay } from "../config/vault";
 import { readLinkedProject } from "./repo-link";
+import { DEFAULT_STRUCTURE, loadStructure } from "../artifacts/registry";
 
 export type CliResult = {
   code: number;
@@ -37,6 +38,21 @@ async function printContextBanner(): Promise<void> {
   const project = await readLinkedProject(process.cwd()).catch(() => null);
   const linked = project === null ? "this repo isn't linked — run wiki project link --project <name>" : `project ${project}`;
   console.error(`wiki vault: ${vault}  |  ${linked}`);
+}
+
+/**
+ * Resolve the kind names from the configured vault's structure, falling back to
+ * the bundled default kinds when no vault is configured or loadStructure fails.
+ * Used by the help path to render dynamic kind lists.
+ */
+async function resolveKindNames(): Promise<string[]> {
+  try {
+    const vaultRoot = await getVaultRoot();
+    const structure = await loadStructure(vaultRoot);
+    return Object.keys(structure.kinds);
+  } catch {
+    return Object.keys(DEFAULT_STRUCTURE.kinds);
+  }
 }
 
 export async function dispatch(args: string[]): Promise<CliResult> {
@@ -77,7 +93,26 @@ export async function dispatch(args: string[]): Promise<CliResult> {
         }
       }
     }
-    console.log(renderHelp(verb, entry));
+    // Dynamic kind list: when a vault is configured, derive the kind names from
+    // the loaded structure so `create --help` and `next-id --help` reflect the
+    // vault's actual kinds rather than the bundled default five.
+    if (verb === "create" || verb === "next-id") {
+      const kindNames = await resolveKindNames();
+      if (verb === "create") {
+        const dynamicSubverbs: Record<string, { summary: string }> = {};
+        for (const k of kindNames) {
+          dynamicSubverbs[k] = entry.subverbs?.[k] ?? { summary: `Create a ${k} artifact.` };
+        }
+        const augmented = { ...entry, subverbs: dynamicSubverbs };
+        console.log(renderHelp(verb, augmented));
+      } else {
+        const placeholder = `<${kindNames.join("|")}>` ;
+        const augmented = { ...entry, usage: `wiki next-id ${placeholder} --project <name>` };
+        console.log(renderHelp(verb, augmented));
+      }
+    } else {
+      console.log(renderHelp(verb, entry));
+    }
     return { code: 0 };
   }
 
