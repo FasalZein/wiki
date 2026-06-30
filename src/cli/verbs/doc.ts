@@ -49,11 +49,20 @@ async function relocate(project: string, id: string, change: { title?: string; b
   const projPath = projectPath(vaultRoot, project);
   try {
     const structure = await loadStructure(vaultRoot);
-    // Validate a recategorize target against the doc section's declared buckets so
+    const type = structure.typeForId(id);
+    if (type === undefined) {
+      console.error(`unknown id (no registered kind for prefix): ${id}`);
+      return { code: 1 };
+    }
+    // Validate a recategorize target against the section's declared buckets so
     // an unknown category fails with the category vocabulary, before any move.
     if (change.bucket !== undefined) {
-      const docSection = structure.sections.find((section) => section.name === "doc");
-      const bucketNames = docSection?.buckets.map((bucket) => bucket.name) ?? [];
+      const section = structure.sections.find((s) => s.name === type);
+      if (section === undefined || section.tree === "leaf") {
+        console.error(`recategorize is not applicable: kind '${type}' has no sub-categories in this vault`);
+        return { code: 1 };
+      }
+      const bucketNames = section.buckets.map((bucket) => bucket.name);
       if (!bucketNames.includes(change.bucket)) {
         console.error(`unknown category: ${change.bucket}`);
         console.error(`category must be one of: ${bucketNames.join(", ")}`);
@@ -61,7 +70,7 @@ async function relocate(project: string, id: string, change: { title?: string; b
       }
     }
     await assertProjectStructure(projPath, structure);
-    const artifact = await relocateArtifact({ type: "doc", vaultRoot, project, id, ...change }, structure);
+    const artifact = await relocateArtifact({ type, vaultRoot, project, id, ...change }, structure);
     if (jsonEnabled()) emitJson({ id: artifact.id, path: artifact.path });
     else console.log(artifact.id);
     console.error(`updated ${artifact.id}`);

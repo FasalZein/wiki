@@ -211,6 +211,66 @@ describe("doc CLI", () => {
     expect(result.stderr).toContain("category");
   });
 
+  test("doc retitle resolves kind from id prefix (works for any registered kind)", async () => {
+    // A vault with a "spec" kind (prefix SPEC, leaf section) — simulates a
+    // 10-kind vault where "doc" does not exist.
+    const vaultRoot = await createFlatKindVault("test-project");
+
+    const result = await runWiki([
+      "doc", "retitle", "SPEC-0001",
+      "--project", "test-project",
+      "--title", "Revised spec title here",
+    ], vaultRoot);
+
+    expect(result.exitCode).toBe(0);
+    const newPath = join(vaultRoot, "projects", "test-project", "specs", "SPEC-0001-revised-spec-title-here.md");
+    const file = await readFile(newPath, "utf8");
+    expect(file).toContain("title: Revised spec title here");
+    expect(file).toContain("id: SPEC-0001");
+  });
+
+  test("doc recategorize works on branch section (5-kind vault)", async () => {
+    const vaultRoot = await createFixtureVault("test-project");
+    await runWiki(createArgs(), vaultRoot); // DOC-0001 in docs/runbooks/
+
+    const result = await runWiki([
+      "doc", "recategorize", "DOC-0001",
+      "--project", "test-project",
+      "--category", "architecture",
+    ], vaultRoot);
+
+    expect(result.exitCode).toBe(0);
+    const newPath = join(vaultRoot, "projects", "test-project", "docs", "architecture", "DOC-0001-pre-deploy-checklist-for-kamal-services.md");
+    expect(await fileExists(newPath)).toBe(true);
+  });
+
+  test("doc recategorize fails with not-applicable on a flat (leaf) section", async () => {
+    const vaultRoot = await createFlatKindVault("test-project");
+
+    const result = await runWiki([
+      "doc", "recategorize", "SPEC-0001",
+      "--project", "test-project",
+      "--category", "architecture",
+    ], vaultRoot);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("recategorize is not applicable");
+    expect(result.stderr).toContain("no sub-categories");
+  });
+
+  test("doc retitle exits 1 for an unknown id prefix", async () => {
+    const vaultRoot = await createFixtureVault("test-project");
+
+    const result = await runWiki([
+      "doc", "retitle", "ZZZ-0001",
+      "--project", "test-project",
+      "--title", "Whatever new title here",
+    ], vaultRoot);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("unknown id (no registered kind for prefix)");
+  });
+
   test("doc retitle exits 1 when the doc id does not exist", async () => {
     const vaultRoot = await createFixtureVault("test-project");
 
@@ -276,6 +336,31 @@ async function createFixtureVault(project: string): Promise<string> {
   await mkdir(join(projectPath, "adrs"));
   await mkdir(join(projectPath, "handoffs"));
   await mkdir(join(projectPath, "docs"));
+  const qmdCommand = join(vaultRoot, "fake-qmd");
+  await writeFile(qmdCommand, "#!/usr/bin/env bash\nset -euo pipefail\ncase \"${1:-}\" in\n  collection) exit 0 ;;\n  query) echo '[]' ;;\nesac\n");
+  await chmod(qmdCommand, 0o755);
+  await writeFile(join(projectPath, "_project.md"), `---\nqmd_command: ${qmdCommand}\n---\n# ${project}\n`);
+  return vaultRoot;
+}
+
+/** Create a vault with a flat "spec" kind (leaf, no buckets) — simulates a
+ *  10-kind vault where the literal kind "doc" does not exist. */
+async function createFlatKindVault(project: string): Promise<string> {
+  const vaultRoot = await mkdtemp(join(tmpdir(), "wiki-vault-flat-"));
+  tempPaths.push(vaultRoot);
+  const projectPath = join(vaultRoot, "projects", project);
+  await mkdir(join(projectPath, "specs"), { recursive: true });
+  // wiki.json with a single leaf kind "spec" (prefix SPEC, folder specs, no buckets)
+  await writeFile(join(vaultRoot, "wiki.json"), JSON.stringify({
+    kinds: {
+      spec: { prefix: "SPEC", folder: "specs", dedup: true },
+    },
+  }));
+  // Seed a SPEC-0001 artifact so retitle can find it
+  await writeFile(
+    join(projectPath, "specs", "SPEC-0001-original-spec-title.md"),
+    "---\nid: SPEC-0001\ntitle: Original spec title\nproject: test-project\n---\n# Original spec title\n",
+  );
   const qmdCommand = join(vaultRoot, "fake-qmd");
   await writeFile(qmdCommand, "#!/usr/bin/env bash\nset -euo pipefail\ncase \"${1:-}\" in\n  collection) exit 0 ;;\n  query) echo '[]' ;;\nesac\n");
   await chmod(qmdCommand, 0o755);
