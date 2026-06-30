@@ -4,7 +4,7 @@ import matter from "gray-matter";
 
 import { buildIdIndex } from "../artifacts/id-index";
 import { nextId } from "../artifacts/id";
-import { bareIdOf, collectReferences, isLocalIdRef } from "../artifacts/references";
+import { bareIdOf, collectPathLinks, collectReferences, isLocalIdRef } from "../artifacts/references";
 import { loadStructure, type Structure } from "../artifacts/registry";
 import { slugifyTitle } from "../artifacts/store";
 import { withProjectLock } from "../artifacts/lock";
@@ -83,6 +83,22 @@ export async function checkProjectIdDrift(vaultPath: string, project: string, st
             message: `${project}: ${path.split("/").pop()} references ${id}, which has no artifact in this project — fix the link or restore the target.`,
           });
         }
+      }
+    }
+  }
+
+  // Second pass: validate path-qualified wikilinks (e.g. [[projects/foo/specs/prds/PRD-009]])
+  for (const paths of index.values()) {
+    for (const path of paths) {
+      for (const target of await collectPathLinks(path)) {
+        const full = join(vaultPath, target);
+        const fullMd = full.endsWith(".md") ? full : `${full}.md`;
+        if (await exists(full)) continue;
+        if (await exists(fullMd)) continue;
+        issues.push({
+          type: "dangling-link",
+          message: `${project}: ${path.split("/").pop()} references path '${target}', which does not exist in the vault — fix or remove the link.`,
+        });
       }
     }
   }

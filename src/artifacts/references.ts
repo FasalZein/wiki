@@ -61,6 +61,31 @@ export async function collectReferences(path: string): Promise<string[]> {
   return refs;
 }
 
+/** Extract path-qualified wikilink targets from a file's body. These are wikilink
+ *  targets that contain a `/` (path-style refs rather than bare ids). Returns the
+ *  cleaned target with `|alias` and `#heading` stripped. Only vault-relative paths
+ *  (those starting with `projects/` or lacking `..`) are included — relative
+ *  cross-project traversals are excluded by design. */
+export async function collectPathLinks(path: string): Promise<string[]> {
+  let content: string;
+  try {
+    content = await readFile(path, "utf8");
+  } catch {
+    return [];
+  }
+  const parsed = matter(content);
+  const targets: string[] = [];
+  WIKILINK_RE.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = WIKILINK_RE.exec(parsed.content)) !== null) {
+    let target = match[1]!.split("|")[0]!.split("#")[0]!.trim();
+    if (!target.includes("/")) continue; // bare id, not a path link
+    if (target.includes("..")) continue; // relative cross-project traversal — skip
+    targets.push(target);
+  }
+  return targets;
+}
+
 /** Every artifact id (other than `id`) whose frontmatter/body references `id`. */
 export async function inboundReferences(index: Map<string, string[]>, id: string): Promise<string[]> {
   const inbound = new Set<string>();
