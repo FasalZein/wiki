@@ -13,6 +13,22 @@ import { parseCommand, stringValue } from "../parse";
 import { emitJson, jsonEnabled } from "../output";
 import { unknownMessage } from "../usage";
 
+/** True when `dir` (or an ancestor) is a git repo — used to decide whether a new
+ *  project should auto-bind its repo to cwd (BUG-10, NOTE-0007). */
+async function isGitRepo(dir: string): Promise<boolean> {
+  let current = dir;
+  for (;;) {
+    try {
+      await stat(join(current, ".git"));
+      return true;
+    } catch {
+      const parent = resolve(current, "..");
+      if (parent === current) return false;
+      current = parent;
+    }
+  }
+}
+
 export async function handleProject(args: string[]): Promise<CliResult> {
   const [subverb, ...rest] = args;
   if (subverb === "create") {
@@ -52,9 +68,18 @@ async function createProject(args: string[]): Promise<CliResult> {
     console.error("missing project name");
     return { code: 1 };
   }
-  // repo binds the project to a code repo (default: cwd, the usual case);
-  // overridable via flag and editable in _project.md.
-  const repo = stringValue(parsed.values, "repo") ?? process.cwd();
+  // repo binds the project to a code repo. Default to cwd only when cwd is an
+  // actual git repo (the usual `create from inside my repo` case); otherwise leave
+  // it empty so a knowledge-only project doesn't get spuriously bound to whatever
+  // directory the CLI happened to run in (BUG-10, NOTE-0007). Override via --repo,
+  // and --repo='' forces no binding. Editable later in _project.md.
+  const repoFlag = stringValue(parsed.values, "repo");
+  let repo: string;
+  if (repoFlag !== undefined) {
+    repo = repoFlag;
+  } else {
+    repo = (await isGitRepo(process.cwd())) ? process.cwd() : "";
+  }
 
   const vaultRoot = await getVaultRoot();
   const projPath = projectPath(vaultRoot, name);

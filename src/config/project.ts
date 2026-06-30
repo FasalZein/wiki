@@ -21,14 +21,19 @@ export class ProjectConfigError extends Error {
   }
 }
 
-/** List the project names that exist under <vaultRoot>/projects (excluding _archived). */
+/** List the project names that exist under <vaultRoot>/projects (excluding _archived).
+ *  A project is one whose directory carries the `_project.md` marker — the same
+ *  signal `projectExists`/`resolveProject` key on. Listing bare directories would
+ *  surface half-created dirs (no `_project.md`) that then fail to resolve/sync
+ *  (BUG-9, NOTE-0007). */
 export async function listProjects(vaultRoot: string): Promise<string[]> {
   try {
     const entries = await readdir(join(vaultRoot, "projects"), { withFileTypes: true });
-    return entries
-      .filter((e) => e.isDirectory() && !e.name.startsWith("_"))
-      .map((e) => e.name)
-      .sort();
+    const dirs = entries.filter((e) => e.isDirectory() && !e.name.startsWith("_")).map((e) => e.name);
+    const marked = await Promise.all(
+      dirs.map(async (name) => ((await projectExists(vaultRoot, name)) ? name : undefined)),
+    );
+    return marked.filter((n): n is string => n !== undefined).sort();
   } catch {
     return [];
   }

@@ -31,6 +31,7 @@ describe("writeVaultIndex (SLICE-0091)", () => {
     const vaultRoot = await makeVault();
     for (const p of ["alpha", "beta"]) {
       await mkdir(join(vaultRoot, "projects", p), { recursive: true });
+      await writeFile(join(vaultRoot, "projects", p, "_project.md"), `---\nproject: ${p}\n---\n# ${p}\n`);
       await addArtifact(vaultRoot, p, "docs", "DOC-0001", "doc");
     }
 
