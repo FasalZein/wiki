@@ -12,7 +12,7 @@ import { handleStatus } from "./verbs/status";
 import { handleSync } from "./verbs/sync";
 import { handleValidate } from "./verbs/validate";
 import { handleVault } from "./verbs/vault";
-import { USAGE_REGISTRY, renderHelp, renderVerbList, unknownMessage, wantsHelp } from "./usage";
+import { USAGE_REGISTRY, renderHelp, renderVerbList, unknownMessage, wantsHelp, type UsageEntry } from "./usage";
 import { setJsonMode } from "./output";
 import { getVaultRoot, resolveVaultRootForDisplay } from "../config/vault";
 import { readLinkedProject } from "./repo-link";
@@ -99,9 +99,13 @@ export async function dispatch(args: string[]): Promise<CliResult> {
     if (verb === "create" || verb === "next-id") {
       const kindNames = await resolveKindNames();
       if (verb === "create") {
-        const dynamicSubverbs: Record<string, { summary: string }> = {};
+        const dynamicSubverbs: Record<string, UsageEntry> = {};
         for (const k of kindNames) {
-          dynamicSubverbs[k] = entry.subverbs?.[k] ?? { summary: `Create a ${k} artifact.` };
+          dynamicSubverbs[k] = entry.subverbs?.[k] ?? {
+            summary: `Create a ${k} artifact.`,
+            usage: `wiki create ${k} --project <name> --title <title> [--body -]`,
+            example: `wiki create ${k} --project myproj --title "Short descriptive title"`,
+          };
         }
         const augmented = { ...entry, subverbs: dynamicSubverbs };
         console.log(renderHelp(verb, augmented));

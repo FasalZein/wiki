@@ -13,8 +13,20 @@ const assertProjectStructure = (projectPath: string) => _assertProjectStructure(
 const originalEnv = { ...process.env };
 const tempPaths: string[] = [];
 
+// Restore process.env by mutating keys on the existing object — never reassign
+// `process.env` wholesale: that detaches bun's native env and silently breaks
+// env reads in any test that runs afterwards (cross-file pollution).
+function restoreEnv(): void {
+  for (const key of Object.keys(process.env)) {
+    if (!(key in originalEnv)) delete process.env[key];
+  }
+  for (const [key, value] of Object.entries(originalEnv)) {
+    if (value !== undefined) process.env[key] = value;
+  }
+}
+
 beforeEach(() => {
-  process.env = { ...originalEnv };
+  restoreEnv();
   delete process.env.CLAUDECODE;
   delete process.env.CLAUDE_CODE_ENTRYPOINT;
   delete process.env.PI_SESSION_ID;
@@ -24,7 +36,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  process.env = { ...originalEnv };
+  restoreEnv();
   await Promise.all(tempPaths.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 

@@ -58,13 +58,25 @@ describe("dynamic kind list in help", () => {
   let originalEnv: NodeJS.ProcessEnv;
   let tempPaths: string[];
 
+  // Mutate keys, never reassign process.env wholesale (see config.test.ts) —
+  // wholesale reassignment detaches bun's native env and breaks env reads in
+  // both this suite and any later test file.
+  function restoreEnv(): void {
+    for (const key of Object.keys(process.env)) {
+      if (!(key in originalEnv)) delete process.env[key];
+    }
+    for (const [key, value] of Object.entries(originalEnv)) {
+      if (value !== undefined) process.env[key] = value;
+    }
+  }
+
   beforeEach(() => {
     originalEnv = { ...process.env };
     tempPaths = [];
   });
 
   afterEach(async () => {
-    process.env = { ...originalEnv };
+    restoreEnv();
     await Promise.all(tempPaths.map((p) => rm(p, { recursive: true, force: true })));
   });
 
@@ -74,16 +86,16 @@ describe("dynamic kind list in help", () => {
     await mkdir(join(vaultRoot, "projects"), { recursive: true });
     const wikiJson = {
       kinds: {
-        prd: { prefix: "PRD", folder: "prds" },
-        slice: { prefix: "SLICE", folder: "slices" },
-        decision: { prefix: "ADR", folder: "adrs" },
-        architecture: { prefix: "ARCH", folder: "architecture" },
-        research: { prefix: "RES", folder: "research" },
-        runbooks: { prefix: "RUN", folder: "runbooks" },
-        specs: { prefix: "SPEC", folder: "specs" },
-        notes: { prefix: "NOTE", folder: "notes" },
-        legacy: { prefix: "LEG", folder: "legacy" },
-        handoff: { prefix: "HANDOFF", folder: "handoffs" },
+        prd: { prefix: "PRD", folder: "prds", dedup: true },
+        slice: { prefix: "SLICE", folder: "slices", dedup: true },
+        decision: { prefix: "ADR", folder: "adrs", dedup: true },
+        architecture: { prefix: "ARCH", folder: "architecture", dedup: true },
+        research: { prefix: "RES", folder: "research", dedup: true },
+        runbooks: { prefix: "RUN", folder: "runbooks", dedup: true },
+        specs: { prefix: "SPEC", folder: "specs", dedup: true },
+        notes: { prefix: "NOTE", folder: "notes", dedup: true },
+        legacy: { prefix: "LEG", folder: "legacy", dedup: true },
+        handoff: { prefix: "HANDOFF", folder: "handoffs", dedup: true },
       },
     };
     await writeFile(join(vaultRoot, "wiki.json"), JSON.stringify(wikiJson));
@@ -105,16 +117,16 @@ describe("dynamic kind list in help", () => {
     await mkdir(join(vaultRoot, "projects"), { recursive: true });
     const wikiJson = {
       kinds: {
-        prd: { prefix: "PRD", folder: "prds" },
-        slice: { prefix: "SLICE", folder: "slices" },
-        decision: { prefix: "ADR", folder: "adrs" },
-        architecture: { prefix: "ARCH", folder: "architecture" },
-        research: { prefix: "RES", folder: "research" },
-        runbooks: { prefix: "RUN", folder: "runbooks" },
-        specs: { prefix: "SPEC", folder: "specs" },
-        notes: { prefix: "NOTE", folder: "notes" },
-        legacy: { prefix: "LEG", folder: "legacy" },
-        handoff: { prefix: "HANDOFF", folder: "handoffs" },
+        prd: { prefix: "PRD", folder: "prds", dedup: true },
+        slice: { prefix: "SLICE", folder: "slices", dedup: true },
+        decision: { prefix: "ADR", folder: "adrs", dedup: true },
+        architecture: { prefix: "ARCH", folder: "architecture", dedup: true },
+        research: { prefix: "RES", folder: "research", dedup: true },
+        runbooks: { prefix: "RUN", folder: "runbooks", dedup: true },
+        specs: { prefix: "SPEC", folder: "specs", dedup: true },
+        notes: { prefix: "NOTE", folder: "notes", dedup: true },
+        legacy: { prefix: "LEG", folder: "legacy", dedup: true },
+        handoff: { prefix: "HANDOFF", folder: "handoffs", dedup: true },
       },
     };
     await writeFile(join(vaultRoot, "wiki.json"), JSON.stringify(wikiJson));
@@ -144,9 +156,11 @@ describe("dynamic kind list in help", () => {
     for (const kind of ["prd", "slice", "decision", "doc", "handoff"]) {
       expect(output, `should list default kind: ${kind}`).toContain(kind);
     }
-    // Should NOT list promoted kinds that only exist in a configured vault
-    expect(output).not.toContain("architecture");
-    expect(output).not.toContain("runbooks");
+    // Should NOT list promoted kinds that only exist in a configured vault.
+    // Check for their subcommand entries specifically — the bare word
+    // "architecture" legitimately appears in the ADR description line.
+    expect(output).not.toContain("Create a architecture artifact");
+    expect(output).not.toContain("Create a runbooks artifact");
   });
 
   test("next-id --help falls back to default 5 kinds when no vault is configured", async () => {
