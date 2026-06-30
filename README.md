@@ -14,8 +14,9 @@ them again with on-device hybrid search.
 - **Artifact kinds are data, not code.** `wiki.json` defines each kind — its id
   prefix, folder, whether the dedup gate runs, and the skill that authors it.
   Add a kind there plus a `templates/<kind>.md`, and `wiki create <kind>` works
-  with no code change. Ships with `prd`, `slice`, `decision` (ADR), `doc`, and
-  `handoff`.
+  with no code change. The bundled default ships with `prd`, `slice`, `decision`
+  (ADR), `doc` (with sub-buckets), and `handoff` — but vaults customize freely;
+  run `wiki schema` to see what kinds the active vault defines.
 - **The CLI is a lean artifact store, not a workflow engine.** It wraps only what
   an agent can't do safely itself: schema-validated writes, id allocation,
   comma-safe field/link edits, dedup, format normalization, and search. There
@@ -172,11 +173,12 @@ Good to know:
   can opt into blocking strong matches with `dedup_strong_blocks: true`.
 - **`wiki search` does not re-embed.** Run `wiki sync` after writing, or new
   artifacts stay invisible to ranked search and the dedup gate.
-- **Docs are nested into config-driven buckets** — each branch section
-  (`doc` by default) declares its buckets in `wiki.json`. The bundled config
-  ships `architecture`, `research`, `runbooks`, `specs`, `notes`, and `legacy`,
-  but a vault can define its own; `wiki schema doc` lists the current buckets and
-  their selection criteria.
+- **Kinds are config-driven.** The vault's `wiki.json` declares every kind the
+  CLI knows about — including folder paths, id prefixes, and optional sub-buckets.
+  The bundled default uses a single `doc` kind with sub-buckets (architecture,
+  research, runbooks, specs, notes, legacy), but a vault can promote those to
+  first-class kinds or define entirely new ones. `wiki schema <kind>` shows the
+  active structure; `wiki --help` lists what `create` accepts.
 
 ## Maintenance
 
@@ -225,7 +227,7 @@ Tests run against temp vaults; the dedup/search gate is driven by a fake `qmd`
 │   ├── schema/      template frontmatter schema loading
 │   └── integrations/  qmd subprocess layer
 ├── skills/          Agent skill bundle: the `wiki` router (one SKILL.md)
-├── templates/       Bundled artifact templates (prd, slice, decision, doc, handoff)
+├── templates/       Bundled artifact templates (11 files — one per default kind/bucket)
 ├── wiki.json        Artifact kind definitions (prefix, folder, dedup, skill)
 ├── tests/           Suites + fixtures
 └── dist/            Built CLI (bun run build)
@@ -249,6 +251,6 @@ All architectural decisions live in the vault, not this repo:
 
 - **Planning project:** `~/Knowledge/projects/wiki-v2/`
 - **ADRs:** `~/Knowledge/projects/wiki-v2/adrs/` (ADR-0001 onward)
-- **Docs:** `~/Knowledge/projects/wiki-v2/docs/`
+- **Docs:** `~/Knowledge/projects/wiki-v2/` (kind folders: `architecture/`, `research/`, `notes/`, `specs/`, etc.)
 
 Read the ADRs before changing the architecture.

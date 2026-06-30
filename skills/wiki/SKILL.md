@@ -33,12 +33,16 @@ commands resolve `--project` from it automatically.
 Creation is one-shot: pass the authored body via `--body -` (stdin) so the
 artifact is complete in a single schema-validated command.
 
-- `wiki create <kind> …` — kinds come from the vault's `wiki.json` (`decision` = ADR). A
-  branch section's **buckets** double as create-names: `wiki create <bucket>` files into that
-  bucket's subfolder (e.g. `wiki create architecture` → `docs/architecture/`), or pass
-  `--category <bucket>` to a section kind (`wiki create doc --category architecture`).
-  Buckets are config-declared in `wiki.json`, not hardcoded; `wiki schema <bucket>` shows a
-  bucket's `criteria` (the what-goes-where signal).
+- `wiki create <kind> …` — kinds come from the vault's `wiki.json` (`decision` = ADR).
+  What kinds are available depends on the vault's configuration; the bundled default
+  ships `prd`, `slice`, `decision`, `doc` (with sub-buckets), and `handoff`, but vaults
+  can promote buckets to first-class kinds or define new ones entirely. Use
+  `wiki schema <kind>` to discover a kind's fields and folder, and `wiki create --help`
+  to see which kinds the active vault accepts.
+- In the **bundled default**, the `doc` kind declares sub-buckets (architecture, research,
+  runbooks, specs, notes, legacy); create into a bucket with `wiki create doc --category
+  <bucket>`. On vaults that promote those to top-level kinds, use `wiki create
+  architecture` (or `research`, etc.) directly — no `--category` needed.
 - Every kind requires a one-line `--summary` — the headline the **roster** and search
   lead with. Write it last, once the body is settled; omitting it fails validation.
 
@@ -76,10 +80,11 @@ One validated `wiki` call per intent — never hand-edit frontmatter:
   last `wiki sync`: it neither refreshes nor embeds, so new artifacts stay invisible to
   search and dedup until a sync. Search warns and skips any project collection that was
   never synced.
-- Docs live in the config-declared `docs/<bucket>/` subfolders the vault's `wiki.json`
-  declares (default buckets: architecture, research, runbooks, specs, notes, legacy) —
-  never invent a folder; an unfit doc goes in the closest declared bucket. `wiki doctor`
-  flags undeclared folders or loose files under a branch section.
+- Artifact folders are config-driven — the vault's `wiki.json` declares each kind's
+  folder path. On the bundled default, docs live under `docs/<bucket>/`; on vaults that
+  promote buckets to first-class kinds, each kind owns a top-level folder (e.g.
+  `architecture/`, `research/`). Never invent a folder; an unfit artifact goes in the
+  closest declared kind. `wiki doctor` flags undeclared folders or loose files.
   `wiki doctor --setup` checks distribution health instead of vault drift: binary freshness (source changed since the last `bun run build`), skill-bundle presence, and whether the persist hook is wired in any runtime. `wiki doctor --fix` repairs what is mechanical — duplicate ids (canonical keeps the id, the rest get a fresh one) plus the fixes `wiki fmt --write` applies — then re-audits, leaving only drift that needs a human (dangling links, repo bindings).
 - `wiki fmt` reports format drift (exit 1); `wiki fmt --write` applies mechanical fixes (dates, frontmatter order, legacy-id renumber with in-project reference rewrite, and renaming files to `<ID>-<slug>.md` when id/slug drift from the filename, keeping the id so links survive). Both `wiki fmt` (flag-only) and `wiki validate <file>` report missing/unknown required H2 body sections, so the create-time structure contract is enforced after edits too.
 
