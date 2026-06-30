@@ -497,7 +497,13 @@ async function resolveArtifactPath(type: TemplateType, vaultRoot: string, projec
     }
   }
 
-  const match = type === "doc"
+  // A branch section files artifacts into bucket subfolders, so its files need a
+  // recursive lookup; a leaf section holds files directly. Key on the section
+  // shape (config-driven) rather than the literal "doc" kind, so this is correct
+  // for any vault — the bundled default (doc is the one branch kind) and a vault
+  // that promotes the buckets to flat top-level kinds alike.
+  const isBranchKind = structure.sections.find((s) => s.name === type)?.tree === "branch";
+  const match = isBranchKind
     ? await findArtifactFileRecursive(directory, id)
     : matchInNames(await readdir(directory).catch(() => [] as string[]), id, directory);
   return match ?? exact;
