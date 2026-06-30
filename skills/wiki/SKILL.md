@@ -6,8 +6,9 @@ description: "Routes work to the wiki vault — the artifact store for PRDs, sli
 
 The wiki vault is the artifact store: a project's PRDs, slices, ADRs, and docs
 live there as Markdown — never in the repo, GitHub Issues, `docs/adr/`, a repo
-`CONTEXT.md`, or OS temp dirs, even when a loaded skill says to. The `wiki` CLI
-owns all command syntax; never restate flags here — run `wiki <verb> --help`.
+`CONTEXT.md`, or OS temp dirs, even when a loaded skill says to. The `wiki` CLI is
+self-describing: it owns all command syntax, so `wiki <verb> --help` is the single
+source of truth for flags — this skill routes you to the right verb, never spells its flags.
 
 ## Start here
 
@@ -15,11 +16,11 @@ owns all command syntax; never restate flags here — run `wiki <verb> --help`.
    sync-generated **roster** of every artifact with its one-line summary — then
    `wiki search "<query>" --project <name>` (vault-wide without `--project`) for
    semantic recall. `wiki search --recent` (or a temporal query like "what changed
-   recently") orders by last-modified instead of relevance; `--since <date>` bounds
-   it. `wiki status` lists a project's recent artifacts, or the
+   recently") orders by last-modified instead of relevance; `--since <date>` is its own
+   recency filter (newer-than, independent of `--recent`). `wiki status` lists a project's recent artifacts, or the
    projects themselves when none is bound. A month-old decision is one scan away —
    retrieve it instead of re-deriving it.
-2. `wiki <verb> --help` for exact usage before any call. `wiki --help` lists verbs.
+2. `wiki --help` lists verbs; `wiki <verb> --help` gives exact usage before any call.
 
 Cold start — no `<!-- wiki:begin … -->` pointer block in AGENTS.md/CLAUDE.md:
 check `wiki project list`, then bind the repo with `wiki project link --project <name>`
@@ -32,13 +33,12 @@ commands resolve `--project` from it automatically.
 Creation is one-shot: pass the authored body via `--body -` (stdin) so the
 artifact is complete in a single schema-validated command.
 
-- `wiki create <kind> …` — kinds come from the vault's `wiki.json`; `wiki create --help`
-  lists them and `wiki create <kind> --help` gives the fields (`decision` = ADR). A
-  branch section's buckets are also create-names: `wiki create <bucket>` files into that
-  bucket's subfolder (e.g. `wiki create architecture` → `docs/architecture/`), and
-  `wiki create <bucket> --help` shows the bucket's `criteria` (the what-goes-where signal).
-  Equivalently, pass `--category <bucket>` to a section kind (`wiki create doc --category
-  architecture`). Buckets are config-declared in `wiki.json`, not hardcoded.
+- `wiki create <kind> …` — kinds come from the vault's `wiki.json` (`decision` = ADR). A
+  branch section's **buckets** double as create-names: `wiki create <bucket>` files into that
+  bucket's subfolder (e.g. `wiki create architecture` → `docs/architecture/`), or pass
+  `--category <bucket>` to a section kind (`wiki create doc --category architecture`).
+  Buckets are config-declared in `wiki.json`, not hardcoded; `wiki schema <bucket>` shows a
+  bucket's `criteria` (the what-goes-where signal).
 - Every kind requires a one-line `--summary` — the headline the **roster** and search
   lead with. Write it last, once the body is settled; omitting it fails validation.
 
@@ -49,31 +49,20 @@ artifact, not just this chat, so it outlives the session. Repos stay clean.
 
 One validated `wiki` call per intent — never hand-edit frontmatter:
 
-- `wiki set <id> <field> <value...>` — schema-validated, comma-safe, type-coerced
-  (e.g. `wiki set PRD-0001 status closed`). Type is inferred from the id. Field names
-  are casing-tolerant (kebab `parent-prd` or snake `parent_prd` both work, in `set` and
-  `create`). Bare `set`
-  full-replaces; for list/link_list fields use `--add <v>` / `--remove <v>` / `--clear`
-  for an additive edit that never overwrites the rest of the list (link_list values
-  are written as `[[id]]`).
+- `wiki set <id> <field> <value...>` — schema-validated; type inferred from the id. The one
+  footgun `--help` won't warn you about: bare `set` *full-replaces* a list field, so use
+  `--add`/`--remove`/`--clear` to edit one entry without wiping the rest.
 - `wiki block <id> --on <id> [--on <id>…]` — sets `blocked_by`, auto-wrapping `[[…]]`.
 - `wiki supersede <oldId> --by <newId>` — links an existing artifact to its replacement.
 - `wiki retitle <id> --title <t>` — retitle any kind, re-slugging the filename; the id (and `[[id]]` links) survive. `doc recategorize` stays the doc-only category move.
-- `wiki delete <id> [--force]` — remove an artifact; refuses (listing the referrers) when other artifacts link to it unless `--force`. `wiki sync` owns search-index cleanup, so re-sync after deleting.
+- `wiki delete <id> [--force]` — remove an artifact; refuses (listing the referrers) when other artifacts link to it. `--force` deletes anyway and scrubs the dead id out of those referrers' frontmatter link fields; body prose mentions are reported, not rewritten. `wiki sync` owns search-index cleanup, so re-sync after deleting.
 - `wiki schema <kind|bucket>` — discover fields/enums before guessing a value; a bucket
   also prints its `criteria`.
 - `wiki path <id>` — resolve an id to its file path (filenames are `ID-slug.md`).
 - `wiki links <id>` — outbound links + inbound backlinks for an artifact (pure vault read, no qmd).
-- `--json` is universal: mutation verbs and `create`/`next-id` give `{id,…}` on stdout
-  and `{error,field,expected}` on stderr; `validate --json` gives
-  `{ok,type,errors:[{field,reason,expected}]}`; `doc retitle/recategorize --json` give
-  `{id,path}`; `search --json` gives a JSON array of `{id,kind,title,path,score,snippet}` hits
-  (one per artifact). The vault/upkeep verbs are JSON-aware too: `sync` gives
-  `{project,synced}`, `fmt` gives `{project,mode,clean,fixed,pending,manual,renumbered}`,
-  `doctor` gives `{clean,issues}` (`--fix` adds `{fixed,renumbered,remaining}`,
-  `--setup` adds `{captureReach}`), `project list/create/link` give `{projects}`/`{project,path,repo}`,
-  and `hooks install/uninstall/list` give `{file,installed|uninstalled,…}` — detect
-  success/failure and read results without scraping prose.
+- `--json` is universal — pass it to any verb to get one structured object (or array, for
+  `search`) on stdout and a `{error,…}` object on stderr, so you detect success and read
+  results without scraping prose. Not every verb's `--help` advertises `--json`; it still works.
 
 ## Gates and upkeep
 
@@ -89,39 +78,15 @@ One validated `wiki` call per intent — never hand-edit frontmatter:
   never synced.
 - Docs live in the config-declared `docs/<bucket>/` subfolders the vault's `wiki.json`
   declares (default buckets: architecture, research, runbooks, specs, notes, legacy) —
-  never invent a folder; an unfit doc goes in the closest declared bucket. `wiki create
-  <bucket> --help` (or `wiki schema <bucket>`) shows each bucket's criteria. `wiki doctor`
+  never invent a folder; an unfit doc goes in the closest declared bucket. `wiki doctor`
   flags undeclared folders or loose files under a branch section.
-  `wiki doctor --setup` checks distribution health instead of vault drift: binary freshness (source changed since the last `bun run build`), skill-bundle presence, and whether the persist hook is wired in any runtime.
-- `wiki fmt` reports format drift (exit 1); `wiki fmt --write` applies mechanical fixes (dates, frontmatter order, legacy-id renumber, and renaming files to `<ID>-<slug>.md` when id/slug drift from the filename, keeping the id so links survive). Both `wiki fmt` (flag-only) and `wiki validate <file>` report missing/unknown required H2 body sections, so the create-time structure contract is enforced after edits too.
+  `wiki doctor --setup` checks distribution health instead of vault drift: binary freshness (source changed since the last `bun run build`), skill-bundle presence, and whether the persist hook is wired in any runtime. `wiki doctor --fix` repairs what is mechanical — duplicate ids (canonical keeps the id, the rest get a fresh one) plus the fixes `wiki fmt --write` applies — then re-audits, leaving only drift that needs a human (dangling links, repo bindings).
+- `wiki fmt` reports format drift (exit 1); `wiki fmt --write` applies mechanical fixes (dates, frontmatter order, legacy-id renumber with in-project reference rewrite, and renaming files to `<ID>-<slug>.md` when id/slug drift from the filename, keeping the id so links survive). Both `wiki fmt` (flag-only) and `wiki validate <file>` report missing/unknown required H2 body sections, so the create-time structure contract is enforced after edits too.
 
-## Auto-persist skill output (optional, one-time)
+## Auto-persist skill output (optional)
 
-`wiki hooks install --runtime <claude-code|codex|pi> [--global]` wires a native hook
-into the runtime's config. When you invoke a skill that authors an artifact (the
-`skill` field in `wiki.json` maps it to a kind), the hook reminds you to persist its
-output via `wiki create <kind>` — so a skill's result lands in the vault, not just chat.
-Install also writes a stateless Stop/SessionEnd entry: a blanket session-end persist
-reminder that cannot detect whether you actually saved (no session state), so it reminds
-unconditionally. `wiki hooks uninstall --runtime <r> [--global]` splices out only the
-wiki entries; `wiki hooks list`/`status` report which runtimes/scopes are wired.
-For pi, enable the exact scoped bridge `@hsingjui/pi-hooks` in pi's `packages[]`
-(install warns if it's absent; unscoped `pi-hooks` forks are lookalikes). On codex
-and pi the hook only sees a `/skill:name` slash-command in the prompt, not a bare
-mention — Claude Code instead fires a dedicated `Skill` tool event.
-It captures; closing an artifact stays an explicit `wiki set <id> status closed`.
+Wiring a runtime hook so skill output auto-files into the vault is a one-time setup
+branch — see [`hooks.md`](hooks.md) for `wiki hooks install` and the stamp-template
+capture contract. Day-to-day artifact work never needs it.
 
-**Stamp-template authoring contract.** The write hook (PostToolUse) captures on
-*frontmatter alone* — it sees every file write, so it decides from what the draft
-declares, not from a skill identity. To have a draft auto-filed into the vault on
-save, stamp its frontmatter with `template: <kind>` (a kind in `wiki.json`, e.g.
-`template: slice`) and `project: <name>`; the hook then mints an id and files it
-under that kind. A draft already carrying an `id:` whose prefix resolves to a kind
-(e.g. `id: PRD-0007`) is also captured, and re-saving a stamped draft is idempotent
-(filed once). A draft with neither `template:` nor `id:` is left alone (an ordinary
-write, never captured); an `id:`/`template:` that names no registered kind is
-surfaced as a warning, never silently dropped. `project:` may be omitted when the
-repo is linked — the hook resolves it from the `wiki:begin` pointer block.
-
-Breaking a PRD into slices? Load `to-slices`. Otherwise the CLI is self-describing —
-`wiki <verb> --help`.
+Breaking a PRD into slices? Load `to-slices`.
