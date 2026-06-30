@@ -120,17 +120,16 @@ describe("vault config", () => {
     });
   });
 
-  test("assertProjectStructure verifies required project folders and _project.md", async () => {
+  test("assertProjectStructure requires only _project.md (kind folders are created on write)", async () => {
     const projectPath = await mkdtemp(join(tmpdir(), "wiki-project-"));
     tempPaths.push(projectPath);
 
     await expect(assertProjectStructure(projectPath)).rejects.toThrow("Project structure missing _project.md");
 
+    // _project.md alone is sufficient — no kind folders need pre-exist (BUG-1,
+    // NOTE-0007): mintAndWrite creates the target folder on write, and empty
+    // kind folders don't survive git clone.
     await writeFile(join(projectPath, "_project.md"), "# Project\n");
-    for (const folder of ["prds", "slices", "adrs", "handoffs", "docs"]) {
-      await mkdir(join(projectPath, folder));
-    }
-
     await expect(assertProjectStructure(projectPath)).resolves.toBeUndefined();
   });
 });

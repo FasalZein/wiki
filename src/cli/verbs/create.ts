@@ -33,27 +33,28 @@ import { unknownMessage } from "../usage";
 
 export async function handleCreate(args: string[]): Promise<CliResult> {
   const [name, ...rest] = args;
-  // SLICE-0112: the create-name is a section kind (e.g. `doc`) OR a bucket/leaf
-  // name in the tree (e.g. `architecture`, which files into the doc section's
-  // docs/architecture/ with a DOC id). Resolve it synchronously against the
-  // bundled default tree so an unknown name fails before any vault load (the
-  // `create bogus` contract runs with no vault configured).
+  // SLICE-0112/SLICE-0118 + BUG-4 (NOTE-0007): the create-name is a section kind
+  // (e.g. `prd`) OR a bucket/leaf name in the tree. Resolve against the PER-VAULT
+  // structure FIRST, so a vault whose wiki.json promotes/renames kinds wins over
+  // the bundled default. (Previously the bundled DEFAULT_STRUCTURE was consulted
+  // first, so a promoted kind like `notes` shadow-matched the default `doc`
+  // bucket and misrouted to the removed `doc` kind.) Fall back to the bundled
+  // default only when no vault is configured, preserving the `create bogus`
+  // no-vault contract.
+  const structure = await tryLoadStructure();
+  if (structure !== undefined && name !== undefined) {
+    if (structure.kinds[name] !== undefined) return createGeneric(name as TemplateType, rest);
+    const resolved = structure.bucketFor(name);
+    if (resolved !== undefined) return createGeneric(resolved.section.name, rest, presetFor(resolved));
+  }
+  // No vault (or unknown name there): resolve against the bundled default tree so
+  // an unknown name still fails cleanly with no vault configured.
   if (name !== undefined && DEFAULT_STRUCTURE.kinds[name] !== undefined) {
     return createGeneric(name as TemplateType, rest);
   }
   const defaultResolved = name === undefined ? undefined : DEFAULT_STRUCTURE.bucketFor(name);
   if (defaultResolved !== undefined) {
     return createGeneric(defaultResolved.section.name, rest, presetFor(defaultResolved));
-  }
-  // SLICE-0118: the name isn't in the bundled default tree — it may be a kind or
-  // a bucket declared only in this vault's custom wiki.json. Load the per-vault
-  // structure and resolve against it so `wiki create <custom-bucket>` works with
-  // zero code change. A vault-load fault (unconfigured) keeps the default error.
-  const structure = await tryLoadStructure();
-  if (structure !== undefined && name !== undefined) {
-    if (structure.kinds[name] !== undefined) return createGeneric(name as TemplateType, rest);
-    const resolved = structure.bucketFor(name);
-    if (resolved !== undefined) return createGeneric(resolved.section.name, rest, presetFor(resolved));
   }
   const kinds = Object.keys(structure?.kinds ?? DEFAULT_STRUCTURE.kinds);
   console.error(unknownMessage("artifact type", name ?? "", kinds));

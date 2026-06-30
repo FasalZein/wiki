@@ -55,11 +55,14 @@ export async function projectErrorMessage(vaultRoot: string, project: string): P
   return `project '${project}' not found — create it with: wiki project create ${project}${list}`;
 }
 
-export async function assertProjectStructure(projectPath: string, structure: Structure): Promise<void> {
+export async function assertProjectStructure(projectPath: string, _structure: Structure): Promise<void> {
+  // A project is identified by its `_project.md` alone. Kind folders are NOT
+  // required to pre-exist: `mintAndWrite` mkdir-recursives the target on write,
+  // and empty kind folders don't survive `git clone` (no .gitkeep), so a project
+  // legitimately lacking docs of some kind must still pass. Requiring every
+  // `structure.folders` entry here broke `create`/`sync`/`fmt` after the doc-kind
+  // promotion grew the kind set (BUG-1, NOTE-0007).
   await assertFile(join(projectPath, "_project.md"), "_project.md");
-  for (const folder of structure.folders) {
-    await assertDirectory(join(projectPath, folder), `${folder}/`);
-  }
 }
 
 export async function loadProjectConfig(projectPath: string): Promise<ProjectConfig> {
@@ -86,20 +89,6 @@ async function assertFile(path: string, label: string): Promise<void> {
   try {
     const stats = await stat(path);
     if (!stats.isFile()) {
-      throw new Error(`Project structure missing ${label}`);
-    }
-  } catch (error) {
-    if (isFileNotFound(error)) {
-      throw new Error(`Project structure missing ${label}`);
-    }
-    throw error;
-  }
-}
-
-async function assertDirectory(path: string, label: string): Promise<void> {
-  try {
-    const stats = await stat(path);
-    if (!stats.isDirectory()) {
       throw new Error(`Project structure missing ${label}`);
     }
   } catch (error) {

@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { DEFAULT_STRUCTURE } from "../src/artifacts/registry";
 import { dispatch } from "../src/cli/dispatch";
@@ -66,11 +69,25 @@ describe("registry ↔ handler contract (ADR-0023)", () => {
   });
 
   test("unknown artifact type lists exactly the kinds defined in wiki.json (no hardcoded drift)", async () => {
-    const { code, out } = await run(["create", "bogus"]);
-    expect(code).toBe(1);
-    expect(out).toContain("unknown artifact type: bogus");
-    for (const kind of Object.keys(ARTIFACTS)) {
-      expect(out, `valid set should include ${kind}`).toContain(kind);
+    // Hermetic: point at a vault with no wiki.json so loadStructure falls back to
+    // DEFAULT_STRUCTURE deterministically. Without this the test inherits the
+    // developer's ambient ~/.config/wiki vault, whose custom wiki.json kinds
+    // (correctly) differ from the bundled default — the error now reflects the
+    // *configured* vault's kinds (BUG-4 fix, NOTE-0007), not a hardcoded set.
+    const emptyVault = await mkdtemp(join(tmpdir(), "wiki-default-struct-"));
+    const prev = process.env.KNOWLEDGE_VAULT_ROOT;
+    process.env.KNOWLEDGE_VAULT_ROOT = emptyVault;
+    try {
+      const { code, out } = await run(["create", "bogus"]);
+      expect(code).toBe(1);
+      expect(out).toContain("unknown artifact type: bogus");
+      for (const kind of Object.keys(ARTIFACTS)) {
+        expect(out, `valid set should include ${kind}`).toContain(kind);
+      }
+    } finally {
+      if (prev === undefined) delete process.env.KNOWLEDGE_VAULT_ROOT;
+      else process.env.KNOWLEDGE_VAULT_ROOT = prev;
+      await rm(emptyVault, { recursive: true, force: true });
     }
   });
 
