@@ -2,8 +2,7 @@ import matter from "gray-matter";
 import { readFile } from "node:fs/promises";
 import { basename, relative } from "node:path";
 
-import { bodySectionDrift } from "../../artifacts/body";
-import { loadTemplate, normalizeInlineMaps, resolveTemplatePath } from "../../schema/load";
+import { loadKind } from "../../artifacts/body";
 import { validate } from "../../schema/validate";
 import { loadStructure } from "../../artifacts/registry";
 import { getVaultRoot } from "../../config/vault";
@@ -36,15 +35,13 @@ export async function handleValidate(args: string[]): Promise<CliResult> {
   }
 
   const parsed = matter(content);
-  const schema = await loadTemplate(type);
-  const result = validate(schema, parsed.data);
+  const kind = await loadKind(type);
+  const result = validate(kind.schema, parsed.data);
 
   // Body-section contract (SLICE-0087): the compiled-structure rules enforced at
   // create time also apply after edits. Report required H2 sections that were
   // removed (and unknown ones added) using the same template as the source of truth.
-  const templateBody = matter(normalizeInlineMaps(await Bun.file(resolveTemplatePath(`${type}.md`)).text())).content;
-  const fieldNames = new Set(schema.fields.map((field) => field.name));
-  const drift = bodySectionDrift(templateBody, fieldNames, parsed.content);
+  const drift = kind.sectionDrift(parsed.content);
 
   // SLICE-0088: a uniform {field,reason,expected} error list across schema and
   // body checks, so --json emits {ok,type,errors:[...]} and human mode prints

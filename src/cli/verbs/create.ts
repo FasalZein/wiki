@@ -1,4 +1,3 @@
-import matter from "gray-matter";
 import { join, relative } from "node:path";
 
 import {
@@ -21,12 +20,12 @@ import {
   setField,
   supersedeArtifact,
 } from "../../artifacts/store";
-import { authoredSections } from "../../artifacts/body";
+import { loadKind } from "../../artifacts/body";
 import { projectPath } from "../../artifacts/paths";
 import { DEFAULT_STRUCTURE, loadStructure, parentBacklink, type Structure } from "../../artifacts/registry";
 import { assertProjectStructure, loadProjectConfig, ProjectConfigError } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
-import { loadTemplate, normalizeInlineMaps, resolveTemplatePath, type TemplateType } from "../../schema/load";
+import { type TemplateType } from "../../schema/load";
 import type { CliResult } from "../dispatch";
 import { emitJson, emitJsonError, jsonEnabled } from "../output";
 import { parseCommand, stringValue } from "../parse";
@@ -132,10 +131,9 @@ const NON_FLAG_FIELDS: ReadonlySet<string> = new Set([
  * untouched and fill their `{{...}}` section.
  */
 async function createGeneric(kind: TemplateType, args: string[], presetCategory?: string): Promise<CliResult> {
-  const schema = await loadTemplate(kind);
-  const template = await Bun.file(resolveTemplatePath(`${kind}.md`)).text();
-  const schemaNames = new Set(schema.fields.map((field) => field.name));
-  const placeholders = authoredSections(matter(normalizeInlineMaps(template)).content, schemaNames).map((s) => s.placeholder);
+  const kindDef = await loadKind(kind);
+  const schema = kindDef.schema;
+  const placeholders = kindDef.authoredSections().map((s) => s.placeholder);
 
   // One derived classification drives BOTH the parser config and value
   // extraction below — schema fields (minus the CLI/override-owned set) tagged

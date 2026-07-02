@@ -4,13 +4,13 @@ import { join, relative } from "node:path";
 import matter from "gray-matter";
 
 import { orderBySchema } from "../../artifacts/render";
-import { bodySectionDrift } from "../../artifacts/body";
+import { loadKind } from "../../artifacts/body";
 import { loadStructure, type Structure } from "../../artifacts/registry";
 import { slugifyTitle } from "../../artifacts/store";
 import { projectPath } from "../../artifacts/paths";
 import { assertProjectStructure, loadProjectConfig, ProjectConfigError, projectErrorMessage } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
-import { loadTemplate, normalizeInlineMaps, resolveTemplatePath, type TemplateType } from "../../schema/load";
+import { loadTemplate, type TemplateType } from "../../schema/load";
 import { booleanValue, parseCommand } from "../parse";
 import { resolveProject } from "../resolve-project";
 import { emitJson, jsonEnabled } from "../output";
@@ -219,10 +219,8 @@ async function diagnoseBodySections(content: string, file: string, structure: St
   if (type === undefined) return [];
   const data = frontmatterOf(content);
   if (data === undefined || typeof data.id !== "string") return []; // identity covers id-less files
-  const schema = await loadTemplate(type);
-  const templateBody = matter(normalizeInlineMaps(await Bun.file(resolveTemplatePath(`${type}.md`)).text())).content;
-  const fieldNames = new Set(schema.fields.map((field) => field.name));
-  const drift = bodySectionDrift(templateBody, fieldNames, matter(content).content);
+  const kind = await loadKind(type);
+  const drift = kind.sectionDrift(matter(content).content);
   const findings: string[] = [];
   for (const heading of drift.missing) {
     findings.push(`${file}: missing required body section "## ${heading}" — hint: add the section back`);

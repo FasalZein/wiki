@@ -8,12 +8,10 @@
  * bucket's config-declared `criteria`.
  */
 
-import matter from "gray-matter";
-
-import { classifyBodySections } from "../../artifacts/body";
+import { loadKind } from "../../artifacts/body";
 import { loadStructure, type Structure } from "../../artifacts/registry";
 import { getVaultRoot } from "../../config/vault";
-import { loadTemplate, normalizeInlineMaps, resolveTemplatePath, type TemplateType } from "../../schema/load";
+import { type TemplateType } from "../../schema/load";
 import type { CliResult } from "../dispatch";
 import { emitJson, emitJsonError, jsonEnabled } from "../output";
 import { parseCommand } from "../parse";
@@ -31,8 +29,8 @@ export async function handleSchema(args: string[]): Promise<CliResult> {
     return { code: 1 };
   }
 
-  const schema = await loadTemplate(resolved.template);
-  const fields = schema.fields.map((field) => ({
+  const kind = await loadKind(resolved.template);
+  const fields = kind.schema.fields.map((field) => ({
     name: field.name,
     type: field.type,
     required: field.required,
@@ -44,9 +42,7 @@ export async function handleSchema(args: string[]): Promise<CliResult> {
   // the ones an author supplies via --body (authorable) and the ones the CLI
   // renders from fields (machine-owned), so the contract is discoverable, not
   // learnable only by failing.
-  const templateText = await Bun.file(resolveTemplatePath(`${resolved.template}.md`)).text();
-  const fieldNames = new Set(schema.fields.map((field) => field.name));
-  const sections = classifyBodySections(matter(normalizeInlineMaps(templateText)).content, fieldNames);
+  const sections = kind.bodySections();
 
   if (jsonEnabled()) {
     emitJson({

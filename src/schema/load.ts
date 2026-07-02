@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 import type { Constraints, FieldDef, FieldType, Schema } from "./types";
 import { isRecord } from "../util";
 
-export function resolveTemplatePath(filename: string): string {
+function resolveTemplatePath(filename: string): string {
   // Dev mode: src/schema/ -> ../../templates. Bundled: dist/ -> ./templates
   // (the build copies templates/ into dist/templates so a relocated dist works).
   const fromSrc = resolve(import.meta.dir, "..", "..", "templates", filename);
@@ -33,13 +33,30 @@ const fieldTypes: ReadonlySet<string> = new Set<FieldType>([
   "file_ref",
 ]);
 
+/**
+ * The whole compiled template — everything one file-read + one matter-parse
+ * yields. `loadKind` (src/artifacts/body.ts) wraps this with the section-contract
+ * and render behaviour; callers never re-read the file or re-run `matter`.
+ */
+export type CompiledTemplate = {
+  schema: Schema;
+  /** The template body (frontmatter stripped), source for the section contract. */
+  templateBody: string;
+  /** Per-field `default:` values declared in the template's schema frontmatter. */
+  templateDefaults: Record<string, unknown>;
+};
+
 // Templates are immutable data shipped beside the binary (resolveTemplatePath
 // never reads the vault), so the parse is identical for a given kind across the
 // whole run — memoize it here so create/fmt/store/mutate/validate share one
 // parse instead of each re-reading the file. Replaces fmt's bespoke schemaCache.
-const templateCache = new Map<TemplateType, Promise<Schema>>();
+const templateCache = new Map<TemplateType, Promise<CompiledTemplate>>();
 
 export function loadTemplate(type: TemplateType): Promise<Schema> {
+  return loadCompiledTemplate(type).then((compiled) => compiled.schema);
+}
+
+export function loadCompiledTemplate(type: TemplateType): Promise<CompiledTemplate> {
   let cached = templateCache.get(type);
   if (cached === undefined) {
     cached = parseTemplate(type);
@@ -48,7 +65,7 @@ export function loadTemplate(type: TemplateType): Promise<Schema> {
   return cached;
 }
 
-async function parseTemplate(type: TemplateType): Promise<Schema> {
+async function parseTemplate(type: TemplateType): Promise<CompiledTemplate> {
   const file = Bun.file(resolveTemplatePath(`${type}.md`));
   const parsed = matter(normalizeInlineMaps(await file.text()));
 
@@ -62,11 +79,16 @@ async function parseTemplate(type: TemplateType): Promise<Schema> {
     throw new Error(`Template ${type} is missing schema`);
   }
 
-  return {
+  const schema: Schema = {
     template: parsed.data.template,
     version: parsed.data.version,
     fields: Object.entries(parsed.data.schema).map(([name, raw]) => parseField(type, name, raw)),
   };
+  const templateDefaults: Record<string, unknown> = {};
+  for (const [name, raw] of Object.entries(parsed.data.schema)) {
+    if (isRecord(raw) && raw.default !== undefined) templateDefaults[name] = raw.default;
+  }
+  return { schema, templateBody: parsed.content, templateDefaults };
 }
 
 function parseField(template: string, name: string, raw: unknown): FieldDef {
@@ -107,6 +129,6 @@ function isFieldType(value: unknown): value is FieldType {
   return typeof value === "string" && fieldTypes.has(value);
 }
 
-export function normalizeInlineMaps(template: string): string {
+function normalizeInlineMaps(template: string): string {
   return template.replace(/^(\s*[A-Za-z0-9_]+):(\s*\{)/gm, "$1: $2");
 }

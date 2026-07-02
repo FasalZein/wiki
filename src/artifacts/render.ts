@@ -1,18 +1,15 @@
 import matter from "gray-matter";
 
-import { normalizeInlineMaps } from "../schema/load";
 import type { NormalizedRecord, Schema } from "../schema/types";
-import { isRecord } from "../util";
 
 export function renderArtifact(
-  template: string,
+  templateBody: string,
   values: NormalizedRecord,
   bodySections?: Record<string, string>,
 ): string {
-  const parsed = matter(normalizeInlineMaps(template));
   // Templater scripts are for manual creation inside Obsidian only — leaked
   // into a rendered artifact they execute on file creation and prompt the user.
-  const noTemplater = parsed.content.replace(/<!--\s*<%\*[\s\S]*?-->\n*/g, "");
+  const noTemplater = templateBody.replace(/<!--\s*<%\*[\s\S]*?-->\n*/g, "");
   const stripped = stripGuidanceForFilled(noTemplater, bodySections);
   const withLists = renderEachBlocks(stripped, values);
   const body = withLists.replace(/{{([A-Za-z0-9_]+)}}/g, (_placeholder: string, name: string) => {
@@ -88,11 +85,13 @@ export function orderBySchema(schema: Schema, record: NormalizedRecord): Normali
   return ordered;
 }
 
-export function applyDefaults(schema: Schema, template: string, input: Record<string, unknown>): NormalizedRecord {
+export function applyDefaults(
+  schema: Schema,
+  templateDefaults: Record<string, unknown>,
+  input: Record<string, unknown>,
+): NormalizedRecord {
   const values: NormalizedRecord = { ...input };
   const today = new Date().toISOString().slice(0, 10);
-
-  const templateDefaults = readTemplateDefaults(template);
 
   for (const field of schema.fields) {
     if (values[field.name] !== undefined) {
@@ -109,19 +108,4 @@ export function applyDefaults(schema: Schema, template: string, input: Record<st
   }
 
   return values;
-}
-
-function readTemplateDefaults(template: string): Record<string, unknown> {
-  const parsed = matter(normalizeInlineMaps(template));
-  const rawSchema = parsed.data.schema;
-  if (!isRecord(rawSchema)) {
-    return {};
-  }
-  const defaults: Record<string, unknown> = {};
-  for (const [fieldName, rawField] of Object.entries(rawSchema)) {
-    if (isRecord(rawField) && rawField.default !== undefined) {
-      defaults[fieldName] = rawField.default;
-    }
-  }
-  return defaults;
 }

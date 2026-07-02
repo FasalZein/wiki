@@ -2,8 +2,8 @@ import matter from "gray-matter";
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, sep } from "node:path";
 
-import { loadTemplate, normalizeInlineMaps, resolveTemplatePath, type TemplateType } from "../schema/load";
-import { BodyParseError, parseBodySections } from "./body";
+import { loadTemplate, type TemplateType } from "../schema/load";
+import { BodyParseError, loadKind } from "./body";
 import { validate } from "../schema/validate";
 import type { NormalizedRecord, Schema, ValidationError } from "../schema/types";
 import { type Structure } from "./registry";
@@ -15,7 +15,7 @@ import { artifactDirectory, assertSafeSegment, projectPath } from "./paths";
 import { ensureCollection, updateCollection } from "../integrations/qmd";
 import { loadProjectConfig } from "../config/project";
 import { isFileNotFound } from "../util";
-import { applyDefaults, orderBySchema, renderArtifact } from "./render";
+import { orderBySchema } from "./render";
 
 export type CreateArtifactInput = {
   type: TemplateType;
@@ -110,11 +110,10 @@ export async function setField(input: SetFieldInput, structure: Structure): Prom
 
 export async function setFields(input: SetFieldsInput, structure: Structure): Promise<Artifact> {
   const existing = await readArtifact(input, structure);
-  const schema = await loadTemplate(input.type);
-  const template = await Bun.file(resolveTemplatePath(`${input.type}.md`)).text();
-  const placeholders = templatePlaceholders(template);
+  const kind = await loadKind(input.type);
+  const placeholders = templatePlaceholders(kind.templateBody);
   for (const field of Object.keys(input.fields)) {
-    assertKnownField(schema, existing, field, placeholders);
+    assertKnownField(kind.schema, existing, field, placeholders);
   }
   return writeFields(input, existing, {
     ...existing.fields,
@@ -241,15 +240,12 @@ export async function preflightCreate(
   fields: Record<string, unknown>,
   body: string | undefined,
 ): Promise<void> {
-  const schema = await loadTemplate(type);
-  const template = await Bun.file(resolveTemplatePath(`${type}.md`)).text();
+  const kind = await loadKind(type);
 
   let absorbed: Record<string, unknown> = {};
   if (body !== undefined) {
-    const fieldNames = new Set(schema.fields.map((field) => field.name));
-    const fieldTypes = new Map(schema.fields.map((field) => [field.name, field.type]));
     try {
-      absorbed = parseBodySections(matter(normalizeInlineMaps(template)).content, fieldNames, body, fieldTypes).absorbed;
+      absorbed = kind.parseBody(body).absorbed;
     } catch (error) {
       if (error instanceof BodyParseError) {
         throw new ArtifactValidationError([{ field: "body", reason: error.message }]);
@@ -263,8 +259,8 @@ export async function preflightCreate(
   // id is not spuriously flagged as required. Absorbed body fields (a machine-owned
   // section parsed into its backing field) are validated alongside the flags.
   const minted = new Set(["id", "aliases", "created", "updated", "session_date"]);
-  const checkSchema: Schema = { ...schema, fields: schema.fields.filter((field) => !minted.has(field.name)) };
-  const withDefaults = applyDefaults(schema, template, { ...fields, ...absorbed });
+  const checkSchema: Schema = { ...kind.schema, fields: kind.schema.fields.filter((field) => !minted.has(field.name)) };
+  const withDefaults = kind.applyDefaults({ ...fields, ...absorbed });
   const result = validate(checkSchema, withDefaults);
   if (!result.ok) {
     throw new ArtifactValidationError(result.errors);
@@ -273,9 +269,8 @@ export async function preflightCreate(
 
 export async function createArtifact(input: CreateArtifactInput): Promise<Artifact> {
   const structure = input.structure;
-  const schema = await loadTemplate(input.type);
-  const templateFile = Bun.file(resolveTemplatePath(`${input.type}.md`));
-  const template = await templateFile.text();
+  const kind = await loadKind(input.type);
+  const schema = kind.schema;
   const suppliedAliases = Array.isArray(input.fields.aliases) ? input.fields.aliases.map(String) : [];
 
   // bodySections parsing is the same every attempt — compute once. A machine-owned
@@ -284,10 +279,8 @@ export async function createArtifact(input: CreateArtifactInput): Promise<Artifa
   let bodySections: Record<string, string> | undefined;
   let absorbedFields: Record<string, unknown> = {};
   if (input.body !== undefined) {
-    const fieldNames = new Set(schema.fields.map((field) => field.name));
-    const fieldTypes = new Map(schema.fields.map((field) => [field.name, field.type]));
     try {
-      const parsed = parseBodySections(matter(normalizeInlineMaps(template)).content, fieldNames, input.body, fieldTypes);
+      const parsed = kind.parseBody(input.body);
       bodySections = parsed.sections;
       absorbedFields = parsed.absorbed;
     } catch (error) {
@@ -301,12 +294,12 @@ export async function createArtifact(input: CreateArtifactInput): Promise<Artifa
   return mintAndWrite({ type: input.type, vaultRoot: input.vaultRoot, project: input.project, structure }, (id) => {
     const aliases = suppliedAliases.includes(id) ? suppliedAliases : [id, ...suppliedAliases];
     // Absorbed body fields fill in first; an explicit flag of the same name wins.
-    const fields = applyDefaults(schema, template, { ...absorbedFields, ...input.fields, id, aliases, project: input.project });
-    const result = validate(schema, fields);
+    const fields = kind.applyDefaults({ ...absorbedFields, ...input.fields, id, aliases, project: input.project });
+    const result = kind.validate(fields);
     if (!result.ok) {
       throw new ArtifactValidationError(result.errors);
     }
-    const content = renderArtifact(template, orderBySchema(schema, result.value), bodySections);
+    const content = kind.render(orderBySchema(schema, result.value), bodySections);
     const path = artifactPath(input.type, input.vaultRoot, input.project, id, String(result.value.title ?? id), structure, input.category);
     return { path, content, fields: result.value };
   });

@@ -1,15 +1,23 @@
 /**
- * Authored-body parsing for one-shot artifact creation (ADR-0031).
+ * The compiled Kind (ADR-0045 item 1): schema + template body + section
+ * contract + render behind one cached interface. `loadKind(type)` is the single
+ * seam create/validate/schema/fmt/store ask instead of each re-running the
+ * loadTemplate + Bun.file().text() + matter(normalizeInlineMaps(...)) + Set
+ * ritual — so the section contract has exactly one definition.
  *
  * A template body has two kinds of H2 sections: authored sections, whose
  * heading sits directly over a `{{placeholder}}` line that is not a schema
  * field (their content comes from the caller), and machine-owned sections
  * rendered by the CLI from fields. `--body` input may only supply authored
  * sections; the mapping is derived from the template so the contract can
- * never drift from it.
+ * never drift from it. The four section functions below are the private
+ * implementation of the Kind's section methods (ADR-0031/ADR-0044).
  */
 
-import type { FieldType } from "../schema/types";
+import { loadCompiledTemplate, type TemplateType } from "../schema/load";
+import type { FieldType, NormalizedRecord, Schema } from "../schema/types";
+import { validate } from "../schema/validate";
+import { applyDefaults, renderArtifact } from "./render";
 
 export class BodyParseError extends Error {}
 
@@ -20,9 +28,64 @@ export type AuthoredSection = { heading: string; placeholder: string };
  *  backing schema field (absorbed) rather than rejected. */
 export type ParsedBody = { sections: Record<string, string>; absorbed: Record<string, unknown> };
 
+/**
+ * A compiled kind: the schema, the field-name set, the parsed template body, and
+ * the section-contract + render + validate methods every verb needs. One file
+ * read + one matter parse per kind per process (memoized via loadCompiledTemplate
+ * and the kind cache below).
+ */
+export type Kind = {
+  schema: Schema;
+  fieldNames: Set<string>;
+  templateBody: string;
+  /** Headings an author supplies via `--body` (heading over a non-field placeholder). */
+  authoredSections(): AuthoredSection[];
+  /** The authorable/machine-owned split, each machine-owned section with its flags. */
+  bodySections(): BodySectionInfo;
+  /** Required sections missing from a rendered body, and unknown ones added. */
+  sectionDrift(artifactBody: string): { missing: string[]; unknown: string[] };
+  /** Parse `--body` into placeholder sections + absorbed machine-owned fields. */
+  parseBody(supplied: string): ParsedBody;
+  /** Render the template body with values (and any authored sections) into an artifact. */
+  render(values: NormalizedRecord, sections?: Record<string, string>): string;
+  /** Fill schema/template defaults onto an input record. */
+  applyDefaults(input: Record<string, unknown>): NormalizedRecord;
+  /** Validate a field record against this kind's schema. */
+  validate(fields: Record<string, unknown>): ReturnType<typeof validate>;
+};
+
+const kindCache = new Map<TemplateType, Promise<Kind>>();
+
+export function loadKind(type: TemplateType): Promise<Kind> {
+  let cached = kindCache.get(type);
+  if (cached === undefined) {
+    cached = buildKind(type);
+    kindCache.set(type, cached);
+  }
+  return cached;
+}
+
+async function buildKind(type: TemplateType): Promise<Kind> {
+  const { schema, templateBody, templateDefaults } = await loadCompiledTemplate(type);
+  const fieldNames = new Set(schema.fields.map((field) => field.name));
+  const fieldTypes = new Map(schema.fields.map((field) => [field.name, field.type]));
+  return {
+    schema,
+    fieldNames,
+    templateBody,
+    authoredSections: () => authoredSections(templateBody, fieldNames),
+    bodySections: () => classifyBodySections(templateBody, fieldNames),
+    sectionDrift: (artifactBody) => bodySectionDrift(templateBody, fieldNames, artifactBody),
+    parseBody: (supplied) => parseBodySections(templateBody, fieldNames, supplied, fieldTypes),
+    render: (values, sections) => renderArtifact(templateBody, values, sections),
+    applyDefaults: (input) => applyDefaults(schema, templateDefaults, input),
+    validate: (fields) => validate(schema, fields),
+  };
+}
+
 const H2_RE = /^## (.+)$/;
 
-export function authoredSections(templateBody: string, schemaFields: Set<string>): AuthoredSection[] {
+function authoredSections(templateBody: string, schemaFields: Set<string>): AuthoredSection[] {
   const sections: AuthoredSection[] = [];
   const lines = templateBody.split("\n");
   for (let i = 0; i < lines.length; i++) {
@@ -38,7 +101,7 @@ export function authoredSections(templateBody: string, schemaFields: Set<string>
   return sections;
 }
 
-export function parseBodySections(
+function parseBodySections(
   templateBody: string,
   schemaFields: Set<string>,
   supplied: string,
@@ -132,7 +195,7 @@ export type BodySectionInfo = {
   machineOwned: Array<{ heading: string; flags: string[] }>;
 };
 
-export function classifyBodySections(templateBody: string, schemaFields: Set<string>): BodySectionInfo {
+function classifyBodySections(templateBody: string, schemaFields: Set<string>): BodySectionInfo {
   const authored = new Set(authoredSections(templateBody, schemaFields).map((s) => normalize(s.heading)));
   const authorable: string[] = [];
   const machineOwned: Array<{ heading: string; flags: string[] }> = [];
@@ -210,7 +273,7 @@ function normalize(heading: string): string {
  * authored nor machine-owned). Machine-owned sections (rendered by the CLI) are
  * not required after edits. Heading match is case-insensitive; order isn't enforced.
  */
-export function bodySectionDrift(
+function bodySectionDrift(
   templateBody: string,
   schemaFields: Set<string>,
   artifactBody: string,

@@ -15,9 +15,7 @@ import { Glob } from "bun";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
-import { resolveTemplatePath, loadTemplate, normalizeInlineMaps } from "../src/schema/load";
-import { authoredSections } from "../src/artifacts/body";
-import { renderArtifact } from "../src/artifacts/render";
+import { loadKind } from "../src/artifacts/body";
 
 const VAULT = process.env.KNOWLEDGE_VAULT_ROOT ?? join(homedir(), "Knowledge");
 const WRITE = process.argv.includes("--write");
@@ -54,33 +52,30 @@ async function main() {
 
     const id = typeof parsed.data.id === "string" ? parsed.data.id : "";
     const prefix = id.split("-")[0];
-    const kind = KIND_BY_PREFIX[prefix];
-    if (!kind) {
+    const kindName = KIND_BY_PREFIX[prefix];
+    if (!kindName) {
       console.warn(`SKIP (unknown kind): ${rel}  id=${id || "(none)"}`);
       continue;
     }
     scanned++;
 
-    const templateText = await readFile(resolveTemplatePath(`${kind}.md`), "utf-8");
-    const schema = await loadTemplate(kind);
-    const schemaFields = new Set(schema.fields.map((f) => f.name));
-    const templateBody = matter(normalizeInlineMaps(templateText)).content;
-    const authored = authoredSections(templateBody, schemaFields);
+    const kind = await loadKind(kindName);
+    const authored = kind.authoredSections();
 
     // Every authored (forge-lost) section gets the honest placeholder.
     const bodySections: Record<string, string> = {};
     for (const s of authored) bodySections[s.placeholder] = LOSS_NOTE;
 
-    const content = renderArtifact(templateText, parsed.data as any, bodySections);
+    const content = kind.render(parsed.data as any, bodySections);
 
     if (WRITE) {
       await writeFile(abs, content, "utf-8");
       migrated++;
     } else {
       migrated++;
-      if (!seenKinds.has(kind)) {
-        seenKinds.add(kind);
-        samples.push(`\n===== DRY-RUN SAMPLE (${kind}) ${rel} =====\n${content}`);
+      if (!seenKinds.has(kindName)) {
+        seenKinds.add(kindName);
+        samples.push(`\n===== DRY-RUN SAMPLE (${kindName}) ${rel} =====\n${content}`);
       }
     }
   }
