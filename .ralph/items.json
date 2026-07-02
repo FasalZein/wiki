@@ -14,122 +14,70 @@
   "items": [
     {
       "category": "functional",
-      "description": "SLICE-0119 Research becomes a vault kind, not a separate qmd collection (ADR-0039, dissolves G2+G9). No blockers. Soft-order: prefer before the incremental-update item, both touch cli-search.test.ts. Owns the README [research] block + research_path config removal (the cleanup item does NOT touch [research]).",
+      "description": "ITEM-1: Add three new first-class artifact kinds — plan (PLAN-, folder plans), visual (VIS-, folder visuals), review (REV-, folder reviews) — to DEFAULT_KINDS/DEFAULT_BUCKETS in src/artifacts/registry.ts AND the repo-root wiki.json, kept byte-aligned so the loadStructure-matches-default check and registry-config.test.ts stay green. Each kind needs a templates/<kind>.md carrying a frontmatter schema (id, project, title, summary required; plus kind-appropriate fields) and authored body H2 sections. No blockers. Foundational for all other items.",
       "steps": [
-        "Remove the literal `research` qmd collection registration from `wiki sync` (src/cli/verbs/sync.ts) and the research query path from `wiki search` (src/cli/verbs/search.ts), including the --include-research flag plumbing on both and in src/cli/usage.ts.",
-        "Remove the per-project `research_path` field from ProjectConfig (src/config/project.ts) and every reader (sync.ts, search.ts); drop the stale research_path header comment in src/integrations/qmd.ts.",
-        "Delete the dead `[research] sources` config example from README.md.",
-        "Confirm research files into the existing doc section's `research` bucket via the config-driven tree: `wiki create research` (or --category research) writes to docs/research/ with a DOC id and is returned by ordinary `wiki search`.",
-        "Update pinned tests that exercised --include-research / research_path to the new contract (do not silently delete; rewrite to the no-research-collection behavior). Use a TEMP vault.",
-        "Run bun run build, bunx tsc --noEmit, bun run test — all green — and commit."
+        "Add plan/visual/review to DEFAULT_KINDS with prefix, folder, dedup (true for plan/review, true for visual), and skill left unset for now (ITEM-4 wires skills).",
+        "Add matching entries to the repo-root wiki.json kinds map so it stays equal to DEFAULT_STRUCTURE; verify with the existing loadStructure-vs-DEFAULT_STRUCTURE comparison.",
+        "Create templates/plan.md, templates/visual.md, templates/review.md each with required id/project/title/summary fields and at least one authored H2 body section, following templates/doc.md as the shape reference.",
+        "Run a temp-vault smoke: wiki create plan --title <t> --summary <s> --project p --body - writes projects/p/plans/PLAN-0001-*.md; same for visual and review; wiki schema plan|visual|review prints the fields.",
+        "Update registry-config.test.ts (or add a test) to pin the three new kinds' prefix/folder, and confirm wiki create/schema for each works end-to-end in a temp vault.",
+        "Run all three gates green."
       ],
-      "passes": true,
+      "passes": false,
       "regression_notes": ""
     },
     {
       "category": "functional",
-      "description": "SLICE-0120 Capture is honest on frontmatter (G1, ADR-0040 capture side). No blockers. NOTE: capture sees every write (hook passes raw path, no area filter), so this is frontmatter-only — a bare draft stays silent; the forgot-to-stamp net is item 0125's session-end reminder. Most of the warn/idempotent behavior already exists in capture.ts; the deliverable is pinning the contract with tests and ensuring an id/template draft that resolves to no kind WARNS rather than returning null.",
+      "description": "ITEM-2: Add a sidecar-asset write path to wiki create, routed through mintAndWrite in src/artifacts/store.ts (the one create/capture seam). A create flag (e.g. --asset <path>) adopts an existing external file (verbatim copy) into the vault beside the minted Markdown, with the same <ID>-<slug> basename and the source file's extension, and records the vault-relative asset path in a frontmatter asset field (reuse the existing file_ref field type). The Markdown spine stays the searchable/indexed artifact; the asset is copied as-is. Keep the copy outside the per-project lock (the lock wraps only allocate->write). Blocked by ITEM-1.",
       "steps": [
-        "In src/artifacts/capture.ts confirm/ensure: a draft stamped `template:<kind>` resolvable against the per-vault structure files into that kind via mintAndWrite on a temp vault.",
-        "Ensure a draft carrying id: or template: that resolves to NO registered kind returns the 'authored but not captured — kind unknown' warn outcome (not null, not a write).",
-        "Ensure a write with no id and no template frontmatter returns null (silent) — document in the test why a bare draft cannot warn (capture sees every write).",
-        "Ensure re-firing capture on an already-filed (id-stamped) draft is idempotent (files once).",
-        "Add tests pinning each branch; the unknown-kind test must fail if capture regresses to returning null on an id/template-bearing draft. Use a TEMP vault.",
-        "Run all three gates green and commit."
+        "Add an optional `asset` field (type file_ref) to the visual template (the primary asset-bearing kind); allow it on any kind generically.",
+        "Add a --asset <path> flag to wiki create that reads the source file, mints the artifact, then writes the asset beside the .md with basename <ID>-<slug> and the source extension; store the vault-relative path in the asset frontmatter field.",
+        "Route the sidecar write so it is part of the same create flow as mintAndWrite without holding the per-project lock during the file copy.",
+        "Fail clearly (non-zero, no partial artifact) when --asset points at a missing/unreadable file; do not leave an orphan .md or orphan asset.",
+        "Temp-vault end-to-end: wiki create visual --title <t> --summary <s> --project p --asset /tmp/x.html writes projects/p/visuals/VIS-0001-slug.md AND VIS-0001-slug.html with matching basenames, and the .md frontmatter asset field points at the .html; confirm wiki search (against a fake/mock qmd or the test's qmd harness) still finds the artifact by its Markdown text.",
+        "Add a test that fails if the asset basename diverges from the .md basename or the asset field is missing; run all three gates green."
       ],
-      "passes": true,
+      "passes": false,
       "regression_notes": ""
     },
     {
       "category": "functional",
-      "description": "SLICE-0121 Per-project allocation lock prevents the duplicate-id race (G3, ADR-0041 lock side). No blockers. SHARED-SEAM RULE: implement the lock INSIDE mintAndWrite in src/artifacts/store.ts so it covers both create and capture without editing capture.ts.",
+      "description": "ITEM-3: Asset retrieval by id. Extend wiki path (or add a focused verb) to resolve an artifact id to its sidecar asset path, including a --json result. Reading is a pure vault read (no qmd). An id with no asset returns a clear not-found-style result, not a crash. Blocked by ITEM-2.",
       "steps": [
-        "Add a short-lived per-project lockfile under <vault>/.wiki/ (or project dir), created with the `wx` exclusive flag and carrying a stale-lock timeout so a crashed writer cannot wedge the vault.",
-        "Wrap the allocate-id -> write-file critical section in mintAndWrite (store.ts) with acquire/release; release on BOTH success and error paths.",
-        "Ensure two near-simultaneous creates in one project yield distinct ids (deterministic test, not timing-flaky); a stale lockfile past timeout is reclaimed (no deadlock); creates in different projects do not contend.",
-        "Tests use a TEMP vault only.",
-        "Run all three gates green and commit."
+        "Resolve an artifact id to its asset path from the frontmatter asset field (verify the asset file exists on disk).",
+        "Surface it via wiki path <id> --asset (or an equivalent documented verb) printing the absolute asset path; --json returns { id, asset } (and { error } shape on stderr when absent).",
+        "An id that has no asset, or whose asset file is missing, returns a clear message and non-zero exit, never a stack trace.",
+        "Temp-vault end-to-end: create a visual with --asset, then resolve its asset path by id (text and --json), and confirm the path points at the on-disk .html.",
+        "Add a test for both the has-asset and no-asset cases; run all three gates green."
       ],
-      "passes": true,
+      "passes": false,
       "regression_notes": ""
     },
     {
       "category": "functional",
-      "description": "SLICE-0122 wiki doctor --fix repairs duplicate ids and spine drift (ADR-0043). No blockers. Most complex item: id renumber PLUS rewrite of all inbound [[id]] links and aliases. Reuse existing reference-collection infra.",
+      "description": "ITEM-4: Wire the skill->kind map and document the extension pattern. In the repo-root wiki.json (and DEFAULT_KINDS, kept aligned), set skill: improve on plan, skill: visual-explainer on visual, and a reviewer/review skill on review. Document in wiki.json's _comment and skills/wiki/SKILL.md how to add a new artifact-producing skill (add a kind with a skill field + a templates/<kind>.md; the per-runtime hook maps the skill to the kind). Blocked by ITEM-1.",
       "steps": [
-        "Add a --fix mode to wiki doctor (src/bootstrap/doctor.ts + src/cli/verbs/vault.ts or the doctor verb) that renumbers duplicate ids (keep one canonical, reassign the other from the section id-space) and updates inbound [[id]] links and aliases so references still resolve.",
-        "Also apply the mechanical fixes fmt --write already does.",
-        "Ensure doctor WITHOUT --fix stays detect-only (no writes); a vault with two PRD-0005 files is repaired to distinct ids; a second --fix run is idempotent.",
-        "Tests cover the link-rewriting path, not just the renumber; use a TEMP vault.",
-        "Run all three gates green and commit."
+        "Set the skill field on plan (improve), visual (visual-explainer), and review (the review skill name) in both DEFAULT_KINDS and the repo-root wiki.json, kept byte-aligned with DEFAULT_STRUCTURE.",
+        "Confirm structure.skillForKind / the skill->kind reverse map resolves improve->plan, visual-explainer->visual, review-skill->review (mirror the existing skill-map assertions in registry-config.test.ts).",
+        "Update wiki.json _comment and the relevant SKILL.md section to describe the add-a-skill pattern (new kind + skill field + template) so future artifact-producing skills can be centralized without code changes.",
+        "Temp-vault check: the skill->kind map returns the new mappings; existing mappings (to-prd->prd, etc.) are unchanged.",
+        "Update/extend the skill-map test to pin the three new mappings; run all three gates green."
       ],
-      "passes": true,
+      "passes": false,
       "regression_notes": ""
     },
     {
       "category": "functional",
-      "description": "SLICE-0123 doctor --setup honest about non-Pi subagent capture reach (G7, ADR-0043). No blockers. The empirical 'does Codex/Claude PostToolUse reach the hook' question is PRE-ANSWERED as unverified — do NOT run Codex/Claude to confirm; the code defaults non-Pi to 'unverified' and the loop only delivers the testable reporting change.",
+      "description": "ITEM-5: Sidecar lifecycle integrity. The asset follows its artifact through delete, relocate, retitle, fmt, and doctor: wiki delete removes the asset alongside the .md; relocate/retitle move/rename the asset to keep the <ID>-<slug> basename paired with the .md; fmt's rename-to-id-slug renames the asset too; doctor does NOT flag a correctly-named sidecar asset as a loose/undeclared file. Blocked by ITEM-2.",
       "steps": [
-        "In src/bootstrap/setup-doctor.ts (+ the doctor --setup caller), change the capture-reach report from blanket-healthy to per-harness: Pi is bridge-checkable via ~/.pi allowlists; Codex/Claude are reported 'unverified / Pi-subagent-only'.",
-        "Default the non-Pi reach to 'unverified' from ADR-0043 context (no harness execution).",
-        "Add a test asserting doctor --setup output distinguishes Pi from non-Pi capture reach.",
-        "Record in this item's progress entry that non-Pi reach was pre-answered (unverified), not empirically run.",
-        "Run all three gates green and commit."
+        "On wiki delete <id> [--force], remove the sidecar asset file in the same operation as the .md (and keep the existing inbound-link scrub behavior).",
+        "On retitle and cross/same-section relocate, move/rename the asset so its basename stays <new-ID-or-slug> matching the moved .md.",
+        "In fmt --write rename-to-id-slug, rename the asset alongside the .md so the pair never drifts.",
+        "In doctor's loose-file/structure check, treat a sidecar asset whose basename matches a sibling .md as part of that artifact (not a loose file); a truly orphaned asset (no matching .md) may still be reported.",
+        "Temp-vault end-to-end: create a visual with --asset, then (a) retitle it and confirm both files renamed and paired, (b) delete it and confirm both files gone, (c) run doctor and confirm the sidecar is not reported as drift; verify fmt --write keeps the pair aligned after an induced filename drift.",
+        "Add tests covering delete-removes-asset, retitle/relocate-moves-asset, and doctor-ignores-paired-sidecar; run all three gates green."
       ],
-      "passes": true,
-      "regression_notes": ""
-    },
-    {
-      "category": "functional",
-      "description": "SLICE-0124 Docs, metadata, and qmd collection-list parse cleanup (G12/G13 + distribution/metadata). No blockers. Does NOT touch the README [research] block (item 0119 owns that).",
-      "steps": [
-        "package.json: rewrite the stale description ('locked Obsidian vault') to the current de-workflowed artifact-store framing; move version off 0.0.0.",
-        "README.md: replace the locked-doc-category language with the config-driven section/bucket model (ADR-0037/PRD-0019). Leave the [research] block to item 0119.",
-        "Harden qmd collection-list parsing (src/integrations/qmd.ts): prefer a `--json` collection-list form (or a version-robust parse) so a qmd output-format change does not masquerade as 'never synced'. Pin with a test.",
-        "Run all three gates green and commit."
-      ],
-      "passes": true,
-      "regression_notes": ""
-    },
-    {
-      "category": "functional",
-      "description": "SLICE-0125 Skill->kind routing + draft-stamp authoring contract (ADR-0040 routing side). BLOCKED BY SLICE-0120 (capture G1 must land first). kindForSkill already exists; the real deliverables are the stamp-template contract doc and the reminder string change.",
-      "steps": [
-        "Confirm the wiki.json `skill` field resolves a skill to its kind (kindForSkill in src/artifacts/registry.ts); pin the mapping with a test.",
-        "Document the stamp-`template:<kind>` (and `project:`) authoring contract in the bundled skill skills/wiki/SKILL.md.",
-        "Update the write/session-end hook guidance string (src/cli/verbs/hooks.ts STOP_REMINDER / hookGuidance) to name the stamp-template step, not only 'run wiki create'; assert the new wording in tests/cli-hook.test.ts.",
-        "Add an end-to-end test: a draft stamped per the contract is captured into the configured kind on a TEMP vault.",
-        "Run all three gates green and commit."
-      ],
-      "passes": true,
-      "regression_notes": ""
-    },
-    {
-      "category": "functional",
-      "description": "SLICE-0126 Incremental keyword index update on every write (G4, ADR-0041 freshness side; amends PRD-0018). BLOCKED BY SLICE-0121 (lock). SHARED-SEAM RULE: put the qmd update INSIDE mintAndWrite in store.ts (same seam as the lock), NOT at each call site, so it covers create and capture without editing capture.ts. Soft-order after SLICE-0119.",
-      "steps": [
-        "In mintAndWrite (src/artifacts/store.ts), after the write and inside the per-project lock from SLICE-0121, fire a cheap incremental qmd `update` (keyword index only) for the project's collection.",
-        "Keep vector `embed` owned solely by `wiki sync`; the write path must NOT embed.",
-        "Keep `wiki search` a pure read (no qmd update on the read path) — preserve PRD-0018's read-only contract.",
-        "Update PRD-0018's pinned search tests to the amended contract (search read-only, write path owns the keyword update) explicitly — do not delete them.",
-        "Verify after `wiki create` the new artifact is in the keyword index with no manual `wiki sync`; embed runs only on sync. Use a TEMP vault.",
-        "Run all three gates green and commit."
-      ],
-      "passes": true,
-      "regression_notes": ""
-    },
-    {
-      "category": "functional",
-      "description": "SLICE-0127 Capture runs the dedup gate and warns-and-files on a match (G6, ADR-0042). BLOCKED BY SLICE-0120 (capture G1) AND SLICE-0126 (so the dedup qmd refresh runs inside the lock, never unlocked). Capture must never block/prompt (non-interactive hook).",
-      "steps": [
-        "Route the capture path through the same runDedupGate seam wiki create uses (src/artifacts/dedup.ts), inside the per-project locked section.",
-        "On a strong dedup match, FILE the artifact anyway and write 'possible duplicate of [[X]] — review' to stderr; never block, never prompt, never drop (including on a false-positive match).",
-        "Ensure the locked critical section order on the capture path is: dedup refresh+query -> allocate -> write -> qmd update, all inside the one per-project lock (no unlocked qmd touch).",
-        "Leave wiki create's existing advisory dedup behavior unchanged.",
-        "Tests use a TEMP vault; assert a strong-match capture both files and warns, and that nothing is dropped.",
-        "Run all three gates green and commit."
-      ],
-      "passes": true,
+      "passes": false,
       "regression_notes": ""
     }
   ]
