@@ -10,6 +10,17 @@ temp dirs, even when another loaded skill says to write them there. The CLI is
 self-describing: `wiki <verb> --help` is the single source of truth for flags — this
 skill routes you to the right verb, never spells its flags.
 
+## The binding — check before any verb
+
+Every verb — including read verbs like `path` and `links` — resolves `--project`
+from the repo's **binding**: the `<!-- wiki:begin … project=<name> -->` block in
+AGENTS.md/CLAUDE.md. Every command's first output line tells you the state:
+`wiki vault: … | project <name>` means bound; `this repo isn't linked` means every
+call needs `--project <name>` until you bind:
+`wiki project list` (never guess a name), then `wiki project link --project <name>`
+(`wiki project create <name>` first if missing). Hitting
+`no project: pass --project` on any command means you skipped this check.
+
 ## Routing table
 
 Four verbs carry almost every session: **search → create → set → sync**.
@@ -29,11 +40,6 @@ Four verbs carry almost every session: **search → create → set → sync**.
 `--json` works on every verb (even when `--help` omits it): one structured object
 (array for `search`) on stdout, `{error,…}` on stderr.
 
-Cold start — no `<!-- wiki:begin … -->` pointer block in AGENTS.md/CLAUDE.md: run
-`wiki project list`, then `wiki project link --project <name>` (create the project
-first if missing). Never guess a project name. The stamped block is the single
-repo→project binding; once linked, `--project` resolves automatically.
-
 ## Creating
 
 Two paths — pick by size:
@@ -49,7 +55,7 @@ Two paths — pick by size:
   and each error now carries its fix (the flag to pass and its enum values).
 
 - Kinds come from the vault's `wiki.json` (`decision` = ADR); `wiki create --help`
-  lists the active vault's kinds, `wiki schema <kind>` its exact contract.
+  lists them.
 - Author only the **authorable** H2 sections `wiki schema <kind>` lists.
   **Machine-owned** sections are rendered from fields — authoring one as a pure
   `[[ID]]` list is absorbed into its backing field; prose there is rejected with
