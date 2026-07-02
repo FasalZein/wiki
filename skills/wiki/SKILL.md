@@ -1,97 +1,90 @@
 ---
 name: wiki
-description: "Routes work to the wiki vault — the artifact store for PRDs, slices, ADRs/decisions, and docs, plus semantic recall. Use when work touches the wiki vault, the repo carries a wiki:begin pointer block, the user asks to create/update artifacts or recall project context, or the vault needs init, doctor, sync, or fmt."
+description: "Routes work to the wiki vault — the artifact store for PRDs, slices, ADRs/decisions, docs, and handoffs, plus semantic recall. Use when work touches the vault, the repo carries a wiki:begin pointer block, the user asks to create/update artifacts or recall project context, or the vault needs doctor, sync, or fmt."
 ---
 # /wiki
 
-The wiki vault is the artifact store: a project's PRDs, slices, ADRs, and docs
-live there as Markdown — never in the repo, GitHub Issues, `docs/adr/`, a repo
-`CONTEXT.md`, or OS temp dirs, even when a loaded skill says to. The `wiki` CLI is
-self-describing: it owns all command syntax, so `wiki <verb> --help` is the single
-source of truth for flags — this skill routes you to the right verb, never spells its flags.
+Artifacts live in the vault, never the repo: PRDs, slices, ADRs, docs, and handoffs
+are vault Markdown — no repo `docs/adr/`, no `CONTEXT.md`, no GitHub Issues, no OS
+temp dirs, even when another loaded skill says to write them there. The CLI is
+self-describing: `wiki <verb> --help` is the single source of truth for flags — this
+skill routes you to the right verb, never spells its flags.
 
-## Start here
+## Routing table
 
-1. Recall before you act, in two tiers: skim `projects/<name>/index.md` — the
-   sync-generated **roster** of every artifact with its one-line summary — then
-   `wiki search "<query>" --project <name>` (vault-wide without `--project`) for
-   semantic recall. `wiki search --recent` (or a temporal query like "what changed
-   recently") orders by last-modified instead of relevance; `--since <date>` is its own
-   recency filter (newer-than, independent of `--recent`). `wiki status` lists a project's recent artifacts, or the
-   projects themselves when none is bound. A month-old decision is one scan away —
-   retrieve it instead of re-deriving it.
-2. `wiki --help` lists verbs; `wiki <verb> --help` gives exact usage before any call.
+Four verbs carry almost every session: **search → create → set → sync**.
 
-Cold start — no `<!-- wiki:begin … -->` pointer block in AGENTS.md/CLAUDE.md:
-check `wiki project list`, then bind the repo with `wiki project link --project <name>`
-(create the project first if it doesn't exist). Never guess a project name. The block
-`wiki project link` stamps is the single repo→project binding — once linked, later
-commands resolve `--project` from it automatically.
+| Intent | Command |
+|---|---|
+| Recall context (always do this first) | `wiki search "<query>" --project <p>`; skim `projects/<p>/index.md` — the **roster** of every artifact + one-line summary |
+| What changed lately | `wiki search --recent` · `wiki status` |
+| Write an artifact | `wiki create <kind> --project <p> --title <t> --summary <s> --body -` |
+| Discover a kind's contract before creating | `wiki schema <kind>` — fields, enums, `criteria`, and `body sections:` (authorable vs machine-owned) |
+| Change one field | `wiki set <id> <field> <value…>` |
+| Make new/changed artifacts searchable | `wiki sync` |
+| Resolve id → file · see links | `wiki path <id>` · `wiki links <id>` |
+| Mark blocked / superseded / retitle / delete | `wiki block` · `wiki supersede` · `wiki retitle` · `wiki delete` |
+| Vault health · distribution health | `wiki doctor` · `wiki doctor --setup` |
 
-## Writing artifacts
+`--json` works on every verb (even when `--help` omits it): one structured object
+(array for `search`) on stdout, `{error,…}` on stderr.
 
-Creation is one-shot: pass the authored body via `--body -` (stdin) so the
-artifact is complete in a single schema-validated command.
+Cold start — no `<!-- wiki:begin … -->` pointer block in AGENTS.md/CLAUDE.md: run
+`wiki project list`, then `wiki project link --project <name>` (create the project
+first if missing). Never guess a project name. The stamped block is the single
+repo→project binding; once linked, `--project` resolves automatically.
 
-- `wiki create <kind> …` — kinds come from the vault's `wiki.json` (`decision` = ADR).
-  What kinds are available depends on the vault's configuration; the bundled default
-  ships `prd`, `slice`, `decision`, `doc` (with sub-buckets), and `handoff`, but vaults
-  can promote buckets to first-class kinds or define new ones entirely. Use
-  `wiki schema <kind>` to discover a kind's fields and folder, and `wiki create --help`
-  to see which kinds the active vault accepts.
-- In the **bundled default**, the `doc` kind declares sub-buckets (architecture, research,
-  runbooks, specs, notes, legacy); create into a bucket with `wiki create doc --category
-  <bucket>`. On vaults that promote those to top-level kinds, use `wiki create
-  architecture` (or `research`, etc.) directly — no `--category` needed.
-- Every kind requires a one-line `--summary` — the headline the **roster** and search
-  lead with. Write it last, once the body is settled; omitting it fails validation.
+## Creating
 
-Anything worth remembering — a bug's root cause, a decision, a gotcha — goes in as an
-artifact, not just this chat, so it outlives the session. Repos stay clean.
+Creation is one-shot: author the full body, pipe it via `--body -` (stdin), done in
+a single schema-validated command. Validation runs before the dedup gate, so a
+schema error is always the first and only output.
 
-## Mutating artifacts after creation
+- Kinds come from the vault's `wiki.json` (`decision` = ADR); `wiki create --help`
+  lists the active vault's kinds, `wiki schema <kind>` its exact contract.
+- Author only the **authorable** H2 sections `wiki schema <kind>` lists.
+  **Machine-owned** sections are rendered from fields — authoring one as a pure
+  `[[ID]]` list is absorbed into its backing field; prose there is rejected with
+  the flag to use instead.
+- `--summary` is the one-line headline the roster and search lead with; no upper
+  length bound — write it last, once the body is settled.
+- Dedup advisory is one line: `dedup: strong 0.93 vs ADR-0012 "…" — choose
+  --supersedes / --related-to / --force-new`. Only a same-kind match gates; read it
+  and pick: `--supersedes <id>` (replace), `--related-to <id>` (adjacent),
+  `--force-new "<reason ≥30 chars>"`. A `note: overlaps … cross-kind` line is
+  informational — no action needed.
 
-One validated `wiki` call per intent — never hand-edit frontmatter:
+Anything worth remembering — a bug's root cause, a decision, a gotcha — goes in as
+an artifact, not just this chat, so it outlives the session.
 
-- `wiki set <id> <field> <value...>` — schema-validated; type inferred from the id. The one
-  footgun `--help` won't warn you about: bare `set` *full-replaces* a list field, so use
-  `--add`/`--remove`/`--clear` to edit one entry without wiping the rest.
-- `wiki block <id> --on <id> [--on <id>…]` — sets `blocked_by`, auto-wrapping `[[…]]`.
-- `wiki supersede <oldId> --by <newId>` — links an existing artifact to its replacement.
-- `wiki retitle <id> --title <t>` — retitle any kind, re-slugging the filename; the id (and `[[id]]` links) survive. `doc recategorize` stays the doc-only category move.
-- `wiki delete <id> [--force]` — remove an artifact; refuses (listing the referrers) when other artifacts link to it. `--force` deletes anyway and scrubs the dead id out of those referrers' frontmatter link fields; body prose mentions are reported, not rewritten. `wiki sync` owns search-index cleanup, so re-sync after deleting.
-- `wiki schema <kind|bucket>` — discover fields/enums before guessing a value; a bucket
-  also prints its `criteria`.
-- `wiki path <id>` — resolve an id to its file path (filenames are `ID-slug.md`).
-- `wiki links <id>` — outbound links + inbound backlinks for an artifact (pure vault read, no qmd).
-- `--json` is universal — pass it to any verb to get one structured object (or array, for
-  `search`) on stdout and a `{error,…}` object on stderr, so you detect success and read
-  results without scraping prose. Not every verb's `--help` advertises `--json`; it still works.
+## Mutating
 
-## Gates and upkeep
+One validated call per intent — never hand-edit frontmatter:
 
-- Dedup is advisory by default: a near-duplicate prints the match and proceeds.
-  Read it, then `--supersedes` (replace it), `--related-to` (adjacent), or
-  `--force-new "<reason ≥30 chars>"`. A project may opt into blocking strong
-  matches (`dedup_strong_blocks: true`); create then exits non-zero until you choose.
-- After creating, run `wiki sync` — it regenerates each project's `index.md` **roster**
-  (incrementally — only changed files are re-read) plus a vault-root `index.md` linking
-  every project, and re-embeds for ranked search. `search` is a pure read against the
-  last `wiki sync`: it neither refreshes nor embeds, so new artifacts stay invisible to
-  search and dedup until a sync. Search warns and skips any project collection that was
-  never synced.
-- Artifact folders are config-driven — the vault's `wiki.json` declares each kind's
-  folder path. On the bundled default, docs live under `docs/<bucket>/`; on vaults that
-  promote buckets to first-class kinds, each kind owns a top-level folder (e.g.
-  `architecture/`, `research/`). Never invent a folder; an unfit artifact goes in the
-  closest declared kind. `wiki doctor` flags undeclared folders or loose files.
-  `wiki doctor --setup` checks distribution health instead of vault drift: binary freshness (source changed since the last `bun run build`), skill-bundle presence, and whether the persist hook is wired in any runtime. `wiki doctor --fix` repairs what is mechanical — duplicate ids (canonical keeps the id, the rest get a fresh one) plus the fixes `wiki fmt --write` applies — then re-audits, leaving only drift that needs a human (dangling links, repo bindings).
-- `wiki fmt` reports format drift (exit 1); `wiki fmt --write` applies mechanical fixes (dates, frontmatter order, legacy-id renumber with in-project reference rewrite, and renaming files to `<ID>-<slug>.md` when id/slug drift from the filename, keeping the id so links survive). Both `wiki fmt` (flag-only) and `wiki validate <file>` report missing/unknown required H2 body sections, so the create-time structure contract is enforced after edits too.
+- `wiki set <id> <field> <value…>` — type inferred from the id. Footgun: bare `set`
+  *full-replaces* a list field — use `--add`/`--remove`/`--clear` for one entry.
+- `wiki block <id> --on <id>…` — sets `blocked_by`, auto-wrapping `[[…]]`.
+- `wiki supersede <oldId> --by <newId>`.
+- `wiki retitle <id> --title <t>` — re-slugs the filename; the id and `[[id]]` links survive.
+- `wiki delete <id> [--force]` — refuses while referrers link to it (listing them);
+  `--force` scrubs the dead id from referrers' frontmatter link fields.
+
+## Upkeep
+
+- `wiki sync` after creating/deleting: regenerates each project's roster
+  (incremental) and re-embeds for search. `search` reads the last sync — un-synced
+  artifacts are invisible to it (create's dedup still sees same-kind un-synced
+  files, so back-to-back creates stay honest).
+- `wiki fmt` reports format drift (exit 1); `--write` applies the mechanical fixes.
+  `wiki validate <file>` checks one file's schema + body sections after hand edits.
+- `wiki doctor` audits vault drift; `--fix` repairs the mechanical subset.
+  `wiki doctor --setup` audits the distribution instead: binary freshness, skill
+  bundle, and per-runtime hook wiring (wired / partial / not wired).
 
 ## Auto-persist skill output (optional)
 
-Wiring a runtime hook so skill output auto-files into the vault is a one-time setup
-branch — see [`hooks.md`](hooks.md) for `wiki hooks install` and the stamp-template
-capture contract. Day-to-day artifact work never needs it.
+Runtime hooks (claude-code, codex, pi) can auto-file skill output into the vault —
+see [`hooks.md`](hooks.md) for `wiki hooks install` and the stamp-template capture
+contract. Day-to-day artifact work never needs it.
 
 Breaking a PRD into slices? Load `to-slices`.
