@@ -386,7 +386,7 @@ async function warnPiBridge(): Promise<void> {
 async function hooksUninstall(args: string[]): Promise<CliResult> {
   const target = resolveTarget(args);
   if (!("spec" in target)) return target;
-  const { spec, file } = target;
+  const { file } = target;
 
   const config = await readConfig(file);
   if (config.hooks === undefined) {
@@ -396,7 +396,10 @@ async function hooksUninstall(args: string[]): Promise<CliResult> {
   }
 
   let removed = 0;
-  for (const { event } of spec.events) {
+  // Sweep EVERY event, not just the current spec's: a spec that stops wiring an
+  // event (e.g. Stop → UserPromptSubmit, 2026-07-02) must still uninstall the
+  // entries an older binary wrote there.
+  for (const event of Object.keys(config.hooks)) {
     const list = config.hooks[event];
     if (list === undefined) continue;
     for (const entry of list) {

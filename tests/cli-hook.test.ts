@@ -613,6 +613,34 @@ describe("wiki hooks uninstall", () => {
     const json = JSON.stringify(after);
     expect(json).not.toContain("wiki hooks run");
   });
+
+  test("uninstall sweeps wiki entries on events the current spec no longer wires (legacy Stop/SessionEnd)", async () => {
+    const home = await mkdtemp(join(tmpdir(), "wiki-home-"));
+    tempPaths.push(home);
+    const settings = join(home, ".claude", "settings.json");
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(join(home, ".claude"), { recursive: true });
+    // A config written by an older binary: wiki entries on Stop + SessionEnd, plus a foreign Stop sibling.
+    await writeFile(
+      settings,
+      JSON.stringify({
+        hooks: {
+          Stop: [
+            { hooks: [{ type: "command", command: "cmux stop" }] },
+            { hooks: [{ type: "command", command: "wiki hooks run" }] },
+          ],
+          SessionEnd: [{ hooks: [{ type: "command", command: "wiki hooks run" }] }],
+        },
+      }),
+    );
+    await runWiki(["hooks", "uninstall", "--runtime", "claude-code", "--global"], { home });
+    const after = JSON.parse(await readFile(settings, "utf8"));
+    expect(JSON.stringify(after)).not.toContain("wiki hooks run");
+    // the foreign Stop sibling survives; the wiki-only SessionEnd key is dropped entirely
+    expect(after.hooks.Stop).toHaveLength(1);
+    expect(after.hooks.Stop[0].hooks[0].command).toBe("cmux stop");
+    expect(after.hooks.SessionEnd).toBeUndefined();
+  });
 });
 
 describe("wiki hooks list / status", () => {
