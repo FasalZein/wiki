@@ -90,15 +90,29 @@ describe("wiki hooks run (callback)", () => {
     expect(stdout).toBe("{}");
   });
 
-  test("a Stop/SessionEnd event injects a blanket persist reminder (once per session)", async () => {
+  test("a Stop event with no persist debt stays silent (Stop fires every turn end, not session end)", async () => {
     const { stdout } = await runWiki(["hooks", "run"], {
       stdin: JSON.stringify({ hook_event_name: "Stop", session_id: crypto.randomUUID() }),
     });
+    expect(stdout).toBe("{}");
+  });
+
+  test("a Stop event after an authoring skill ran (same session) reminds with that skill's kind", async () => {
+    const cwd = await repoDir("wiki-v2");
+    const session = crypto.randomUUID();
+    await runWiki(["hooks", "run"], {
+      cwd,
+      stdin: JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Skill", tool_input: { skill: "to-slices" }, session_id: session, cwd }),
+    });
+    const { stdout } = await runWiki(["hooks", "run"], {
+      stdin: JSON.stringify({ hook_event_name: "Stop", session_id: session }),
+    });
     const out = JSON.parse(stdout);
     expect(out.hookSpecificOutput.hookEventName).toBe("Stop");
-    expect(out.hookSpecificOutput.additionalContext).toContain("wiki create");
+    expect(out.hookSpecificOutput.additionalContext).toContain("to-slices");
+    expect(out.hookSpecificOutput.additionalContext).toContain("wiki create slice");
     // the reminder names the stamp-template step too (SLICE-0125), not only `wiki create`
-    expect(out.hookSpecificOutput.additionalContext).toContain("template: <kind>");
+    expect(out.hookSpecificOutput.additionalContext).toContain("template: slice");
   });
 
   test("skill→kind routing is vault-config-driven: a custom kind + skill in the vault's wiki.json routes with no code change", async () => {
@@ -126,18 +140,52 @@ describe("wiki hooks run (callback)", () => {
     expect(other.stdout).toBe("{}");
   });
 
-  test("the Stop reminder does NOT repeat within one session (harnesses re-invoke per injection — an unconditional reminder loops the stop)", async () => {
+  test("the Stop reminder clears its debt when it fires (harnesses re-invoke per injection — an unclearing reminder loops the stop)", async () => {
+    const cwd = await repoDir("wiki-v2");
     const session = crypto.randomUUID();
+    await runWiki(["hooks", "run"], {
+      cwd,
+      stdin: JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Skill", tool_input: { skill: "handoff" }, session_id: session, cwd }),
+    });
     const payload = JSON.stringify({ hook_event_name: "Stop", session_id: session });
     const first = await runWiki(["hooks", "run"], { stdin: payload });
-    expect(JSON.parse(first.stdout).hookSpecificOutput.additionalContext).toContain("wiki create");
+    expect(JSON.parse(first.stdout).hookSpecificOutput.additionalContext).toContain("wiki create handoff");
     const second = await runWiki(["hooks", "run"], { stdin: payload });
     expect(second.stdout).toBe("{}");
-    // a different session still gets its own reminder
+    // a different session with no debt of its own stays silent
     const other = await runWiki(["hooks", "run"], {
       stdin: JSON.stringify({ hook_event_name: "Stop", session_id: crypto.randomUUID() }),
     });
-    expect(JSON.parse(other.stdout).hookSpecificOutput.additionalContext).toContain("wiki create");
+    expect(other.stdout).toBe("{}");
+  });
+
+  test("a captured write clears the persist debt, so the following Stop stays silent", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "wiki-vault-"));
+    tempPaths.push(vaultRoot);
+    const projectPath = join(vaultRoot, "projects", "wiki-v2");
+    await mkdir(join(projectPath, "slices"), { recursive: true });
+    await writeFile(join(projectPath, "_project.md"), "---\n---\n# wiki-v2\n");
+    const cwd = await repoDir("wiki-v2");
+    const session = crypto.randomUUID();
+    // 1. authoring skill fires → debt recorded
+    await runWiki(["hooks", "run"], {
+      cwd,
+      vaultRoot,
+      stdin: JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Skill", tool_input: { skill: "to-slices" }, session_id: session, cwd }),
+    });
+    // 2. a stamped draft is written and captured → debt cleared
+    const file = join(cwd, "draft.md");
+    await writeFile(file, "---\ntemplate: slice\nproject: wiki-v2\ntitle: Debt Clearing Slice\n---\n# Debt Clearing Slice\n\nbody\n");
+    const captured = await runWiki(["hooks", "run"], {
+      vaultRoot,
+      stdin: JSON.stringify({ hook_event_name: "PostToolUse", tool_name: "Write", tool_input: { file_path: file }, session_id: session, cwd }),
+    });
+    expect(captured.stdout).toContain("hookSpecificOutput");
+    // 3. Stop owes nothing
+    const stop = await runWiki(["hooks", "run"], {
+      stdin: JSON.stringify({ hook_event_name: "Stop", session_id: session }),
+    });
+    expect(stop.stdout).toBe("{}");
   });
 });
 

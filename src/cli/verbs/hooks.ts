@@ -1,5 +1,5 @@
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { mkdir, readFile, readdir, unlink, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
 import { readFrontmatter } from "../../artifacts/artifact-file";
@@ -19,14 +19,27 @@ const HOOK_COMMAND = "wiki hooks run";
 const PI_BRIDGE_PACKAGE = "@hsingjui/pi-hooks";
 
 /**
- * Stateless session-end reminder. Fired on Stop/SessionEnd with no session state,
- * so it cannot know whether anything was authored or persisted — it reminds
- * unconditionally and the agent ignores it when there's nothing to save.
+ * Persist-debt marker: written when an authoring skill fires, cleared when a
+ * stamped write is captured into the vault. Stop fires at the end of EVERY
+ * assistant turn — not at session end — so an unconditional reminder is
+ * wrong-time by construction (observed live 2026-07-02: fired mid-work, and
+ * /compact resets session_id so a once-per-session dedup re-fires mid-work
+ * too). Conditioning on outstanding debt makes the reminder both quiet (a
+ * session that authored nothing gets zero stop noise) and accurate (it names
+ * the skill and kind that ran without a capture).
  */
-const STOP_REMINDER =
-  "Session ending. If you authored a PRD, slice, decision, doc, or handoff this session, " +
-  "persist it to the vault now — don't leave it only in chat. Either run\n  wiki create <kind> --project <name> --body -\n" +
-  "or stamp the draft's frontmatter with `template: <kind>` and `project: <name>` so the write hook captures it on save.";
+function debtMarker(input: HookInput): string {
+  const key = (input.session_id ?? `${input.cwd ?? "nocwd"}-${new Date().toISOString().slice(0, 10)}`).replace(/[^\w.-]/g, "_");
+  return join(tmpdir(), `wiki-persist-debt-${key}`);
+}
+
+async function recordPersistDebt(input: HookInput, skill: string, kind: string): Promise<void> {
+  await Bun.write(debtMarker(input), JSON.stringify({ skill, kind }));
+}
+
+async function clearPersistDebt(input: HookInput): Promise<void> {
+  await unlink(debtMarker(input)).catch(() => {});
+}
 
 /**
  * Per-runtime install target. All three runtimes accept the same JSON `hooks`
@@ -38,8 +51,8 @@ const STOP_REMINDER =
  *    (UserPromptSubmit).
  *  - artifact write: a file-write tool (PostToolUse, matched to the runtime's
  *    write/edit tool names) — the in-child capture trigger (ADR-0038).
- *  - session end: a stateless blanket persist reminder (Stop / SessionEnd). It
- *    has no session state, so it reminds unconditionally.
+ *  - turn end: a persist reminder (Stop / SessionEnd) that fires only while
+ *    persist debt is outstanding — an authoring skill ran without a capture.
  */
 interface HookTarget {
   event: string;
@@ -75,7 +88,7 @@ const RUNTIMES: Record<string, RuntimeSpec> = {
   },
 };
 
-/** Events that fire at session end — the run callback emits a blanket persist reminder for these. */
+/** Turn-end events — the run callback emits the debt-conditioned persist reminder for these. */
 const STOP_EVENTS = new Set(["Stop", "SessionEnd"]);
 
 export async function handleHooks(args: string[]): Promise<CliResult> {
@@ -179,15 +192,19 @@ async function hooksRun(): Promise<CliResult> {
       return { code: 0 };
     }
     if (capture.note !== undefined) console.error(capture.note); // SLICE-0127: advisory dedup note, filed anyway
+    await clearPersistDebt(input); // artifact landed in the vault — the Stop reminder owes nothing
     process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: capture.context } }));
     return { code: 0 };
   }
   const guidance = STOP_EVENTS.has(event)
-    ? await stopReminderOnce(input)
+    ? await stopDebtReminder(input)
     : await (async () => {
         const structure = await hookStructure();
         const skill = extractSkill(input, structure);
-        return skill === null ? null : hookGuidance(skill, input.cwd ?? process.cwd(), structure);
+        if (skill === null) return null;
+        const text = await hookGuidance(skill, input.cwd ?? process.cwd(), structure);
+        if (text !== null) await recordPersistDebt(input, skill, structure.kindForSkill(skill) ?? "<kind>");
+        return text;
       })();
   if (guidance === null) {
     process.stdout.write("{}");
@@ -199,17 +216,31 @@ async function hooksRun(): Promise<CliResult> {
   return { code: 0 };
 }
 
-/** The Stop reminder fires ONCE per session: harnesses re-invoke the agent on
- *  every additionalContext injection, so an unconditional reminder loops the
- *  stop forever (observed live on claude-code 2026-07-02). Deduped by a tmpdir
- *  marker keyed on session_id; payloads without one fall back to cwd+day. */
-async function stopReminderOnce(input: HookInput): Promise<string | null> {
-  const { tmpdir } = await import("node:os");
-  const key = (input.session_id ?? `${input.cwd ?? "nocwd"}-${new Date().toISOString().slice(0, 10)}`).replace(/[^\w.-]/g, "_");
-  const marker = `${tmpdir()}/wiki-stop-reminder-${key}`;
-  if (await Bun.file(marker).exists()) return null;
-  await Bun.write(marker, new Date().toISOString());
-  return STOP_REMINDER;
+/** The Stop reminder fires only while persist debt is outstanding (an authoring
+ *  skill ran, no capture followed), and clears itself when it fires — harnesses
+ *  re-invoke the agent on every additionalContext injection, so an unclearing
+ *  reminder loops the stop forever (observed live on claude-code 2026-07-02).
+ *  `wiki create` runs outside the hook's sight (a Bash tool call), so the text
+ *  tells an agent that already persisted to ignore it. */
+async function stopDebtReminder(input: HookInput): Promise<string | null> {
+  const file = Bun.file(debtMarker(input));
+  if (!(await file.exists())) return null;
+  let debt: { skill?: string; kind?: string } = {};
+  try {
+    debt = JSON.parse(await file.text());
+  } catch {
+    // unreadable marker — still owed; fall back to generic wording
+  }
+  await clearPersistDebt(input);
+  const skill = debt.skill ?? "an authoring";
+  const kind = debt.kind ?? "<kind>";
+  return (
+    `The ${skill} skill ran this session but no artifact was captured into the wiki vault. ` +
+    `If its output is worth keeping, persist it now — don't leave it only in chat:\n` +
+    `  wiki create ${kind} --project <name> --body -\n` +
+    `or stamp the draft's frontmatter with \`template: ${kind}\` and \`project: <name>\` so the write hook captures it on save. ` +
+    `Already persisted it (e.g. via wiki create)? Ignore this.`
+  );
 }
 
 /**
