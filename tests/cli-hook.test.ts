@@ -90,15 +90,29 @@ describe("wiki hooks run (callback)", () => {
     expect(stdout).toBe("{}");
   });
 
-  test("a Stop/SessionEnd event injects a stateless blanket persist reminder", async () => {
+  test("a Stop/SessionEnd event injects a blanket persist reminder (once per session)", async () => {
     const { stdout } = await runWiki(["hooks", "run"], {
-      stdin: JSON.stringify({ hook_event_name: "Stop" }),
+      stdin: JSON.stringify({ hook_event_name: "Stop", session_id: crypto.randomUUID() }),
     });
     const out = JSON.parse(stdout);
     expect(out.hookSpecificOutput.hookEventName).toBe("Stop");
     expect(out.hookSpecificOutput.additionalContext).toContain("wiki create");
     // the reminder names the stamp-template step too (SLICE-0125), not only `wiki create`
     expect(out.hookSpecificOutput.additionalContext).toContain("template: <kind>");
+  });
+
+  test("the Stop reminder does NOT repeat within one session (harnesses re-invoke per injection — an unconditional reminder loops the stop)", async () => {
+    const session = crypto.randomUUID();
+    const payload = JSON.stringify({ hook_event_name: "Stop", session_id: session });
+    const first = await runWiki(["hooks", "run"], { stdin: payload });
+    expect(JSON.parse(first.stdout).hookSpecificOutput.additionalContext).toContain("wiki create");
+    const second = await runWiki(["hooks", "run"], { stdin: payload });
+    expect(second.stdout).toBe("{}");
+    // a different session still gets its own reminder
+    const other = await runWiki(["hooks", "run"], {
+      stdin: JSON.stringify({ hook_event_name: "Stop", session_id: crypto.randomUUID() }),
+    });
+    expect(JSON.parse(other.stdout).hookSpecificOutput.additionalContext).toContain("wiki create");
   });
 });
 

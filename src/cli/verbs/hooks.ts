@@ -98,6 +98,7 @@ export async function handleHooks(args: string[]): Promise<CliResult> {
 interface HookInput {
   cwd?: string;
   hook_event_name?: string;
+  session_id?: string;
   tool_input?: { skill?: string; skill_name?: string; path?: string; file_path?: string; content?: string };
   tool_response?: unknown;
   tool_result?: unknown;
@@ -170,7 +171,7 @@ async function hooksRun(): Promise<CliResult> {
     return { code: 0 };
   }
   const guidance = STOP_EVENTS.has(event)
-    ? STOP_REMINDER
+    ? await stopReminderOnce(input)
     : await (async () => {
         const skill = extractSkill(input);
         return skill === null ? null : hookGuidance(skill, input.cwd ?? process.cwd());
@@ -183,6 +184,19 @@ async function hooksRun(): Promise<CliResult> {
   if (event === "PreToolUse") hookSpecificOutput.permissionDecision = "allow";
   process.stdout.write(JSON.stringify({ hookSpecificOutput }));
   return { code: 0 };
+}
+
+/** The Stop reminder fires ONCE per session: harnesses re-invoke the agent on
+ *  every additionalContext injection, so an unconditional reminder loops the
+ *  stop forever (observed live on claude-code 2026-07-02). Deduped by a tmpdir
+ *  marker keyed on session_id; payloads without one fall back to cwd+day. */
+async function stopReminderOnce(input: HookInput): Promise<string | null> {
+  const { tmpdir } = await import("node:os");
+  const key = (input.session_id ?? `${input.cwd ?? "nocwd"}-${new Date().toISOString().slice(0, 10)}`).replace(/[^\w.-]/g, "_");
+  const marker = `${tmpdir()}/wiki-stop-reminder-${key}`;
+  if (await Bun.file(marker).exists()) return null;
+  await Bun.write(marker, new Date().toISOString());
+  return STOP_REMINDER;
 }
 
 /**
