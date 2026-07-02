@@ -13,7 +13,7 @@ import { withProjectLock } from "./lock";
 import { buildIdIndex } from "./id-index";
 import { bareIdOf } from "./references";
 import { artifactDirectory, assertSafeSegment, projectPath } from "./paths";
-import { ensureCollection, updateCollection } from "../integrations/qmd";
+import { projectIndex, resolveQmdCommandLazy } from "../integrations/project-index";
 import { loadProjectConfig } from "../config/project";
 import { isFileNotFound } from "../util";
 import { orderBySchema } from "./render";
@@ -418,13 +418,13 @@ export async function mintAndWrite(
  */
 async function refreshKeywordIndex(vaultRoot: string, project: string): Promise<void> {
   try {
-    let qmdCommand = process.env.QMD_COMMAND;
-    if (qmdCommand === undefined) {
-      qmdCommand = (await loadProjectConfig(projectPath(vaultRoot, project))).qmd_command;
-    }
     const projPath = projectPath(vaultRoot, project);
-    await ensureCollection(qmdCommand, project, projPath); // register on first write
-    await updateCollection(qmdCommand, project, false); // keyword reindex only; no embed
+    // QMD_COMMAND skips the config load; without it, a config-less project throws
+    // here and the outer catch skips this best-effort refresh (unchanged behavior).
+    const command = await resolveQmdCommandLazy(() => loadProjectConfig(projPath));
+    const index = projectIndex({ project, projectPath: projPath, config: { qmd_command: command } });
+    await index.ensure(); // register on first write
+    await index.refresh(); // keyword reindex only; no embed
   } catch {
     // qmd missing / project unconfigured / never synced — `wiki sync` is the
     // durable reindex, so a write must never fail on the freshness best-effort.

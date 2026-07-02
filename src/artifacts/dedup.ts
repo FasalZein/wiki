@@ -1,7 +1,8 @@
 import { readdir } from "node:fs/promises";
 import { basename, join } from "node:path";
 
-import { ensureCollection, QmdError, refreshCollections, runQuery, type QmdResult } from "../integrations/qmd";
+import { QmdError, type QmdResult } from "../integrations/qmd";
+import { projectIndex } from "../integrations/project-index";
 import type { ProjectConfig } from "../config/project";
 import type { TemplateType } from "../schema/load";
 import { classifyIntent } from "../search/intent";
@@ -68,16 +69,16 @@ export async function runDedupGate(input: DedupGateInput): Promise<void> {
 
   const thresholds = { weak: input.config.dedup_threshold_weak, strong: input.config.dedup_threshold_strong };
 
-  const qmdCommand = process.env.QMD_COMMAND ?? input.config.qmd_command;
-  await ensureCollection(qmdCommand, input.project, input.projectPath);
-  await refreshCollections(qmdCommand, [input.project]);
+  const index = projectIndex({ project: input.project, projectPath: input.projectPath, config: input.config });
+  await index.ensure();
+  await index.refresh();
   // Route through the same structured-query path search uses so dedup and
   // search score against the identical intent/lex/vec document.
   const queryDocument = buildStructuredQuery(input.query, {
     intent: classifyIntent(input.query),
     project: input.project,
   });
-  const qmdResults = thresholdResults(await runQuery(qmdCommand, queryDocument, [input.project]), thresholds);
+  const qmdResults = thresholdResults(await index.query(queryDocument), thresholds);
   const qmdMatches = await Promise.all(
     qmdResults.map((result) => enrichMatch(result, input.projectPath, input.project, input.type, input.structure)),
   );

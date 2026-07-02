@@ -11,6 +11,7 @@
 import { join } from "node:path";
 
 import { listCollections, QmdError, runQuery, type QmdResult } from "../../integrations/qmd";
+import { resolveSharedQmdCommand } from "../../integrations/project-index";
 import { openArtifact } from "../../artifacts/artifact-file";
 import { artifactFolder, projectPath } from "../../artifacts/paths";
 import { loadStructure, type Structure } from "../../artifacts/registry";
@@ -115,18 +116,12 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
       configs.push([proj, await loadProjectConfig(projPath)]);
     }
 
-    const envQmd = process.env.QMD_COMMAND;
-    let qmdCommand: string;
-    if (envQmd !== undefined) {
-      qmdCommand = envQmd;
-    } else {
-      const resolved = uniformConfigValue(configs.map(([proj, c]) => [proj, c.qmd_command] as const));
-      if (resolved === null) {
-        console.error(divergenceMessage("qmd_command", configs.map(([proj, c]) => [proj, c.qmd_command] as const), "set QMD_COMMAND to pin one binary"));
-        return { code: 10 };
-      }
-      qmdCommand = resolved;
+    const resolution = resolveSharedQmdCommand(configs);
+    if ("divergent" in resolution) {
+      console.error(divergenceMessage("qmd_command", resolution.divergent, "set QMD_COMMAND to pin one binary"));
+      return { code: 10 };
     }
+    const qmdCommand = resolution.command;
 
     // PRD-0018: search is a pure read against whatever `wiki sync` last produced.
     // One `qmd collection list` up front tells us which collections exist; we
@@ -183,17 +178,6 @@ function parseSearchType(value: string | undefined, allowedTypes: readonly Templ
     return undefined;
   }
   return allowedTypes.includes(value as TemplateType) ? (value as TemplateType) : null;
-}
-
-/**
- * Return the shared value when every project agrees (or there is only one), else
- * null to signal divergence. Used to enforce a single qmd binary
- * across a vault-wide search.
- */
-function uniformConfigValue(pairs: ReadonlyArray<readonly [string, string]>): string | null {
-  const first = pairs[0]?.[1];
-  if (first === undefined) return null;
-  return pairs.every(([, value]) => value === first) ? first : null;
 }
 
 /** Build an actionable error naming which projects pin which value, plus the fix and the --project escape hatch. */

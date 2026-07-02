@@ -7,6 +7,7 @@ import { loadStructure } from "../../artifacts/registry";
 import { listProjects } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import { ensureCollection } from "../../integrations/qmd";
+import { resolveQmdCommand } from "../../integrations/project-index";
 import { stampRepo } from "../repo-link";
 import type { CliResult } from "../dispatch";
 import { parseCommand, stringValue } from "../parse";
@@ -108,7 +109,7 @@ async function createProject(args: string[]): Promise<CliResult> {
 
   // Try to register QMD collection (best-effort)
   try {
-    const qmdCommand = process.env.QMD_COMMAND ?? "qmd";
+    const qmdCommand = resolveQmdCommand();
     await ensureCollection(qmdCommand, name, projPath);
   } catch {
     // QMD not available — proceed without it

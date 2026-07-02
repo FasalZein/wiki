@@ -1,6 +1,7 @@
 import { projectPath } from "../../artifacts/paths";
 import { writeProjectIndex, writeVaultIndex } from "../../artifacts/index-md";
 import { embedCollection, ensureCollection, QmdError, updateCollection } from "../../integrations/qmd";
+import { resolveQmdCommand } from "../../integrations/project-index";
 import { assertProjectStructure, loadProjectConfig, ProjectConfigError, projectErrorMessage } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import { loadStructure } from "../../artifacts/registry";
@@ -45,7 +46,7 @@ export async function handleSync(args: string[]): Promise<CliResult> {
   try {
     await assertProjectStructure(projPath, structure);
     const config = await loadProjectConfig(projPath);
-    const qmdCommand = process.env.QMD_COMMAND ?? config.qmd_command;
+    const qmdCommand = resolveQmdCommand(config);
     const targets = [{ name: project, path: projPath }];
 
     for (const target of targets) {
