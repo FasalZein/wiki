@@ -10,11 +10,12 @@ describe("config-driven kind registry (wiki.json)", () => {
     // The kinds shipped in wiki.json; the point is they come from config,
     // not a hardcoded union, so this just pins the loaded shape.
     expect(kinds.prd).toEqual({ prefix: "PRD", folder: "prds", dedup: true, skill: "to-prd", child_list: "slices" });
-    // A promoted knowledge kind (PRD-0023): its own folder + prefix + criteria, no authoring skill.
+    // A promoted knowledge kind (PRD-0023): its own folder + prefix + criteria + authoring skill.
     expect(kinds.research).toEqual({
       prefix: "RES",
       folder: "research",
       dedup: true,
+      skill: "research",
       criteria: "External findings, investigations, comparisons, and explorations feeding a decision.",
     });
     expect(specFor("handoff").skill).toBe("handoff");

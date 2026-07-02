@@ -1,15 +1,70 @@
 {
-  "_comment": "Artifact kinds, defined as data — not hardcoded in the CLI. Each kind: prefix (id), folder (per-project location), dedup (run the advisory gate), optional skill (the skill that authors this kind; read by per-runtime hooks), optional parent/child_list (backlink edges), and optional criteria (the what-goes-where signal, surfaced by `wiki schema` and `create --help`). A kind names a logical destination; the CLI owns the actual path. Add a kind here + a matching templates/<kind>.md to extend the vault — no code change. This file mirrors the bundled DEFAULT_STRUCTURE (src/artifacts/registry.ts) and is a copy-ready starting point for a new vault. PRD-0023 promoted the former single `doc` BRANCH kind into six first-class LEAF kinds (architecture/research/runbooks/specs/notes/legacy), each with its own folder + id prefix.",
+  "_comment": "Artifact kinds, defined as data \u2014 not hardcoded in the CLI. Each kind: prefix (id), folder (per-project location), dedup (run the advisory gate), optional skill (the skill that authors this kind; read by per-runtime hooks), optional parent/child_list (backlink edges), and optional criteria (the what-goes-where signal, surfaced by `wiki schema` and `create --help`). A kind names a logical destination; the CLI owns the actual path. Add a kind here + a matching templates/<kind>.md to extend the vault \u2014 no code change. This file mirrors the bundled DEFAULT_STRUCTURE (src/artifacts/registry.ts) and is a copy-ready starting point for a new vault. PRD-0023 promoted the former single `doc` BRANCH kind into six first-class LEAF kinds (architecture/research/runbooks/specs/notes/legacy), each with its own folder + id prefix.",
   "kinds": {
-    "prd":          { "prefix": "PRD",     "folder": "prds",         "dedup": true,  "skill": "to-prd",        "child_list": "slices" },
-    "slice":        { "prefix": "SLICE",   "folder": "slices",       "dedup": true,  "skill": "to-slices",     "parent": "prd" },
-    "decision":     { "prefix": "ADR",     "folder": "adrs",         "dedup": true,  "skill": "grill-with-docs" },
-    "architecture": { "prefix": "ARCH",    "folder": "architecture", "dedup": true,  "criteria": "How the system is built: components, boundaries, data flow, structural decisions." },
-    "research":     { "prefix": "RES",     "folder": "research",     "dedup": true,  "criteria": "External findings, investigations, comparisons, and explorations feeding a decision." },
-    "runbooks":     { "prefix": "RUN",     "folder": "runbooks",     "dedup": true,  "criteria": "Operational how-to: step-by-step procedures for running, deploying, or recovering." },
-    "specs":        { "prefix": "SPEC",    "folder": "specs",        "dedup": true,  "criteria": "Specifications: precise contracts, formats, schemas, and interface definitions." },
-    "notes":        { "prefix": "NOTE",    "folder": "notes",        "dedup": true,  "criteria": "Catch-all for durable notes that fit no other bucket." },
-    "legacy":       { "prefix": "LEG",     "folder": "legacy",       "dedup": true,  "criteria": "Imported or historical material kept for reference, not actively maintained." },
-    "handoff":      { "prefix": "HANDOFF", "folder": "handoffs",     "dedup": false, "skill": "handoff" }
+    "prd": {
+      "prefix": "PRD",
+      "folder": "prds",
+      "dedup": true,
+      "skill": "to-prd",
+      "child_list": "slices"
+    },
+    "slice": {
+      "prefix": "SLICE",
+      "folder": "slices",
+      "dedup": true,
+      "skill": "to-slices",
+      "parent": "prd"
+    },
+    "decision": {
+      "prefix": "ADR",
+      "folder": "adrs",
+      "dedup": true,
+      "skill": "grill-with-docs"
+    },
+    "architecture": {
+      "prefix": "ARCH",
+      "folder": "architecture",
+      "dedup": true,
+      "criteria": "How the system is built: components, boundaries, data flow, structural decisions.",
+      "skill": "improve-codebase-architecture"
+    },
+    "research": {
+      "prefix": "RES",
+      "folder": "research",
+      "dedup": true,
+      "criteria": "External findings, investigations, comparisons, and explorations feeding a decision.",
+      "skill": "research"
+    },
+    "runbooks": {
+      "prefix": "RUN",
+      "folder": "runbooks",
+      "dedup": true,
+      "criteria": "Operational how-to: step-by-step procedures for running, deploying, or recovering."
+    },
+    "specs": {
+      "prefix": "SPEC",
+      "folder": "specs",
+      "dedup": true,
+      "criteria": "Specifications: precise contracts, formats, schemas, and interface definitions."
+    },
+    "notes": {
+      "prefix": "NOTE",
+      "folder": "notes",
+      "dedup": true,
+      "criteria": "Catch-all for durable notes that fit no other bucket.",
+      "skill": "diagnosing-bugs"
+    },
+    "legacy": {
+      "prefix": "LEG",
+      "folder": "legacy",
+      "dedup": true,
+      "criteria": "Imported or historical material kept for reference, not actively maintained."
+    },
+    "handoff": {
+      "prefix": "HANDOFF",
+      "folder": "handoffs",
+      "dedup": false,
+      "skill": "handoff"
+    }
   }
 }

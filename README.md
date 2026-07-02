@@ -102,6 +102,9 @@ writes:
 - `to-prd` → authors `prd`
 - `to-slices` → authors `slice`
 - `grill-with-docs` → authors `decision`
+- `improve-codebase-architecture` → authors `architecture`
+- `research` → authors `research`
+- `diagnosing-bugs` → authors `notes`
 - `handoff` → authors `handoff`
 <!-- skill-map:end -->
 

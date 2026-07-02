@@ -73,6 +73,7 @@ describe("SLICE-0110: bundled default section/bucket tree", () => {
       prefix: "RES",
       folder: "research",
       dedup: true,
+      skill: "research",
       criteria: "External findings, investigations, comparisons, and explorations feeding a decision.",
     });
     expect(DEFAULT_STRUCTURE.specFor("handoff").dedup).toBe(false);

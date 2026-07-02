@@ -101,6 +101,31 @@ describe("wiki hooks run (callback)", () => {
     expect(out.hookSpecificOutput.additionalContext).toContain("template: <kind>");
   });
 
+  test("skill→kind routing is vault-config-driven: a custom kind + skill in the vault's wiki.json routes with no code change", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "wiki-customkind-"));
+    tempPaths.push(vaultRoot);
+    await writeFile(
+      join(vaultRoot, "wiki.json"),
+      JSON.stringify({
+        kinds: {
+          incident: { prefix: "INC", folder: "incidents", dedup: false, skill: "postmortem" },
+        },
+      }),
+    );
+    const { stdout } = await runWiki(["hooks", "run"], {
+      vaultRoot,
+      stdin: JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Skill", tool_input: { skill: "postmortem" } }),
+    });
+    const out = JSON.parse(stdout);
+    expect(out.hookSpecificOutput.additionalContext).toContain("wiki 'incident' artifact");
+    // and a bundled-default skill is NOT registered in this vault's config, so it stays silent
+    const other = await runWiki(["hooks", "run"], {
+      vaultRoot,
+      stdin: JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Skill", tool_input: { skill: "to-slices" } }),
+    });
+    expect(other.stdout).toBe("{}");
+  });
+
   test("the Stop reminder does NOT repeat within one session (harnesses re-invoke per injection — an unconditional reminder loops the stop)", async () => {
     const session = crypto.randomUUID();
     const payload = JSON.stringify({ hook_event_name: "Stop", session_id: session });

@@ -4,7 +4,8 @@ import { basename, dirname, join } from "node:path";
 
 import { readFrontmatter } from "../../artifacts/artifact-file";
 import { captureArtifact, type CaptureOutcome } from "../../artifacts/capture";
-import { DEFAULT_STRUCTURE } from "../../artifacts/registry";
+import { DEFAULT_STRUCTURE, loadStructure, type Structure } from "../../artifacts/registry";
+import { resolveVaultRootForDisplay } from "../../config/vault";
 import { readLinkedProject } from "../repo-link";
 import { unknownMessage } from "../usage";
 import { booleanValue, parseCommand, stringValue } from "../parse";
@@ -114,31 +115,44 @@ const WRITE_EVENT = "PostToolUse";
  * or a `/skill:<name>` slash-command in the prompt (Codex, pi). Null when none
  * names a registered authoring skill, so the caller injects nothing.
  */
-/** Authoring skills the bundled kinds register, for prompt scanning. Hooks fire
- *  in an arbitrary cwd with no resolved vault, so they read the bundled default
- *  rather than a per-vault wiki.json — the reminder is advisory, not vault state. */
-function registeredSkills(): string[] {
-  return Object.values(DEFAULT_STRUCTURE.kinds)
+/** Kinds are data: the vault's wiki.json is authoritative for skill→kind routing,
+ *  so a vault that declares its own kinds (or extra skill bindings) routes without
+ *  any code change. Hooks fire in arbitrary cwds, so resolution is best-effort —
+ *  no configured vault, or a malformed wiki.json, falls back to the bundled
+ *  default rather than failing the hook. */
+async function hookStructure(): Promise<Structure> {
+  const root = await resolveVaultRootForDisplay();
+  if (root === null) return DEFAULT_STRUCTURE;
+  try {
+    return await loadStructure(root);
+  } catch {
+    return DEFAULT_STRUCTURE;
+  }
+}
+
+/** Authoring skills the structure's kinds register, for prompt scanning. */
+function registeredSkills(structure: Structure): string[] {
+  return Object.values(structure.kinds)
     .map((spec) => spec.skill)
     .filter((skill): skill is string => skill !== undefined);
 }
 
-function extractSkill(input: HookInput): string | null {
+function extractSkill(input: HookInput, structure: Structure): string | null {
   // Claude Code's Skill tool carries the name as `tool_input.skill`; older/other
   // shapes used `skill_name`. Accept either so the reminder fires regardless.
   const named = input.tool_input?.skill ?? input.tool_input?.skill_name;
-  if (named !== undefined && DEFAULT_STRUCTURE.kindForSkill(named) !== undefined) return named;
+  if (named !== undefined && structure.kindForSkill(named) !== undefined) return named;
 
   const path = input.tool_input?.path;
   if (path !== undefined && basename(path) === "SKILL.md") {
     const skill = basename(dirname(path));
-    if (DEFAULT_STRUCTURE.kindForSkill(skill) !== undefined) return skill;
+    if (structure.kindForSkill(skill) !== undefined) return skill;
   }
 
   const prompt = input.prompt;
   if (prompt !== undefined) {
     // skill names are kebab-case; match a /skill:name or /name token, not a bare mention
-    for (const skill of registeredSkills()) {
+    for (const skill of registeredSkills(structure)) {
       if (new RegExp(`(?:^|\\s)/(?:skill:)?${skill}(?![\\w-])`).test(prompt)) return skill;
     }
   }
@@ -173,8 +187,9 @@ async function hooksRun(): Promise<CliResult> {
   const guidance = STOP_EVENTS.has(event)
     ? await stopReminderOnce(input)
     : await (async () => {
-        const skill = extractSkill(input);
-        return skill === null ? null : hookGuidance(skill, input.cwd ?? process.cwd());
+        const structure = await hookStructure();
+        const skill = extractSkill(input, structure);
+        return skill === null ? null : hookGuidance(skill, input.cwd ?? process.cwd(), structure);
       })();
   if (guidance === null) {
     process.stdout.write("{}");
@@ -204,8 +219,8 @@ async function stopReminderOnce(input: HookInput): Promise<string | null> {
  * agent to persist the skill's output to the vault via `wiki create`. Returns
  * null when the skill authors no kind (per wiki.json) — the caller injects nothing.
  */
-export async function hookGuidance(skill: string, cwd: string): Promise<string | null> {
-  const kind = DEFAULT_STRUCTURE.kindForSkill(skill);
+export async function hookGuidance(skill: string, cwd: string, structure: Structure = DEFAULT_STRUCTURE): Promise<string | null> {
+  const kind = structure.kindForSkill(skill);
   if (kind === undefined) return null;
   const project = await readLinkedProject(cwd);
   const projectFlag = project === null ? "--project <name>" : `--project ${project}`;
