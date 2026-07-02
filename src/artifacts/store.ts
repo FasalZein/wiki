@@ -244,10 +244,12 @@ export async function preflightCreate(
   const schema = await loadTemplate(type);
   const template = await Bun.file(resolveTemplatePath(`${type}.md`)).text();
 
+  let absorbed: Record<string, unknown> = {};
   if (body !== undefined) {
     const fieldNames = new Set(schema.fields.map((field) => field.name));
+    const fieldTypes = new Map(schema.fields.map((field) => [field.name, field.type]));
     try {
-      parseBodySections(matter(normalizeInlineMaps(template)).content, fieldNames, body);
+      absorbed = parseBodySections(matter(normalizeInlineMaps(template)).content, fieldNames, body, fieldTypes).absorbed;
     } catch (error) {
       if (error instanceof BodyParseError) {
         throw new ArtifactValidationError([{ field: "body", reason: error.message }]);
@@ -258,10 +260,11 @@ export async function preflightCreate(
 
   // Validate every field except the ones the CLI mints at write time — so a
   // missing/short title or over-long summary is caught here, but the not-yet-minted
-  // id is not spuriously flagged as required.
+  // id is not spuriously flagged as required. Absorbed body fields (a machine-owned
+  // section parsed into its backing field) are validated alongside the flags.
   const minted = new Set(["id", "aliases", "created", "updated", "session_date"]);
   const checkSchema: Schema = { ...schema, fields: schema.fields.filter((field) => !minted.has(field.name)) };
-  const withDefaults = applyDefaults(schema, template, { ...fields });
+  const withDefaults = applyDefaults(schema, template, { ...fields, ...absorbed });
   const result = validate(checkSchema, withDefaults);
   if (!result.ok) {
     throw new ArtifactValidationError(result.errors);
@@ -275,12 +278,18 @@ export async function createArtifact(input: CreateArtifactInput): Promise<Artifa
   const template = await templateFile.text();
   const suppliedAliases = Array.isArray(input.fields.aliases) ? input.fields.aliases.map(String) : [];
 
-  // bodySections parsing is the same every attempt — compute once.
+  // bodySections parsing is the same every attempt — compute once. A machine-owned
+  // section whose authored content is derivable is absorbed into its backing field
+  // (absorbedFields) and rendered canonically from that field, not from the body.
   let bodySections: Record<string, string> | undefined;
+  let absorbedFields: Record<string, unknown> = {};
   if (input.body !== undefined) {
     const fieldNames = new Set(schema.fields.map((field) => field.name));
+    const fieldTypes = new Map(schema.fields.map((field) => [field.name, field.type]));
     try {
-      bodySections = parseBodySections(matter(normalizeInlineMaps(template)).content, fieldNames, input.body);
+      const parsed = parseBodySections(matter(normalizeInlineMaps(template)).content, fieldNames, input.body, fieldTypes);
+      bodySections = parsed.sections;
+      absorbedFields = parsed.absorbed;
     } catch (error) {
       if (error instanceof BodyParseError) {
         throw new ArtifactValidationError([{ field: "body", reason: error.message }]);
@@ -291,7 +300,8 @@ export async function createArtifact(input: CreateArtifactInput): Promise<Artifa
 
   return mintAndWrite({ type: input.type, vaultRoot: input.vaultRoot, project: input.project, structure }, (id) => {
     const aliases = suppliedAliases.includes(id) ? suppliedAliases : [id, ...suppliedAliases];
-    const fields = applyDefaults(schema, template, { ...input.fields, id, aliases, project: input.project });
+    // Absorbed body fields fill in first; an explicit flag of the same name wins.
+    const fields = applyDefaults(schema, template, { ...absorbedFields, ...input.fields, id, aliases, project: input.project });
     const result = validate(schema, fields);
     if (!result.ok) {
       throw new ArtifactValidationError(result.errors);

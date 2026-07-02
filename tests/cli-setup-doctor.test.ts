@@ -97,6 +97,26 @@ describe("doctor --setup distribution health", () => {
     expect(result.issues.map((i) => i.type)).toContain("unwired-hook");
   });
 
+  test("reports a partially-wired hook distinctly from an unwired one, naming the missing events", async () => {
+    const { binaryPath, srcDir } = await freshBinary();
+    const bundle = join(await tmp("wiki-bundle-"), "SKILL.md");
+    await writeFile(bundle, "skill");
+    const result = await evaluateSetup({
+      binaryPath,
+      srcDir,
+      skillBundlePath: bundle,
+      hookWired: true, // something IS wired…
+      partialRuntimes: ["claude-code global (missing: PostToolUse, Stop)"], // …but not everything
+    });
+    expect(result.clean).toBe(false);
+    const partial = result.issues.find((i) => i.type === "partial-hook");
+    expect(partial).toBeDefined();
+    expect(partial!.message).toContain("claude-code global");
+    expect(partial!.message).toContain("PostToolUse");
+    // it is NOT reported as fully unwired
+    expect(result.issues.map((i) => i.type)).not.toContain("unwired-hook");
+  });
+
   test("reports subagents whose allowlist cannot reach the bridge, naming them", async () => {
     const { binaryPath, srcDir } = await freshBinary();
     const bundle = join(await tmp("wiki-bundle-"), "SKILL.md");

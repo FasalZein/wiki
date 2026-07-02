@@ -102,6 +102,58 @@ describe("wiki hooks run (callback)", () => {
   });
 });
 
+describe("wiki hooks run (real claude-code payload shapes)", () => {
+  test("a PreToolUse Skill event carries the skill name in tool_input.skill (not skill_name)", async () => {
+    const cwd = await repoDir("wiki-v2");
+    const { stdout } = await runWiki(["hooks", "run"], {
+      cwd,
+      stdin: JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Skill", tool_input: { skill: "to-slices", args: "" } }),
+    });
+    const out = JSON.parse(stdout);
+    expect(out.hookSpecificOutput.hookEventName).toBe("PreToolUse");
+    expect(out.hookSpecificOutput.permissionDecision).toBe("allow");
+    expect(out.hookSpecificOutput.additionalContext).toContain("wiki create slice");
+  });
+
+  test("the legacy tool_input.skill_name shape still triggers the reminder", async () => {
+    const cwd = await repoDir("wiki-v2");
+    const { stdout } = await runWiki(["hooks", "run"], {
+      cwd,
+      stdin: JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Skill", tool_input: { skill_name: "to-slices" } }),
+    });
+    const out = JSON.parse(stdout);
+    expect(out.hookSpecificOutput.additionalContext).toContain("wiki create slice");
+  });
+
+  test("a PostToolUse Write payload with file_path/content and tool_response reaches the capture path", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "wiki-vault-"));
+    tempPaths.push(vaultRoot);
+    const projectPath = join(vaultRoot, "projects", "wiki-v2");
+    await mkdir(join(projectPath, "slices"), { recursive: true });
+    await writeFile(join(projectPath, "_project.md"), "---\n---\n# wiki-v2\n");
+    const dir = await mkdtemp(join(tmpdir(), "wiki-write-"));
+    tempPaths.push(dir);
+    const file = join(dir, "draft.md");
+    const content = "---\ntemplate: slice\nproject: wiki-v2\ntitle: Draft Slice\n---\n# Draft Slice\n\nbody\n";
+    await writeFile(file, content);
+    const { stdout } = await runWiki(["hooks", "run"], {
+      vaultRoot,
+      // full Write PostToolUse shape: tool_input carries file_path + content; tool_response is the tool's output
+      stdin: JSON.stringify({
+        hook_event_name: "PostToolUse",
+        tool_name: "Write",
+        tool_input: { file_path: file, content },
+        tool_response: { filePath: file, success: true },
+      }),
+    });
+    const out = JSON.parse(stdout);
+    expect(out.hookSpecificOutput.hookEventName).toBe("PostToolUse");
+    expect(out.hookSpecificOutput.additionalContext).toContain("slice");
+    const filed = (await readdir(join(projectPath, "slices"))).filter((f) => f.endsWith(".md"));
+    expect(filed).toHaveLength(1);
+  });
+});
+
 describe("wiki hooks run (write-signal capture, ADR-0038)", () => {
   /** A minimal vault with one project's folder skeleton, so capture can file. */
   async function fixtureVault(project: string): Promise<string> {
@@ -295,12 +347,105 @@ describe("wiki hooks install", () => {
       tempPaths.push(home);
       await runWiki(["hooks", "install", "--runtime", runtime, "--global"], { home });
       const config = JSON.parse(await readFile(join(home, file), "utf8"));
-      const stopEvent = runtime === "claude-code" ? "Stop" : "SessionEnd";
+      // claude-code + codex use "Stop"; only pi still uses "SessionEnd".
+      const stopEvent = runtime === "pi" ? "SessionEnd" : "Stop";
       const wired = (config.hooks[stopEvent] as { hooks?: { command?: string }[] }[]).some((e) =>
         e.hooks?.some((h) => h.command === "wiki hooks run"),
       );
       expect(wired).toBe(true);
     }
+  });
+});
+
+describe("wiki hooks install (merge semantics — never clobber foreign hooks)", () => {
+  test("claude-code: foreign PreToolUse/Bash + SessionStart survive install, wiki events added, re-install idempotent", async () => {
+    const home = await mkdtemp(join(tmpdir(), "wiki-home-"));
+    tempPaths.push(home);
+    const settings = join(home, ".claude", "settings.json");
+    await mkdir(join(home, ".claude"), { recursive: true });
+    // A live-shaped config: foreign rtk/herdr-style hooks on PreToolUse + a SessionStart.
+    const foreignPre = { matcher: "Bash", hooks: [{ type: "command", command: "rtk guard" }] };
+    const foreignSession = { hooks: [{ type: "command", command: "herdr session-start" }] };
+    await writeFile(
+      settings,
+      JSON.stringify({ model: "opus", hooks: { PreToolUse: [foreignPre], SessionStart: [foreignSession] } }),
+    );
+
+    await runWiki(["hooks", "install", "--runtime", "claude-code", "--global"], { home });
+    const after = JSON.parse(await readFile(settings, "utf8"));
+
+    // Foreign entries survive byte-identical (deep-equal).
+    expect(after.model).toBe("opus");
+    expect(after.hooks.SessionStart).toEqual([foreignSession]);
+    expect(after.hooks.PreToolUse).toContainEqual(foreignPre);
+    // Wiki's three events are added (PreToolUse Skill alongside the foreign Bash entry).
+    expect(after.hooks.PreToolUse.some((e: { matcher?: string }) => e.matcher === "Skill")).toBe(true);
+    expect(after.hooks.PostToolUse[0].matcher).toBe("^(?:Write|Edit|MultiEdit)$");
+    expect(after.hooks.Stop[0].hooks[0].command).toBe("wiki hooks run");
+
+    // Re-install is idempotent — no duplicate wiki entries, foreign untouched.
+    await runWiki(["hooks", "install", "--runtime", "claude-code", "--global"], { home });
+    const second = JSON.parse(await readFile(settings, "utf8"));
+    expect(second.hooks.PreToolUse.filter((e: { matcher?: string }) => e.matcher === "Skill")).toHaveLength(1);
+    expect(second.hooks.PreToolUse).toContainEqual(foreignPre);
+    expect(second.hooks.PostToolUse).toHaveLength(1);
+    expect(second.hooks.Stop).toHaveLength(1);
+  });
+
+  test("codex: foreign cmux hooks on 5 events survive; wiki adds UserPromptSubmit + Stop; idempotent", async () => {
+    const home = await mkdtemp(join(tmpdir(), "wiki-home-"));
+    tempPaths.push(home);
+    const file = join(home, ".codex", "hooks.json");
+    await mkdir(join(home, ".codex"), { recursive: true });
+    // cmux-style foreign hooks on 5 events.
+    const cmux = (n: string) => ({ hooks: [{ type: "command", command: `cmux ${n}` }] });
+    const foreign = {
+      hooks: {
+        UserPromptSubmit: [cmux("prompt")],
+        PostToolUse: [cmux("post")],
+        PreToolUse: [cmux("pre")],
+        SessionStart: [cmux("start")],
+        SessionEnd: [cmux("end")],
+      },
+    };
+    await writeFile(file, JSON.stringify(foreign));
+
+    await runWiki(["hooks", "install", "--runtime", "codex", "--global"], { home });
+    const after = JSON.parse(await readFile(file, "utf8"));
+
+    // Every foreign entry survives, on every event.
+    for (const [event, entries] of Object.entries(foreign.hooks)) {
+      expect(after.hooks[event]).toEqual(expect.arrayContaining(entries));
+    }
+    // Wiki adds its UserPromptSubmit (alongside foreign), a PostToolUse capture, and a Stop.
+    expect(after.hooks.UserPromptSubmit.some((e: { hooks?: { command?: string }[] }) => e.hooks?.[0]?.command === "wiki hooks run")).toBe(true);
+    expect(after.hooks.Stop[0].hooks[0].command).toBe("wiki hooks run");
+    expect(after.hooks.PostToolUse.some((e: { matcher?: string }) => e.matcher === "^(?:write|edit)$")).toBe(true);
+
+    // Idempotent re-install.
+    await runWiki(["hooks", "install", "--runtime", "codex", "--global"], { home });
+    const second = JSON.parse(await readFile(file, "utf8"));
+    expect(second.hooks.UserPromptSubmit.filter((e: { hooks?: { command?: string }[] }) => e.hooks?.[0]?.command === "wiki hooks run")).toHaveLength(1);
+    expect(second.hooks.Stop).toHaveLength(1);
+  });
+
+  test("pi: merge preserves foreign settings and is idempotent", async () => {
+    const home = await mkdtemp(join(tmpdir(), "wiki-home-"));
+    tempPaths.push(home);
+    const file = join(home, ".pi", "agent", "settings.json");
+    await mkdir(join(home, ".pi", "agent"), { recursive: true });
+    await writeFile(file, JSON.stringify({ packages: [{ source: "npm:@hsingjui/pi-hooks" }], hooks: { UserPromptSubmit: [{ hooks: [{ type: "command", command: "foreign" }] }] } }));
+
+    await runWiki(["hooks", "install", "--runtime", "pi", "--global"], { home });
+    const after = JSON.parse(await readFile(file, "utf8"));
+    // foreign package + hook survive
+    expect(after.packages).toEqual([{ source: "npm:@hsingjui/pi-hooks" }]);
+    expect(after.hooks.UserPromptSubmit.some((e: { hooks?: { command?: string }[] }) => e.hooks?.[0]?.command === "foreign")).toBe(true);
+    expect(after.hooks.UserPromptSubmit.some((e: { hooks?: { command?: string }[] }) => e.hooks?.[0]?.command === "wiki hooks run")).toBe(true);
+
+    await runWiki(["hooks", "install", "--runtime", "pi", "--global"], { home });
+    const second = JSON.parse(await readFile(file, "utf8"));
+    expect(second.hooks.UserPromptSubmit.filter((e: { hooks?: { command?: string }[] }) => e.hooks?.[0]?.command === "wiki hooks run")).toHaveLength(1);
   });
 });
 
@@ -388,6 +533,44 @@ describe("wiki hooks list / status", () => {
     expect(list.exitCode).toBe(0);
     expect(list.stdout).toContain("claude-code");
     expect(list.stdout).toContain("wired");
+  });
+
+  test("a runtime wired with only SOME required events reports as partial, naming the missing ones", async () => {
+    const home = await mkdtemp(join(tmpdir(), "wiki-home-"));
+    tempPaths.push(home);
+    const settings = join(home, ".claude", "settings.json");
+    await mkdir(join(home, ".claude"), { recursive: true });
+    // Only the PreToolUse (Skill) wiki hook is wired — PostToolUse + Stop are missing.
+    await writeFile(
+      settings,
+      JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Skill", hooks: [{ type: "command", command: "wiki hooks run" }] }] } }),
+    );
+    const status = await runWiki(["hooks", "status"], { home });
+    expect(status.exitCode).toBe(0);
+    const line = status.stdout.split("\n").find((l) => l.startsWith("claude-code global:"))!;
+    expect(line).toContain("partial");
+    expect(line).toContain("MISSING");
+    expect(line).toContain("PostToolUse");
+    expect(line).toContain("Stop");
+    // partial must NOT read as a clean "wired (...)" state
+    expect(line).not.toMatch(/wired \(PreToolUse, PostToolUse, Stop\)/);
+  });
+
+  test("an agent with `extensions: all` reaches the bridge (all includes it), and frontmatterless files are skipped", async () => {
+    const home = await mkdtemp(join(tmpdir(), "wiki-home-"));
+    tempPaths.push(home);
+    const agentsDir = join(home, ".pi", "agent", "agents");
+    await mkdir(agentsDir, { recursive: true });
+    // `extensions: all` is the no-restriction sentinel → reachable, not a false positive.
+    await writeFile(join(agentsDir, "architect.md"), "---\nname: architect\nextensions: all\n---\nbody\n");
+    // A template doc with no frontmatter is not an agent → skipped entirely.
+    await writeFile(join(agentsDir, "scout-report-template.md"), "# Scout report template\n\njust a doc\n");
+
+    const status = await runWiki(["hooks", "status"], { home });
+    expect(status.exitCode).toBe(0);
+    expect(status.stdout).toContain("subagent architect: reachable");
+    expect(status.stdout).not.toContain("scout-report-template");
+    expect(status.stdout).not.toMatch(/subagent architect: cannot fire/);
   });
 
   test("reports per-subagent bridge reachability, naming the agents whose allowlist lacks the exact bridge", async () => {

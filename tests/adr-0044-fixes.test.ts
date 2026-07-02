@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import matter from "gray-matter";
 
 // Regression tests for the ADR-0044 fix batch (BUG-A..G, NOTE-0010): cheap
 // validation precedes dedup (BUG-C), unknown flags rejected by name + `--body -`
@@ -261,9 +262,37 @@ describe("BUG-E: wiki schema prints body sections + machine-owned split", () => 
     expect(result.stdout).toContain("## What this session produced");
   });
 
-  test("authoring a machine-owned section names the flag the author should use instead", async () => {
+  test("a derivable machine-owned section is ABSORBED into its backing field, not rejected", async () => {
     const fixture = await makeFixture();
-    const body = "## Decisions locked\n\n- [[ADR-0001]]\n";
+    const body = "## Decisions locked\n\n- [[ADR-0001]]\n- [[ADR-0002]]\n";
+    const result = await runWiki(
+      ["create", "handoff", "--title", "Session handoff", "--summary", "A handoff for the session.",
+        "--phase", "handoff", "--project", "wiki-v2", "--body", "-"],
+      fixture,
+      body,
+    );
+    expect(result.exitCode).toBe(0);
+    const id = result.stdout.trim();
+    const files = (await readdir(join(fixture.projectPath, "handoffs"))).filter((f) => f.endsWith(".md"));
+    expect(files).toHaveLength(1);
+    const created = await readFile(join(fixture.projectPath, "handoffs", files[0]!), "utf8");
+    const parsed = matter(created);
+    // ids landed in the backing field
+    expect(parsed.data.decisions_made).toEqual(["ADR-0001", "ADR-0002"]);
+    // body renders canonically from the field (not the authored section verbatim)
+    expect(parsed.content).toContain("## Decisions locked");
+    expect(parsed.content).toContain("- [[ADR-0001]]");
+    expect(parsed.content).toContain("- [[ADR-0002]]");
+
+    // absorbed create is idempotent under `wiki validate` (canonical body, no drift)
+    const validate = await runWiki(["validate", join(fixture.projectPath, "handoffs", files[0]!)], fixture);
+    expect(validate.exitCode).toBe(0);
+    expect(id).toMatch(/^HANDOFF-\d{4}$/);
+  });
+
+  test("prose in a machine-owned section is rejected, naming the backing field and authorable sections", async () => {
+    const fixture = await makeFixture();
+    const body = "## Decisions locked\n\nWe decided to ship it as-is.\n";
     const result = await runWiki(
       ["create", "handoff", "--title", "Session handoff", "--summary", "A handoff for the session.",
         "--phase", "handoff", "--project", "wiki-v2", "--body", "-"],
@@ -273,5 +302,6 @@ describe("BUG-E: wiki schema prints body sections + machine-owned split", () => 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("machine-owned");
     expect(result.stderr).toContain("--decisions-made");
+    expect(result.stderr).toContain("Authorable sections");
   });
 });

@@ -5,7 +5,7 @@ import { applyFmtFixes } from "./fmt";
 import { loadStructure } from "../../artifacts/registry";
 import { projectPath } from "../../artifacts/paths";
 import { evaluateSetup, type CaptureReach } from "../../bootstrap/setup-doctor";
-import { anyHookWired, unreachableSubagents } from "./hooks";
+import { anyHookWired, partiallyWiredRuntimes, unreachableSubagents } from "./hooks";
 import { initVault } from "../../bootstrap/init";
 import { parseCommand } from "../parse";
 import { unknownMessage } from "../usage";
@@ -153,6 +153,7 @@ async function setupDoctor(): Promise<CliResult> {
     srcDir: join(repoRoot, "src"),
     skillBundlePath: join(repoRoot, "skills", "wiki", "SKILL.md"),
     hookWired: await anyHookWired(),
+    partialRuntimes: await partiallyWiredRuntimes(),
     unreachableSubagents: await unreachableSubagents(),
   });
 

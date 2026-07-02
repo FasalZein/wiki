@@ -8,8 +8,12 @@ into the runtime's config. When you invoke a skill that authors an artifact (the
 output via `wiki create <kind>` — so a skill's result lands in the vault, not just chat.
 Install also writes a stateless Stop/SessionEnd entry: a blanket session-end persist
 reminder that cannot detect whether you actually saved (no session state), so it reminds
-unconditionally. `wiki hooks uninstall --runtime <r> [--global]` splices out only the
-wiki entries; `wiki hooks list`/`status` report which runtimes/scopes are wired.
+unconditionally (fired on `Stop` for claude-code and codex, `SessionEnd` for pi).
+`wiki hooks uninstall --runtime <r> [--global]` splices out only the
+wiki entries. `wiki hooks list`/`status` report per runtime/scope which of the required
+events are wired: all present is `wired`, some-but-not-all is `partial` (broken — it names
+the MISSING events; re-run install to add them, it merges and never clobbers), none is
+`not wired`. `wiki doctor --setup` surfaces the same partial state as a `partial-hook` issue.
 For pi, enable the exact scoped bridge `@hsingjui/pi-hooks` in pi's `packages[]`
 (install warns if it's absent; unscoped `pi-hooks` forks are lookalikes). On codex
 and pi the hook only sees a `/skill:name` slash-command in the prompt, not a bare

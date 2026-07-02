@@ -9,9 +9,16 @@
  * never drift from it.
  */
 
+import type { FieldType } from "../schema/types";
+
 export class BodyParseError extends Error {}
 
 export type AuthoredSection = { heading: string; placeholder: string };
+
+/** What {@link parseBodySections} yields: authored sections keyed by placeholder,
+ *  plus any machine-owned section whose authored content was DERIVABLE into its
+ *  backing schema field (absorbed) rather than rejected. */
+export type ParsedBody = { sections: Record<string, string>; absorbed: Record<string, unknown> };
 
 const H2_RE = /^## (.+)$/;
 
@@ -35,7 +42,8 @@ export function parseBodySections(
   templateBody: string,
   schemaFields: Set<string>,
   supplied: string,
-): Record<string, string> {
+  fieldTypes?: Map<string, FieldType>,
+): ParsedBody {
   const authored = authoredSections(templateBody, schemaFields);
   const expected = authored.map((section) => `## ${section.heading}`).join(", ");
   if (supplied.trim().length === 0) {
@@ -54,25 +62,62 @@ export function parseBodySections(
     throw new BodyParseError(`no H2 sections found in --body; expected sections: ${expected}`);
   }
 
-  const result: Record<string, string> = {};
+  const sections: Record<string, string> = {};
+  const absorbed: Record<string, unknown> = {};
   for (const part of parts) {
     const section = byHeading.get(normalize(part.heading));
     if (section !== undefined) {
-      result[section.placeholder] = part.content;
+      sections[section.placeholder] = part.content;
       continue;
     }
     if (machineOwned.has(normalize(part.heading))) {
+      // Absorb instead of reject when the authored content is DERIVABLE into the
+      // section's backing field: exactly one link_list field rendered from pure
+      // [[ID]] wikilinks. The ids land in that field and the section drops from the
+      // body (rendered canonically from the field). Prose (non-wikilink content) or
+      // any other backing shape is still rejected — the author can't hand-write what
+      // the CLI owns.
+      const backing = machineOwnedFieldNames(templateBody, schemaFields, part.heading);
+      if (backing.length === 1 && fieldTypes?.get(backing[0]!) === "link_list") {
+        const ids = parseWikilinkList(part.content);
+        if (ids !== null) {
+          absorbed[backing[0]!] = ids;
+          continue;
+        }
+      }
       const flags = machineOwnedFlags(templateBody, schemaFields, part.heading);
-      const hint = flags.length > 0
-        ? ` — set that content with ${flags.join(" / ")}, not by authoring this section`
-        : " — remove it from --body";
+      const flagHint = flags.length > 0
+        ? `set that content with ${flags.join(" / ")}, not by authoring this section`
+        : "remove it from --body";
+      const authorHint = authored.length > 0 ? ` Authorable sections: ${expected}.` : "";
       throw new BodyParseError(
-        `body section "## ${part.heading}" is machine-owned and rendered by the CLI${hint}`,
+        `body section "## ${part.heading}" is machine-owned and rendered by the CLI — ${flagHint}.${authorHint}`,
       );
     }
     throw new BodyParseError(`unknown body section "## ${part.heading}"; expected sections: ${expected}`);
   }
-  return result;
+  return { sections, absorbed };
+}
+
+/**
+ * Parse a machine-owned section's authored content as a link_list value: the bare
+ * ids of `[[ID]]` wikilinks (one per line, optional `-`/`*` bullet), skipping a lone
+ * italic `_none_` marker (the template's `{{else}}` fallback). Returns null when ANY
+ * non-empty line is not a wikilink — i.e. the content is prose, not derivable — so the
+ * caller rejects it. An all-marker/empty section absorbs as `[]`.
+ */
+function parseWikilinkList(content: string): string[] | null {
+  const ids: string[] = [];
+  for (const raw of content.split("\n")) {
+    const line = raw.trim();
+    if (line.length === 0) continue;
+    const item = line.replace(/^[-*]\s+/, "");
+    if (/^_.*_$/.test(item)) continue; // the {{else}} "_None …_" fallback marker
+    const match = item.match(/^\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]$/);
+    if (match === null) return null; // prose — not derivable into a link_list
+    ids.push(match[1]!.trim());
+  }
+  return ids;
 }
 
 /**
@@ -95,7 +140,10 @@ export function classifyBodySections(templateBody: string, schemaFields: Set<str
     if (authored.has(normalize(part.heading))) {
       authorable.push(part.heading);
     } else {
-      machineOwned.push({ heading: part.heading, flags: fieldFlagsIn(part.content, schemaFields) });
+      machineOwned.push({
+        heading: part.heading,
+        flags: fieldNamesIn(part.content, schemaFields).map((name) => `--${name.replace(/_/g, "-")}`),
+      });
     }
   }
   return { authorable, machineOwned };
@@ -103,21 +151,24 @@ export function classifyBodySections(templateBody: string, schemaFields: Set<str
 
 /** The flags (`--field-name`) that render a machine-owned section named `heading`. */
 function machineOwnedFlags(templateBody: string, schemaFields: Set<string>, heading: string): string[] {
-  const part = splitByH2(templateBody).find((p) => normalize(p.heading) === normalize(heading));
-  return part === undefined ? [] : fieldFlagsIn(part.content, schemaFields);
+  return machineOwnedFieldNames(templateBody, schemaFields, heading).map((name) => `--${name.replace(/_/g, "-")}`);
 }
 
-/** Schema fields referenced in a section's template content, as CLI flags. Catches
- *  both `{{field}}` and `{{#each field}}` forms; `{{this}}`/`{{else}}` are dropped. */
-function fieldFlagsIn(content: string, schemaFields: Set<string>): string[] {
-  const flags: string[] = [];
+/** Schema field names referenced in a machine-owned section's template content. */
+function machineOwnedFieldNames(templateBody: string, schemaFields: Set<string>, heading: string): string[] {
+  const part = splitByH2(templateBody).find((p) => normalize(p.heading) === normalize(heading));
+  return part === undefined ? [] : fieldNamesIn(part.content, schemaFields);
+}
+
+/** Schema fields referenced in a section's template content. Catches both `{{field}}`
+ *  and `{{#each field}}` forms; `{{this}}`/`{{else}}` are dropped. */
+function fieldNamesIn(content: string, schemaFields: Set<string>): string[] {
+  const names: string[] = [];
   for (const match of content.matchAll(/{{\s*(?:#each\s+)?([A-Za-z0-9_]+)/g)) {
     const name = match[1];
-    if (name !== undefined && schemaFields.has(name) && !flags.includes(name)) {
-      flags.push(`--${name.replace(/_/g, "-")}`);
-    }
+    if (name !== undefined && schemaFields.has(name) && !names.includes(name)) names.push(name);
   }
-  return flags;
+  return names;
 }
 
 function templateHeadings(templateBody: string): string[] {

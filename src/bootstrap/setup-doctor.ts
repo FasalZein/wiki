@@ -5,7 +5,7 @@ import { exists } from "../util";
 
 /** One distribution-health finding from `wiki doctor --setup`. */
 export type SetupIssue = {
-  type: "stale-binary" | "missing-bundle" | "unwired-hook" | "unreachable-subagent";
+  type: "stale-binary" | "missing-bundle" | "unwired-hook" | "partial-hook" | "unreachable-subagent";
   message: string;
 };
 
@@ -51,6 +51,8 @@ export interface SetupFacts {
   skillBundlePath: string;
   /** Whether the persist-reminder hook is wired in any runtime/scope. */
   hookWired: boolean;
+  /** Runtime/scope labels wired with SOME but not all required events (broken — a role won't fire). Empty when none are partial. */
+  partialRuntimes?: string[];
   /** Subagents whose allowlist lacks the exact bridge, so their hook cannot fire. Empty when all reach it. */
   unreachableSubagents?: string[];
 }
@@ -114,6 +116,19 @@ export async function evaluateSetup(facts: SetupFacts): Promise<SetupResult> {
     issues.push({
       type: "unwired-hook",
       message: "persist hook not wired in any runtime — run: wiki hooks install --runtime <claude-code|codex|pi> --global",
+    });
+  }
+
+  // Partial wiring is a distinct, quieter failure than "unwired": a runtime has
+  // SOME wiki events but not all, so a role it should cover (skill / write / stop)
+  // silently never fires. Re-running install adds the missing events (merge-safe).
+  const partial = facts.partialRuntimes ?? [];
+  if (partial.length > 0) {
+    issues.push({
+      type: "partial-hook",
+      message:
+        `persist hook only partially wired: ${partial.join("; ")} — re-run 'wiki hooks install --runtime <r> --global' ` +
+        `to add the missing events (merges into existing config, never clobbers).`,
     });
   }
 

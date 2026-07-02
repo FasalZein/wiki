@@ -63,7 +63,7 @@ const RUNTIMES: Record<string, RuntimeSpec> = {
     project: ".claude/settings.json",
   },
   codex: {
-    events: [{ event: "UserPromptSubmit" }, { event: "PostToolUse", matcher: POSIX_WRITE }, { event: "SessionEnd" }],
+    events: [{ event: "UserPromptSubmit" }, { event: "PostToolUse", matcher: POSIX_WRITE }, { event: "Stop" }],
     global: ".codex/hooks.json",
     project: ".codex/hooks.json",
   },
@@ -87,11 +87,20 @@ export async function handleHooks(args: string[]): Promise<CliResult> {
   return { code: 1 };
 }
 
-/** The fields any of the three runtimes may put on a hook's stdin payload. */
+/** The fields any of the three runtimes may put on a hook's stdin payload.
+ *  `tool_input` is the invoked tool's OWN parameter object verbatim: the Skill tool
+ *  declares `skill` (the name) + `args`, so that — not `skill_name` — is the real
+ *  key; we read both defensively. Write/Edit declare `file_path`/`content`. The
+ *  PostToolUse output key is `tool_response` in the hooks doc but `tool_result` in
+ *  the anthropics hook-development SKILL.md — carried here (both) so a handler that
+ *  needs the tool output reads whichever the runtime sends; capture re-reads the
+ *  file from disk, so it does not consume either. */
 interface HookInput {
   cwd?: string;
   hook_event_name?: string;
-  tool_input?: { skill_name?: string; path?: string; file_path?: string };
+  tool_input?: { skill?: string; skill_name?: string; path?: string; file_path?: string; content?: string };
+  tool_response?: unknown;
+  tool_result?: unknown;
   prompt?: string;
 }
 
@@ -114,7 +123,9 @@ function registeredSkills(): string[] {
 }
 
 function extractSkill(input: HookInput): string | null {
-  const named = input.tool_input?.skill_name;
+  // Claude Code's Skill tool carries the name as `tool_input.skill`; older/other
+  // shapes used `skill_name`. Accept either so the reminder fires regardless.
+  const named = input.tool_input?.skill ?? input.tool_input?.skill_name;
   if (named !== undefined && DEFAULT_STRUCTURE.kindForSkill(named) !== undefined) return named;
 
   const path = input.tool_input?.path;
@@ -342,11 +353,12 @@ async function hooksUninstall(args: string[]): Promise<CliResult> {
  * `extensions:` frontmatter field, which is a RESTRICTIVE allowlist: a subagent
  * loads only the extensions it lists (every shipped agent re-lists its full set,
  * which only makes sense if listing is required), so its persist hook can fire
- * only when that allowlist carries the EXACT `@hsingjui/pi-hooks` bridge. We
- * inspect those files (read-only — never edited here) and report, per agent,
- * whether the bridge is reachable. A lookalike does not satisfy it (reuses
- * `isPiBridge`). An agent explicitly `enabled: false` is skipped — it never runs,
- * so it is not a gap.
+ * only when that allowlist carries the EXACT `@hsingjui/pi-hooks` bridge — or the
+ * `all` sentinel, which loads every extension (bridge included). We inspect those
+ * files (read-only — never edited here) and report, per agent, whether the bridge
+ * is reachable. A lookalike does not satisfy it (reuses `isPiBridge`). A `.md` with
+ * no frontmatter is a template/doc, not an agent, and is skipped; an agent
+ * explicitly `enabled: false` is skipped too — it never runs, so it is not a gap.
  */
 type AgentReach = { name: string; reachable: boolean };
 
@@ -356,6 +368,14 @@ function agentExtensions(data: Record<string, unknown>): string[] {
   if (typeof ext === "string") return ext.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
   if (Array.isArray(ext)) return ext.map((e) => String(e).trim()).filter((s) => s.length > 0);
   return [];
+}
+
+/** True when a subagent's allowlist reaches the bridge: the exact scoped package is
+ *  listed, OR the allowlist is the `all` sentinel (which loads every extension,
+ *  bridge included). `all` is NOT a lookalike — it is the "no restriction" marker. */
+function reachesBridge(data: Record<string, unknown>): boolean {
+  const ext = agentExtensions(data);
+  return ext.includes("all") || ext.some(isPiBridge);
 }
 
 /** Inspect each enabled subagent definition's allowlist for the exact bridge (read-only). */
@@ -375,9 +395,12 @@ async function agentReachability(home: string): Promise<AgentReach[]> {
     } catch {
       continue; // unparseable agent file — skip
     }
+    // A .md with no frontmatter is a doc/template dropped in the agents dir, not an
+    // agent definition (e.g. scout-report-template.md) — never a reachability gap.
+    if (Object.keys(data).length === 0) continue;
     if (data.enabled === false) continue; // disabled agent never runs — not a reachability gap
     const name = typeof data.name === "string" ? data.name : basename(file, ".md");
-    out.push({ name, reachable: agentExtensions(data).some(isPiBridge) });
+    out.push({ name, reachable: reachesBridge(data) });
   }
   return out;
 }
@@ -390,7 +413,15 @@ export async function unreachableSubagents(home: string = homedir()): Promise<st
 /** Report which runtimes/scopes have the wiki hook wired (shared by `list` and `status`). */
 async function hooksReport(): Promise<CliResult> {
   const json = jsonEnabled();
-  const runtimes: { runtime: string; scope: string; wired: boolean; events: string[]; file: string }[] = [];
+  const runtimes: {
+    runtime: string;
+    scope: string;
+    wired: boolean;
+    partial: boolean;
+    events: string[];
+    missing: string[];
+    file: string;
+  }[] = [];
   for (const [runtime, spec] of Object.entries(RUNTIMES)) {
     for (const [scope, rel] of [
       ["global", spec.global],
@@ -398,10 +429,21 @@ async function hooksReport(): Promise<CliResult> {
     ] as const) {
       const file = scope === "global" ? join(homedir(), rel) : join(process.cwd(), rel);
       const config = await readConfig(file);
-      const events = spec.events.map((t) => t.event).filter((e) => isWired(config.hooks?.[e]));
-      runtimes.push({ runtime, scope, wired: events.length > 0, events, file });
+      const required = spec.events.map((t) => t.event);
+      const events = required.filter((e) => isWired(config.hooks?.[e]));
+      const missing = required.filter((e) => !events.includes(e));
+      // Honest tri-state: a hook is only "wired" when ALL its required events are
+      // present; some-but-not-all is "partial" (broken — the roles it needs to cover
+      // don't all fire), never "wired". Naming the missing events is the fix signal.
+      const partial = events.length > 0 && missing.length > 0;
+      const wired = events.length > 0 && missing.length === 0;
+      runtimes.push({ runtime, scope, wired, partial, events, missing, file });
       if (!json) {
-        const state = events.length > 0 ? `wired (${events.join(", ")})` : "not wired";
+        const state = wired
+          ? `wired (${events.join(", ")})`
+          : partial
+            ? `partial — wired ${events.join(", ")}; MISSING ${missing.join(", ")}`
+            : "not wired";
         console.log(`${runtime} ${scope}: ${state}  ${file}`);
       }
     }
@@ -431,4 +473,29 @@ export async function anyHookWired(cwd: string = process.cwd()): Promise<boolean
     }
   }
   return false;
+}
+
+/**
+ * Runtime/scope labels wired with SOME but not all required events — read by
+ * `doctor --setup`. A partially-wired runtime is broken (a role it needs to cover
+ * won't fire), so it is reported distinctly from a fully-unwired one, with the
+ * missing events named. `anyHookWired` stays true for these (something IS wired),
+ * so this is the signal that turns "hook present" into "hook complete".
+ */
+export async function partiallyWiredRuntimes(cwd: string = process.cwd()): Promise<string[]> {
+  const out: string[] = [];
+  for (const [runtime, spec] of Object.entries(RUNTIMES)) {
+    for (const [scope, file] of [
+      ["global", join(homedir(), spec.global)],
+      ["project", join(cwd, spec.project)],
+    ] as const) {
+      const config = await readConfig(file);
+      const required = spec.events.map((t) => t.event);
+      const wired = required.filter((e) => isWired(config.hooks?.[e]));
+      if (wired.length > 0 && wired.length < required.length) {
+        out.push(`${runtime} ${scope} (missing: ${required.filter((e) => !wired.includes(e)).join(", ")})`);
+      }
+    }
+  }
+  return out;
 }

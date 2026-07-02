@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { authoredSections, BodyParseError, parseBodySections } from "../src/artifacts/body";
+import type { FieldType } from "../src/schema/types";
 
 const SLICE_TEMPLATE_BODY = [
   "# {{title}}",
@@ -45,19 +46,19 @@ describe("parseBodySections", () => {
   test("maps supplied sections to placeholders, preserving content verbatim", () => {
     const supplied = "## What to build\n\nParse `--body` on create.\n\n### Detail\n\nMore prose.\n";
     const result = parseBodySections(SLICE_TEMPLATE_BODY, SLICE_FIELDS, supplied);
-    expect(result.what_to_build).toBe("Parse `--body` on create.\n\n### Detail\n\nMore prose.");
+    expect(result.sections.what_to_build).toBe("Parse `--body` on create.\n\n### Detail\n\nMore prose.");
   });
 
   test("ignores content before the first H2 heading", () => {
     const supplied = "# My own title\n\nintro text\n\n## What to build\n\nThe feature.\n";
     const result = parseBodySections(SLICE_TEMPLATE_BODY, SLICE_FIELDS, supplied);
-    expect(result.what_to_build).toBe("The feature.");
+    expect(result.sections.what_to_build).toBe("The feature.");
   });
 
   test("matches headings case-insensitively", () => {
     const supplied = "## what to BUILD\n\nThe feature.\n";
     const result = parseBodySections(SLICE_TEMPLATE_BODY, SLICE_FIELDS, supplied);
-    expect(result.what_to_build).toBe("The feature.");
+    expect(result.sections.what_to_build).toBe("The feature.");
   });
 
   test("rejects a machine-owned heading, naming it", () => {
@@ -74,5 +75,43 @@ describe("parseBodySections", () => {
 
   test("rejects an empty body", () => {
     expect(() => parseBodySections(SLICE_TEMPLATE_BODY, SLICE_FIELDS, "  \n")).toThrow(BodyParseError);
+  });
+});
+
+describe("parseBodySections — machine-owned absorption (link_list)", () => {
+  // A template whose machine-owned "Decisions" section renders from a link_list field.
+  const HANDOFF_BODY = [
+    "# {{title}}",
+    "",
+    "## What produced",
+    "",
+    "{{produced}}",
+    "",
+    "## Decisions",
+    "",
+    "{{#each decisions_made}}- [[{{this}}]]",
+    "{{else}}_None this session._",
+    "{{/each}}",
+  ].join("\n");
+  // produced is an authored placeholder (not a schema field); decisions_made is the link_list field.
+  const FIELDS = new Set(["title", "decisions_made"]);
+  const TYPES = new Map<string, FieldType>([["decisions_made", "link_list"]]);
+
+  test("absorbs a derivable wikilink section into its backing field, dropping it from the body", () => {
+    const supplied = "## Decisions\n\n- [[ADR-0001]]\n- [[ADR-0002]]\n";
+    const result = parseBodySections(HANDOFF_BODY, FIELDS, supplied, TYPES);
+    expect(result.absorbed.decisions_made).toEqual(["ADR-0001", "ADR-0002"]);
+    expect(result.sections).toEqual({}); // the section is not carried as authored body
+  });
+
+  test("rejects prose in a machine-owned section, naming the backing flag and authorable sections", () => {
+    const supplied = "## Decisions\n\nWe decided to ship it.\n";
+    expect(() => parseBodySections(HANDOFF_BODY, FIELDS, supplied, TYPES)).toThrow(/--decisions-made/);
+    expect(() => parseBodySections(HANDOFF_BODY, FIELDS, supplied, TYPES)).toThrow(/Authorable sections/);
+  });
+
+  test("without field types, a machine-owned section is rejected (no absorption)", () => {
+    const supplied = "## Decisions\n\n- [[ADR-0001]]\n";
+    expect(() => parseBodySections(HANDOFF_BODY, FIELDS, supplied)).toThrow(/machine-owned/);
   });
 });
