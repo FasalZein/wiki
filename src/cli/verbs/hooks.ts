@@ -20,13 +20,13 @@ const PI_BRIDGE_PACKAGE = "@hsingjui/pi-hooks";
 
 /**
  * Persist-debt marker: written when an authoring skill fires, cleared when a
- * stamped write is captured into the vault. Stop fires at the end of EVERY
- * assistant turn — not at session end — so an unconditional reminder is
- * wrong-time by construction (observed live 2026-07-02: fired mid-work, and
- * /compact resets session_id so a once-per-session dedup re-fires mid-work
- * too). Conditioning on outstanding debt makes the reminder both quiet (a
- * session that authored nothing gets zero stop noise) and accurate (it names
- * the skill and kind that ran without a capture).
+ * stamped write is captured into the vault, checked at the next UserPromptSubmit.
+ * History: this reminder lived on Stop first — but Stop fires at the end of
+ * EVERY assistant turn, where "background work still in flight" is
+ * indistinguishable from "done" (observed misfiring live twice, 2026-07-02).
+ * The next user prompt is the one knowably-settled moment. Conditioning on
+ * outstanding debt keeps it quiet (a session that authored nothing gets zero
+ * noise) and accurate (it names the skill and kind that ran without a capture).
  */
 function debtMarker(input: HookInput): string {
   const key = (input.session_id ?? `${input.cwd ?? "nocwd"}-${new Date().toISOString().slice(0, 10)}`).replace(/[^\w.-]/g, "_");
@@ -51,8 +51,14 @@ async function clearPersistDebt(input: HookInput): Promise<void> {
  *    (UserPromptSubmit).
  *  - artifact write: a file-write tool (PostToolUse, matched to the runtime's
  *    write/edit tool names) — the in-child capture trigger (ADR-0038).
- *  - turn end: a persist reminder (Stop / SessionEnd) that fires only while
- *    persist debt is outstanding — an authoring skill ran without a capture.
+ *  - next user prompt: a persist reminder (UserPromptSubmit) that fires only
+ *    while persist debt is outstanding — an authoring skill ran without a
+ *    capture. Turn-end events (Stop/SessionEnd) are deliberately NOT wired:
+ *    Stop fires at every turn end, where "work still in flight" is
+ *    indistinguishable from "done" (observed misfiring live, 2026-07-02), and
+ *    pi's SessionEnd fires after the model can act — a dead letter. The next
+ *    user prompt is the one moment where pending work is knowably settled:
+ *    whatever the skill produced either landed or was abandoned.
  */
 interface HookTarget {
   event: string;
@@ -72,23 +78,23 @@ const POSIX_WRITE = "^(?:write|edit)$";
 
 const RUNTIMES: Record<string, RuntimeSpec> = {
   "claude-code": {
-    events: [{ event: "PreToolUse", matcher: "Skill" }, { event: "PostToolUse", matcher: CLAUDE_WRITE }, { event: "Stop" }],
+    events: [{ event: "PreToolUse", matcher: "Skill" }, { event: "PostToolUse", matcher: CLAUDE_WRITE }, { event: "UserPromptSubmit" }],
     global: ".claude/settings.json",
     project: ".claude/settings.json",
   },
   codex: {
-    events: [{ event: "UserPromptSubmit" }, { event: "PostToolUse", matcher: POSIX_WRITE }, { event: "Stop" }],
+    events: [{ event: "UserPromptSubmit" }, { event: "PostToolUse", matcher: POSIX_WRITE }],
     global: ".codex/hooks.json",
     project: ".codex/hooks.json",
   },
   pi: {
-    events: [{ event: "UserPromptSubmit" }, { event: "PostToolUse", matcher: POSIX_WRITE }, { event: "SessionEnd" }],
+    events: [{ event: "UserPromptSubmit" }, { event: "PostToolUse", matcher: POSIX_WRITE }],
     global: ".pi/agent/settings.json",
     project: ".pi/settings.json",
   },
 };
 
-/** Turn-end events — the run callback emits the debt-conditioned persist reminder for these. */
+/** Turn-end events — no longer wired, but legacy installs still fire them; the run callback answers `{}`. */
 const STOP_EVENTS = new Set(["Stop", "SessionEnd"]);
 
 export async function handleHooks(args: string[]): Promise<CliResult> {
@@ -197,14 +203,24 @@ async function hooksRun(): Promise<CliResult> {
     return { code: 0 };
   }
   const guidance = STOP_EVENTS.has(event)
-    ? await stopDebtReminder(input)
+    ? null // legacy wiring: turn-end fires mid-work by construction — never remind there
     : await (async () => {
         const structure = await hookStructure();
+        const parts: string[] = [];
+        // Outstanding debt is settled knowledge only once the user speaks again.
+        if (event === "UserPromptSubmit") {
+          const owed = await debtReminder(input);
+          if (owed !== null) parts.push(owed);
+        }
         const skill = extractSkill(input, structure);
-        if (skill === null) return null;
-        const text = await hookGuidance(skill, input.cwd ?? process.cwd(), structure);
-        if (text !== null) await recordPersistDebt(input, skill, structure.kindForSkill(skill) ?? "<kind>");
-        return text;
+        if (skill !== null) {
+          const text = await hookGuidance(skill, input.cwd ?? process.cwd(), structure);
+          if (text !== null) {
+            await recordPersistDebt(input, skill, structure.kindForSkill(skill) ?? "<kind>");
+            parts.push(text);
+          }
+        }
+        return parts.length === 0 ? null : parts.join("\n\n");
       })();
   if (guidance === null) {
     process.stdout.write("{}");
@@ -216,13 +232,12 @@ async function hooksRun(): Promise<CliResult> {
   return { code: 0 };
 }
 
-/** The Stop reminder fires only while persist debt is outstanding (an authoring
- *  skill ran, no capture followed), and clears itself when it fires — harnesses
- *  re-invoke the agent on every additionalContext injection, so an unclearing
- *  reminder loops the stop forever (observed live on claude-code 2026-07-02).
- *  `wiki create` runs outside the hook's sight (a Bash tool call), so the text
- *  tells an agent that already persisted to ignore it. */
-async function stopDebtReminder(input: HookInput): Promise<string | null> {
+/** The persist reminder fires on the NEXT USER PROMPT, only while persist debt
+ *  is outstanding (an authoring skill ran, no capture followed), and clears
+ *  itself when it fires — once per debt, never a nag loop. `wiki create` runs
+ *  outside the hook's sight (a Bash tool call), so the text tells an agent
+ *  that already persisted to ignore it. */
+async function debtReminder(input: HookInput): Promise<string | null> {
   const file = Bun.file(debtMarker(input));
   if (!(await file.exists())) return null;
   let debt: { skill?: string; kind?: string } = {};

@@ -6,11 +6,13 @@ Loaded only when you're wiring auto-capture. Day-to-day artifact work never need
 into the runtime's config. When you invoke a skill that authors an artifact (the
 `skill` field in `wiki.json` maps it to a kind), the hook reminds you to persist its
 output via `wiki create <kind>` — so a skill's result lands in the vault, not just chat.
-Install also writes a Stop/SessionEnd entry (fired on `Stop` for claude-code and codex,
-`SessionEnd` for pi): a turn-end persist reminder that fires only while persist debt is
-outstanding — an authoring skill ran without a stamped write being captured — then clears
-itself. A session that authored nothing gets no stop noise; `wiki create` runs outside the
-hook's sight, so if you already persisted that way, ignore the one reminder.
+Install also writes a `UserPromptSubmit` entry: a persist reminder that fires at the
+next user prompt, only while persist debt is outstanding — an authoring skill ran without
+a stamped write being captured — then clears itself (once per debt). Turn-end events
+(Stop/SessionEnd) are deliberately not wired: they fire at every turn end, where
+work-in-flight is indistinguishable from done. A session that authored nothing gets no
+reminder noise; `wiki create` runs outside the hook's sight, so if you already persisted
+that way, ignore the one reminder.
 `wiki hooks uninstall --runtime <r> [--global]` splices out only the
 wiki entries. `wiki hooks list`/`status` report per runtime/scope which of the required
 events are wired: all present is `wired`, some-but-not-all is `partial` (broken — it names

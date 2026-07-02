@@ -90,14 +90,22 @@ describe("wiki hooks run (callback)", () => {
     expect(stdout).toBe("{}");
   });
 
-  test("a Stop event with no persist debt stays silent (Stop fires every turn end, not session end)", async () => {
-    const { stdout } = await runWiki(["hooks", "run"], {
-      stdin: JSON.stringify({ hook_event_name: "Stop", session_id: crypto.randomUUID() }),
+  test("Stop/SessionEnd are always silent — even with outstanding debt (turn end is mid-work by construction)", async () => {
+    const cwd = await repoDir("wiki-v2");
+    const session = crypto.randomUUID();
+    await runWiki(["hooks", "run"], {
+      cwd,
+      stdin: JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Skill", tool_input: { skill: "to-slices" }, session_id: session, cwd }),
     });
-    expect(stdout).toBe("{}");
+    for (const event of ["Stop", "SessionEnd"]) {
+      const { stdout } = await runWiki(["hooks", "run"], {
+        stdin: JSON.stringify({ hook_event_name: event, session_id: session }),
+      });
+      expect(stdout, `${event} must stay silent`).toBe("{}");
+    }
   });
 
-  test("a Stop event after an authoring skill ran (same session) reminds with that skill's kind", async () => {
+  test("the next UserPromptSubmit after an authoring skill ran (same session) reminds with that skill's kind", async () => {
     const cwd = await repoDir("wiki-v2");
     const session = crypto.randomUUID();
     await runWiki(["hooks", "run"], {
@@ -105,10 +113,10 @@ describe("wiki hooks run (callback)", () => {
       stdin: JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Skill", tool_input: { skill: "to-slices" }, session_id: session, cwd }),
     });
     const { stdout } = await runWiki(["hooks", "run"], {
-      stdin: JSON.stringify({ hook_event_name: "Stop", session_id: session }),
+      stdin: JSON.stringify({ hook_event_name: "UserPromptSubmit", prompt: "looks good, continue", session_id: session }),
     });
     const out = JSON.parse(stdout);
-    expect(out.hookSpecificOutput.hookEventName).toBe("Stop");
+    expect(out.hookSpecificOutput.hookEventName).toBe("UserPromptSubmit");
     expect(out.hookSpecificOutput.additionalContext).toContain("to-slices");
     expect(out.hookSpecificOutput.additionalContext).toContain("wiki create slice");
     // the reminder names the stamp-template step too (SLICE-0125), not only `wiki create`
@@ -140,21 +148,21 @@ describe("wiki hooks run (callback)", () => {
     expect(other.stdout).toBe("{}");
   });
 
-  test("the Stop reminder clears its debt when it fires (harnesses re-invoke per injection — an unclearing reminder loops the stop)", async () => {
+  test("the persist reminder clears its debt when it fires (once per debt, never a nag loop)", async () => {
     const cwd = await repoDir("wiki-v2");
     const session = crypto.randomUUID();
     await runWiki(["hooks", "run"], {
       cwd,
       stdin: JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Skill", tool_input: { skill: "handoff" }, session_id: session, cwd }),
     });
-    const payload = JSON.stringify({ hook_event_name: "Stop", session_id: session });
+    const payload = JSON.stringify({ hook_event_name: "UserPromptSubmit", prompt: "carry on", session_id: session });
     const first = await runWiki(["hooks", "run"], { stdin: payload });
     expect(JSON.parse(first.stdout).hookSpecificOutput.additionalContext).toContain("wiki create handoff");
     const second = await runWiki(["hooks", "run"], { stdin: payload });
     expect(second.stdout).toBe("{}");
     // a different session with no debt of its own stays silent
     const other = await runWiki(["hooks", "run"], {
-      stdin: JSON.stringify({ hook_event_name: "Stop", session_id: crypto.randomUUID() }),
+      stdin: JSON.stringify({ hook_event_name: "UserPromptSubmit", prompt: "carry on", session_id: crypto.randomUUID() }),
     });
     expect(other.stdout).toBe("{}");
   });
@@ -181,11 +189,11 @@ describe("wiki hooks run (callback)", () => {
       stdin: JSON.stringify({ hook_event_name: "PostToolUse", tool_name: "Write", tool_input: { file_path: file }, session_id: session, cwd }),
     });
     expect(captured.stdout).toContain("hookSpecificOutput");
-    // 3. Stop owes nothing
-    const stop = await runWiki(["hooks", "run"], {
-      stdin: JSON.stringify({ hook_event_name: "Stop", session_id: session }),
+    // 3. the next user prompt owes nothing
+    const next = await runWiki(["hooks", "run"], {
+      stdin: JSON.stringify({ hook_event_name: "UserPromptSubmit", prompt: "next task", session_id: session }),
     });
-    expect(stop.stdout).toBe("{}");
+    expect(next.stdout).toBe("{}");
   });
 });
 
@@ -392,15 +400,17 @@ describe("wiki hooks install", () => {
     expect(first.hooks.PostToolUse[0].matcher).toBe("^(?:Write|Edit|MultiEdit)$");
     expect(first.hooks.PostToolUse[0].hooks[0].command).toBe("wiki hooks run");
 
-    // a Stop entry is written alongside the skill entry
-    expect(first.hooks.Stop[0].hooks[0].command).toBe("wiki hooks run");
+    // a UserPromptSubmit entry (debt-conditioned persist reminder) is written alongside the skill entry
+    expect(first.hooks.UserPromptSubmit[0].hooks[0].command).toBe("wiki hooks run");
+    // turn-end events are NOT wired (Stop fires mid-work by construction)
+    expect(first.hooks.Stop).toBeUndefined();
 
     // re-run must not append a duplicate entry
     await runWiki(["hooks", "install", "--runtime", "claude-code", "--global"], { home });
     const second = JSON.parse(await readFile(settings, "utf8"));
     expect(second.hooks.PreToolUse).toHaveLength(1);
     expect(second.hooks.PostToolUse).toHaveLength(1);
-    expect(second.hooks.Stop).toHaveLength(1);
+    expect(second.hooks.UserPromptSubmit).toHaveLength(1);
   });
 
   test("the PostToolUse capture hook is installed and uninstalled per runtime (write-signal reaches the bridge)", async () => {
@@ -424,7 +434,7 @@ describe("wiki hooks install", () => {
     }
   });
 
-  test("a Stop entry is written per runtime", async () => {
+  test("a UserPromptSubmit entry is written per runtime; no turn-end event is wired", async () => {
     for (const [runtime, file] of [
       ["claude-code", ".claude/settings.json"],
       ["codex", ".codex/hooks.json"],
@@ -434,12 +444,13 @@ describe("wiki hooks install", () => {
       tempPaths.push(home);
       await runWiki(["hooks", "install", "--runtime", runtime, "--global"], { home });
       const config = JSON.parse(await readFile(join(home, file), "utf8"));
-      // claude-code + codex use "Stop"; only pi still uses "SessionEnd".
-      const stopEvent = runtime === "pi" ? "SessionEnd" : "Stop";
-      const wired = (config.hooks[stopEvent] as { hooks?: { command?: string }[] }[]).some((e) =>
+      const wired = (config.hooks.UserPromptSubmit as { hooks?: { command?: string }[] }[]).some((e) =>
         e.hooks?.some((h) => h.command === "wiki hooks run"),
       );
-      expect(wired).toBe(true);
+      expect(wired, `${runtime} should wire UserPromptSubmit`).toBe(true);
+      // Stop/SessionEnd fire at turn end — mid-work by construction — and must not be wired.
+      expect(config.hooks.Stop, `${runtime} must not wire Stop`).toBeUndefined();
+      expect(config.hooks.SessionEnd, `${runtime} must not wire SessionEnd`).toBeUndefined();
     }
   });
 });
@@ -468,7 +479,7 @@ describe("wiki hooks install (merge semantics — never clobber foreign hooks)",
     // Wiki's three events are added (PreToolUse Skill alongside the foreign Bash entry).
     expect(after.hooks.PreToolUse.some((e: { matcher?: string }) => e.matcher === "Skill")).toBe(true);
     expect(after.hooks.PostToolUse[0].matcher).toBe("^(?:Write|Edit|MultiEdit)$");
-    expect(after.hooks.Stop[0].hooks[0].command).toBe("wiki hooks run");
+    expect(after.hooks.UserPromptSubmit[0].hooks[0].command).toBe("wiki hooks run");
 
     // Re-install is idempotent — no duplicate wiki entries, foreign untouched.
     await runWiki(["hooks", "install", "--runtime", "claude-code", "--global"], { home });
@@ -476,10 +487,10 @@ describe("wiki hooks install (merge semantics — never clobber foreign hooks)",
     expect(second.hooks.PreToolUse.filter((e: { matcher?: string }) => e.matcher === "Skill")).toHaveLength(1);
     expect(second.hooks.PreToolUse).toContainEqual(foreignPre);
     expect(second.hooks.PostToolUse).toHaveLength(1);
-    expect(second.hooks.Stop).toHaveLength(1);
+    expect(second.hooks.UserPromptSubmit).toHaveLength(1);
   });
 
-  test("codex: foreign cmux hooks on 5 events survive; wiki adds UserPromptSubmit + Stop; idempotent", async () => {
+  test("codex: foreign cmux hooks on 5 events survive; wiki adds UserPromptSubmit + capture; idempotent", async () => {
     const home = await mkdtemp(join(tmpdir(), "wiki-home-"));
     tempPaths.push(home);
     const file = join(home, ".codex", "hooks.json");
@@ -504,16 +515,15 @@ describe("wiki hooks install (merge semantics — never clobber foreign hooks)",
     for (const [event, entries] of Object.entries(foreign.hooks)) {
       expect(after.hooks[event]).toEqual(expect.arrayContaining(entries));
     }
-    // Wiki adds its UserPromptSubmit (alongside foreign), a PostToolUse capture, and a Stop.
+    // Wiki adds its UserPromptSubmit (alongside foreign) and a PostToolUse capture — no turn-end event.
     expect(after.hooks.UserPromptSubmit.some((e: { hooks?: { command?: string }[] }) => e.hooks?.[0]?.command === "wiki hooks run")).toBe(true);
-    expect(after.hooks.Stop[0].hooks[0].command).toBe("wiki hooks run");
     expect(after.hooks.PostToolUse.some((e: { matcher?: string }) => e.matcher === "^(?:write|edit)$")).toBe(true);
+    expect(JSON.stringify(after.hooks.Stop ?? [])).not.toContain("wiki hooks run");
 
     // Idempotent re-install.
     await runWiki(["hooks", "install", "--runtime", "codex", "--global"], { home });
     const second = JSON.parse(await readFile(file, "utf8"));
     expect(second.hooks.UserPromptSubmit.filter((e: { hooks?: { command?: string }[] }) => e.hooks?.[0]?.command === "wiki hooks run")).toHaveLength(1);
-    expect(second.hooks.Stop).toHaveLength(1);
   });
 
   test("pi: merge preserves foreign settings and is idempotent", async () => {
@@ -627,7 +637,7 @@ describe("wiki hooks list / status", () => {
     tempPaths.push(home);
     const settings = join(home, ".claude", "settings.json");
     await mkdir(join(home, ".claude"), { recursive: true });
-    // Only the PreToolUse (Skill) wiki hook is wired — PostToolUse + Stop are missing.
+    // Only the PreToolUse (Skill) wiki hook is wired — PostToolUse + UserPromptSubmit are missing.
     await writeFile(
       settings,
       JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Skill", hooks: [{ type: "command", command: "wiki hooks run" }] }] } }),
@@ -638,9 +648,9 @@ describe("wiki hooks list / status", () => {
     expect(line).toContain("partial");
     expect(line).toContain("MISSING");
     expect(line).toContain("PostToolUse");
-    expect(line).toContain("Stop");
+    expect(line).toContain("UserPromptSubmit");
     // partial must NOT read as a clean "wired (...)" state
-    expect(line).not.toMatch(/wired \(PreToolUse, PostToolUse, Stop\)/);
+    expect(line).not.toMatch(/wired \(PreToolUse, PostToolUse, UserPromptSubmit\)/);
   });
 
   test("an agent with `extensions: all` reaches the bridge (all includes it), and frontmatterless files are skipped", async () => {
