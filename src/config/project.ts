@@ -10,6 +10,12 @@ export type ProjectConfig = {
   qmd_command: string;
   dedup_threshold_weak: number;
   dedup_threshold_strong: number;
+  /** Thresholds for the UNSYNCED local same-kind scan (dedup.ts), which scores a raw
+   * term-frequency cosine over title+summary — a DIFFERENT scale from qmd's fused
+   * hybrid score above (F2). Cosine is lumpy on short text, so these default STRICTER
+   * than the qmd pair to keep the two paths from meaning different things by "strong". */
+  dedup_lexical_weak: number;
+  dedup_lexical_strong: number;
   /** Opt-in strict mode: when true, a strong dedup match blocks create unless an override flag is passed.
    * Default false — dedup is advisory (warn + link), matching a general memory layer; blocking is opt-in per project. */
   dedup_strong_blocks: boolean;
@@ -86,6 +92,8 @@ export async function loadProjectConfig(projectPath: string): Promise<ProjectCon
     qmd_command: isNonEmptyString(data.qmd_command) ? data.qmd_command : "qmd",
     dedup_threshold_weak: numberValue(data.dedup_threshold_weak, 0.7),
     dedup_threshold_strong: numberValue(data.dedup_threshold_strong, 0.85),
+    dedup_lexical_weak: numberValue(data.dedup_lexical_weak, 0.8),
+    dedup_lexical_strong: numberValue(data.dedup_lexical_strong, 0.92),
     dedup_strong_blocks: typeof data.dedup_strong_blocks === "boolean" ? data.dedup_strong_blocks : false,
   };
 }

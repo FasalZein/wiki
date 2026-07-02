@@ -127,7 +127,7 @@ export async function setField(input: SetFieldInput, structure: Structure, index
 
 export async function setFields(input: SetFieldsInput, structure: Structure, index?: IdIndex): Promise<Artifact> {
   const file = await resolveAndOpen(input, structure, index);
-  const kind = await loadKind(input.type);
+  const kind = await loadKind(input.type, input.vaultRoot);
   const placeholders = templatePlaceholders(kind.templateBody);
   const existingFields = file.data as NormalizedRecord;
   for (const field of Object.keys(input.fields)) {
@@ -158,7 +158,7 @@ export async function setFields(input: SetFieldsInput, structure: Structure, ind
  */
 export async function supersedeArtifact(input: ReadArtifactInput & { by: string }, structure: Structure, index?: IdIndex): Promise<Artifact> {
   const file = await resolveAndOpen(input, structure, index);
-  const schema = await loadTemplate(input.type);
+  const schema = await loadTemplate(input.type, input.vaultRoot);
   const statusField = schema.fields.find((field) => field.name === "status");
   const hasSupersededStatus = statusField?.constraints.values?.includes("superseded") ?? false;
   // Guard the ONE thing the narrowed write still owns: `superseded_by` must be a
@@ -338,7 +338,7 @@ async function backlinkParent(plan: CreatePlan, vaultRoot: string, childId: stri
 
 export async function createArtifact(input: CreateArtifactInput): Promise<Artifact> {
   const structure = input.structure;
-  const kind = await loadKind(input.type);
+  const kind = await loadKind(input.type, input.vaultRoot);
   const schema = kind.schema;
   const suppliedAliases = Array.isArray(input.fields.aliases) ? input.fields.aliases.map(String) : [];
 

@@ -87,7 +87,10 @@ export async function runDedupGate(input: DedupGateInput): Promise<void> {
   // near-duplicates the last sync missed (a file created earlier this session with
   // no sync in between is not yet in the qmd index). Compares title+summary locally
   // — create stays pure, no index write. Merged with the qmd matches, deduped by id.
-  const localMatches = await scanUnsyncedSameKind(input.type, input.projectPath, input.query, input.structure, thresholds);
+  // F2: the local scan is a raw lexical cosine (a different scale from qmd's fused
+  // score), so it gets its OWN, stricter threshold pair — not the qmd `thresholds`.
+  const lexicalThresholds = { weak: input.config.dedup_lexical_weak, strong: input.config.dedup_lexical_strong };
+  const localMatches = await scanUnsyncedSameKind(input.type, input.projectPath, input.query, input.structure, lexicalThresholds);
 
   const merged = mergeById([...qmdMatches, ...localMatches]);
   if (merged.length > 0) {
@@ -142,13 +145,13 @@ export function formatCrossKindNote(match: DedupResult): string {
   return `note: overlaps ${match.id} "${match.title}" (${match.kind ?? "unknown"}, ${match.score.toFixed(2)}) — cross-kind, not a duplicate`;
 }
 
-function thresholdResults(results: QmdResult[], thresholds: DedupThresholds): Array<{ path: string; score: number; strength: "possible" | "strong" }> {
+function thresholdResults(results: QmdResult[], thresholds: DedupThresholds): Array<{ path: string; rel: string | undefined; score: number; strength: "possible" | "strong" }> {
   return results.flatMap((result) => {
     const score = Number.parseFloat(result.score);
     if (!Number.isFinite(score) || score < thresholds.weak) {
       return [];
     }
-    return [{ path: result.path, score, strength: score >= thresholds.strong ? "strong" : "possible" }];
+    return [{ path: result.path, rel: result.rel, score, strength: score >= thresholds.strong ? "strong" : "possible" }];
   });
 }
 
@@ -156,29 +159,24 @@ function thresholdResults(results: QmdResult[], thresholds: DedupThresholds): Ar
  *  from the id prefix, title from frontmatter, and whether it is the same kind as
  *  the create. Never blocks on a read failure — a missing title falls back to "". */
 async function enrichMatch(
-  raw: { path: string; score: number; strength: "possible" | "strong" },
+  raw: { path: string; rel: string | undefined; score: number; strength: "possible" | "strong" },
   projectPath: string,
   project: string,
   createKind: TemplateType,
   structure: Structure,
 ): Promise<DedupResult> {
-  const filePath = resolveMatchFile(raw.path, projectPath, project);
+  const filePath = resolveMatchFile(raw, projectPath);
   const id = idOfFile(filePath);
   const kind = structure.typeForId(id);
   const title = await readTitle(filePath);
   return { path: raw.path, score: raw.score, strength: raw.strength, id, kind, title, sameKind: kind === createKind };
 }
 
-/** Resolve a qmd://<collection>/<rel> URI (or raw fs path) to a file on disk. Dedup
- *  queries only the current project's collection, so <rel> is under projectPath. */
-function resolveMatchFile(path: string, projectPath: string, project: string): string {
-  if (path.startsWith("qmd://")) {
-    const rest = path.slice("qmd://".length);
-    const slash = rest.indexOf("/");
-    const rel = slash === -1 ? rest : rest.slice(slash + 1);
-    return join(projectPath, rel);
-  }
-  return path;
+/** Resolve a match to a file on disk from the adapter-parsed `rel` (F5) — dedup
+ *  queries only the current project's collection, so <rel> is under projectPath.
+ *  A raw filesystem path (no URI, so no `rel`) is used verbatim. */
+function resolveMatchFile(raw: { path: string; rel: string | undefined }, projectPath: string): string {
+  return raw.rel === undefined ? raw.path : join(projectPath, raw.rel);
 }
 
 /** The artifact id a match points at — the filename's PREFIX-NNNN stem. */
@@ -227,12 +225,13 @@ async function scanUnsyncedSameKind(
     if (id === undefined) continue;
     const title = af.field("title") ?? "";
     const summary = af.field("summary") ?? "";
-    const score = cosine(queryTokens, tokenize(`${title} ${summary}`));
+    const candidateTokens = tokenize(`${title} ${summary}`);
+    const score = cosine(queryTokens, candidateTokens);
     if (score >= thresholds.weak) {
       out.push({
         path: file,
         score,
-        strength: score >= thresholds.strong ? "strong" : "possible",
+        strength: lexicalStrength(score, thresholds, queryTokens.size, candidateTokens.size),
         id,
         kind: type,
         title,
@@ -241,6 +240,25 @@ async function scanUnsyncedSameKind(
     }
   }
   return out;
+}
+
+/**
+ * F2 short-text guard: term-frequency cosine is lumpy on short text — a 2- or
+ * 3-token title+summary sharing a couple of tokens with the query cosines near 1
+ * on almost no signal. So a match only earns "strong" when it clears the (already
+ * stricter) lexical strong threshold AND both sides carry at least
+ * {@link MIN_STRONG_TOKENS} distinct tokens; otherwise it caps at "possible".
+ */
+const MIN_STRONG_TOKENS = 6;
+
+function lexicalStrength(
+  score: number,
+  thresholds: DedupThresholds,
+  queryTokenCount: number,
+  candidateTokenCount: number,
+): "possible" | "strong" {
+  const enoughSignal = queryTokenCount >= MIN_STRONG_TOKENS && candidateTokenCount >= MIN_STRONG_TOKENS;
+  return score >= thresholds.strong && enoughSignal ? "strong" : "possible";
 }
 
 /** Recursively list *.md files under a directory (branch kinds nest into buckets). */

@@ -132,9 +132,9 @@ export type AuthorableFlag = {
   default?: unknown;
 };
 
-export async function authorableFlags(type: TemplateType): Promise<AuthorableFlag[]> {
-  const kind = await loadKind(type);
-  const { templateDefaults } = await loadCompiledTemplate(type);
+export async function authorableFlags(type: TemplateType, vaultRoot?: string): Promise<AuthorableFlag[]> {
+  const kind = await loadKind(type, vaultRoot);
+  const { templateDefaults } = await loadCompiledTemplate(type, vaultRoot);
   const out: AuthorableFlag[] = [];
   for (const field of kind.schema.fields) {
     if (NON_FLAG_FIELDS.has(field.name) || field.auto === true) continue;
@@ -165,7 +165,16 @@ export function formatDefault(value: unknown): string {
  * untouched and fill their `{{...}}` section.
  */
 async function createGeneric(kind: TemplateType, args: string[], presetCategory?: string): Promise<CliResult> {
-  const kindDef = await loadKind(kind);
+  // Resolve the vault root up front (best-effort) so a vault-shipped template (F1)
+  // resolves for the loadKind below. A create with no vault configured still reaches
+  // the bundled templates (vaultRoot undefined) and errors at the definite resolve later.
+  let vaultRoot: string | undefined;
+  try {
+    vaultRoot = await getVaultRoot();
+  } catch {
+    vaultRoot = undefined;
+  }
+  const kindDef = await loadKind(kind, vaultRoot);
   const schema = kindDef.schema;
   const placeholders = kindDef.authoredSections().map((s) => s.placeholder);
 
@@ -232,7 +241,9 @@ async function createGeneric(kind: TemplateType, args: string[], presetCategory?
   if (missing) return missing;
   if (project === undefined) return { code: 1 };
 
-  const vaultRoot = await getVaultRoot();
+  // Definite resolve: if no vault was configured above, this throws the canonical
+  // unconfigured error (create requires a vault to write into).
+  if (vaultRoot === undefined) vaultRoot = await getVaultRoot();
   const structure = await loadStructure(vaultRoot);
 
   const fields: Record<string, unknown> = {};
@@ -443,6 +454,12 @@ async function stdinOrValue(value: string | undefined): Promise<string | undefin
  * when the name resolves to no bucket, so dispatch falls back to generic help.
  */
 export async function renderBucketCreateHelp(name: string): Promise<string | null> {
+  let vaultRoot: string | undefined;
+  try {
+    vaultRoot = await getVaultRoot();
+  } catch {
+    vaultRoot = undefined;
+  }
   const structure = (await tryLoadStructure()) ?? DEFAULT_STRUCTURE;
   const resolved = structure.bucketFor(name);
   if (resolved === undefined) return null;
@@ -455,7 +472,7 @@ export async function renderBucketCreateHelp(name: string): Promise<string | nul
   // loaded Kind so `create <kind> --help` no longer hides them. A vault kind may lack
   // a bundled template — fall back to the schema-pointer line when loadKind throws.
   try {
-    const flags = await authorableFlags(bucket.template);
+    const flags = await authorableFlags(bucket.template, vaultRoot);
     lines.push("");
     lines.push("Flags:");
     lines.push(...renderCreateFlagLines(flags));

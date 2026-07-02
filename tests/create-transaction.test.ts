@@ -16,10 +16,17 @@ import { createArtifact, executeCreate, readArtifact } from "../src/artifacts/st
 
 const tempPaths: string[] = [];
 const savedVaultRoot = process.env.KNOWLEDGE_VAULT_ROOT;
+const savedQmd = process.env.QMD_COMMAND;
+// createArtifact/captureArtifact fire a best-effort keyword `qmd update` on write;
+// pin it to the no-op fake so this test never reaches the real qmd on PATH (per the
+// noop-qmd.sh convention) — otherwise a real embed races the test timeout under load.
+const NOOP_QMD = join(import.meta.dir, "fixtures", "noop-qmd.sh");
 
 afterEach(async () => {
   if (savedVaultRoot === undefined) delete process.env.KNOWLEDGE_VAULT_ROOT;
   else process.env.KNOWLEDGE_VAULT_ROOT = savedVaultRoot;
+  if (savedQmd === undefined) delete process.env.QMD_COMMAND;
+  else process.env.QMD_COMMAND = savedQmd;
   await Promise.all(tempPaths.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
@@ -27,6 +34,7 @@ async function createFixtureVault(project = "wiki-v2"): Promise<string> {
   const vaultRoot = await mkdtemp(join(tmpdir(), "wiki-create-txn-"));
   tempPaths.push(vaultRoot);
   process.env.KNOWLEDGE_VAULT_ROOT = vaultRoot;
+  process.env.QMD_COMMAND = NOOP_QMD;
   const projectPath = join(vaultRoot, "projects", project);
   for (const dir of ["prds", "slices", "adrs", "handoffs", "docs"]) {
     await mkdir(join(projectPath, dir), { recursive: true });

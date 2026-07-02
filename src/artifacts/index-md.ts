@@ -22,7 +22,11 @@ type Entry = {
  *  The dot-prefix keeps it out of readdir's artifact scan (it skips non-.md anyway). */
 const CACHE_FILE = ".index-cache.json";
 
-type CacheRecord = { mtimeMs: number; entry: Entry | null }; // entry null = id-less (Unindexed)
+// entry non-null = a roster row. entry null = skipped: id-less (Unindexed trailer)
+// unless `unrecognized` is set, in which case the file has an id whose prefix is no
+// registered kind (Unrecognized kind trailer). The id is cached so an unrecognized
+// file isn't re-parsed every sync (F7).
+type CacheRecord = { mtimeMs: number; entry: Entry | null; unrecognized?: { id: string } };
 type Cache = Record<string, CacheRecord>;
 
 const DEFAULT_GROUP = "General";
@@ -65,6 +69,7 @@ export async function writeProjectIndex(vaultRoot: string, project: string, stru
   const nextCache: Cache = {};
   const entries: Entry[] = [];
   const unindexed: string[] = []; // id-less files, skipped from the roster but surfaced in a trailer
+  const unrecognized: Array<{ path: string; id: string }> = []; // id present but prefix is no registered kind (F7)
   let parsed = 0;
   let reused = 0;
 
@@ -80,8 +85,9 @@ export async function writeProjectIndex(vaultRoot: string, project: string, stru
     if (cached !== undefined && cached.mtimeMs === mtimeMs) {
       reused += 1;
       nextCache[relPath] = cached;
-      if (cached.entry === null) unindexed.push(relPath);
-      else entries.push(cached.entry);
+      if (cached.entry !== null) entries.push(cached.entry);
+      else if (cached.unrecognized !== undefined) unrecognized.push({ path: relPath, id: cached.unrecognized.id });
+      else unindexed.push(relPath);
       continue;
     }
 
@@ -94,7 +100,14 @@ export async function writeProjectIndex(vaultRoot: string, project: string, stru
       continue;
     }
     const kind = structure.typeForId(id);
-    if (kind === undefined) continue; // skip non-artifact / unrecognized files
+    if (kind === undefined) {
+      // Has an id but its prefix maps to no registered kind (a promoted-away kind, a
+      // typo prefix). Surface it in the Unrecognized trailer and cache it so it isn't
+      // re-parsed every sync (F7) — the opposite of silently vanishing from both.
+      unrecognized.push({ path: relPath, id });
+      nextCache[relPath] = { mtimeMs, entry: null, unrecognized: { id } };
+      continue;
+    }
     const entry: Entry = {
       kind,
       id,
@@ -146,6 +159,16 @@ export async function writeProjectIndex(vaultRoot: string, project: string, stru
     lines.push("## Unindexed (no id)", "");
     for (const path of [...unindexed].sort((a, b) => a.localeCompare(b))) {
       lines.push(`- ${path}`);
+    }
+    lines.push("");
+  }
+
+  // Trailer: files with an id whose prefix is no registered kind (F7) — surfaced so
+  // a promoted-away or typo'd prefix doesn't silently vanish from the roster.
+  if (unrecognized.length > 0) {
+    lines.push("## Unrecognized kind", "");
+    for (const { path, id } of [...unrecognized].sort((a, b) => a.path.localeCompare(b.path))) {
+      lines.push(`- ${path} (id ${id} — prefix not a registered kind)`);
     }
     lines.push("");
   }

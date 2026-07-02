@@ -97,10 +97,13 @@ describe("index-md honors the per-vault Structure (read path)", () => {
     expect(indexWithCustom).toContain("[[REQ-0001]] A requirement");
 
     // Same artifact, but the bundled default structure does not know the REQ
-    // prefix, so typeForId returns undefined and the artifact is skipped.
+    // prefix, so typeForId returns undefined — it is kept OUT of the roster body but
+    // surfaced in the Unrecognized-kind trailer (F7), never silently dropped.
     const { DEFAULT_STRUCTURE } = await import("../src/artifacts/registry");
     await writeProjectIndex(vaultRoot, "pb", DEFAULT_STRUCTURE);
     const indexWithDefault = await Bun.file(join(vaultRoot, "projects", "pb", "index.md")).text();
-    expect(indexWithDefault).not.toContain("REQ-0001");
+    expect(indexWithDefault).not.toContain("[[REQ-0001]]"); // not a roster row
+    expect(indexWithDefault).toContain("## Unrecognized kind");
+    expect(indexWithDefault).toContain("requirements/REQ-0001-x.md (id REQ-0001 — prefix not a registered kind)");
   });
 });

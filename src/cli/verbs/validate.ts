@@ -35,7 +35,7 @@ export async function handleValidate(args: string[]): Promise<CliResult> {
   }
 
   const parsed = readFrontmatter(content);
-  const kind = await loadKind(type);
+  const kind = await loadKind(type, vaultRoot);
   const result = validate(kind.schema, parsed.data);
 
   // Body-section contract (SLICE-0087): the compiled-structure rules enforced at

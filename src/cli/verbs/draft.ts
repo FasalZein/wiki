@@ -28,7 +28,7 @@ import { unknownMessage } from "../usage";
 export async function handleDraft(args: string[]): Promise<CliResult> {
   const parsed = parseCommand(args, ["project", "title"]);
   const name = parsed.positionals[0];
-  const structure = await draftStructure();
+  const { structure, vaultRoot } = await draftStructure();
   const template =
     name === undefined ? undefined : structure.kinds[name] !== undefined ? name : structure.bucketFor(name)?.bucket.template;
   if (template === undefined) {
@@ -36,7 +36,7 @@ export async function handleDraft(args: string[]): Promise<CliResult> {
     return { code: 1 };
   }
   const project = stringValue(parsed.values, "project") ?? (await readLinkedProject(process.cwd())) ?? "<project>";
-  const skeleton = await renderDraft(template, { project, title: stringValue(parsed.values, "title") });
+  const skeleton = await renderDraft(template, { project, title: stringValue(parsed.values, "title"), vaultRoot });
   console.log(skeleton);
   return { code: 0 };
 }
@@ -49,8 +49,8 @@ export async function handleDraft(args: string[]): Promise<CliResult> {
  * to serialize, and the agent opts into an optional by uncommenting it. Enum choices
  * ride the same comment (`# required — one of: ...`), so nothing must be memorized.
  */
-export async function renderDraft(type: TemplateType, opts: { project: string; title?: string }): Promise<string> {
-  const [flags, kind] = await Promise.all([authorableFlags(type), loadKind(type)]);
+export async function renderDraft(type: TemplateType, opts: { project: string; title?: string; vaultRoot?: string }): Promise<string> {
+  const [flags, kind] = await Promise.all([authorableFlags(type, opts.vaultRoot), loadKind(type, opts.vaultRoot)]);
   const lines: string[] = ["---", `template: ${type}`, `project: ${opts.project}`];
   for (const f of flags) {
     lines.push(draftFieldLine(f, opts.title));
@@ -73,13 +73,15 @@ function draftFieldLine(f: AuthorableFlag, title: string | undefined): string {
   return `# ${f.field}:  # ${tag}`;
 }
 
-/** Load the per-vault structure, falling back to the bundled default when no vault
- *  is configured (a draft is pure schema materialization — no vault write needed). */
-async function draftStructure(): Promise<Structure> {
+/** Load the per-vault structure + vault root, falling back to the bundled default
+ *  when no vault is configured (a draft is pure schema materialization — no vault
+ *  write needed). The vaultRoot is threaded so a vault-shipped template resolves (F1). */
+async function draftStructure(): Promise<{ structure: Structure; vaultRoot: string | undefined }> {
   try {
-    return await loadStructure(await getVaultRoot());
+    const vaultRoot = await getVaultRoot();
+    return { structure: await loadStructure(vaultRoot), vaultRoot };
   } catch {
-    return DEFAULT_STRUCTURE;
+    return { structure: DEFAULT_STRUCTURE, vaultRoot: undefined };
   }
 }
 

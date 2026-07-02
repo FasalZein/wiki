@@ -53,7 +53,7 @@ export async function handleSet(args: string[]): Promise<CliResult> {
 
   if (additive) return setListField(target, field, { add, remove, clear });
 
-  const coerced = await coerceValue(target.type, field, values);
+  const coerced = await coerceValue(target.type, field, values, target.vaultRoot);
   if (!coerced.ok) return fail(coerced.error);
 
   return run(target, () => setField({ ...target, field, value: coerced.value }, target.structure), (artifact) => ({
@@ -69,7 +69,7 @@ async function setListField(
   field: string,
   ops: { add: string[]; remove: string[]; clear: boolean },
 ): Promise<CliResult> {
-  const schema = await loadTemplate(target.type);
+  const schema = await loadTemplate(target.type, target.vaultRoot);
   const def = schema.fields.find((candidate) => candidate.name === field);
   if (def === undefined) return fail(`unknown field for ${target.type}: ${field}`);
   if (def.type !== "list" && def.type !== "link_list") {
@@ -253,8 +253,8 @@ async function resolveTarget(id: string, parsed: ParsedCommand): Promise<Target 
 /** Coerce raw CLI string args to the field's schema type (booleans, integers, lists). */
 type CoercedValue = { ok: true; value: unknown } | { ok: false; error: string };
 
-async function coerceValue(type: TemplateType, field: string, values: string[]): Promise<CoercedValue> {
-  const schema = await loadTemplate(type);
+async function coerceValue(type: TemplateType, field: string, values: string[], vaultRoot?: string): Promise<CoercedValue> {
+  const schema = await loadTemplate(type, vaultRoot);
   const def = schema.fields.find((candidate) => candidate.name === field);
   if (def === undefined) return { ok: false, error: `unknown field for ${type}: ${field}` };
   if (def.type === "list" || def.type === "link_list") return { ok: true, value: values };

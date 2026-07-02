@@ -19,7 +19,8 @@ import { parseCommand } from "../parse";
 export async function handleSchema(args: string[]): Promise<CliResult> {
   const parsed = parseCommand(args, []);
   const name = parsed.positionals[0];
-  const structure = await loadStructure(await getVaultRoot());
+  const vaultRoot = await getVaultRoot();
+  const structure = await loadStructure(vaultRoot);
   const resolved = name === undefined ? undefined : resolveSchemaTarget(structure, name);
   if (resolved === undefined) {
     const valid = [...new Set([...Object.keys(structure.kinds), ...bucketNames(structure)])];
@@ -29,7 +30,7 @@ export async function handleSchema(args: string[]): Promise<CliResult> {
     return { code: 1 };
   }
 
-  const kind = await loadKind(resolved.template);
+  const kind = await loadKind(resolved.template, vaultRoot);
   const fields = kind.schema.fields.map((field) => ({
     name: field.name,
     type: field.type,

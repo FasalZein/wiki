@@ -22,9 +22,9 @@ import type { CliResult } from "../dispatch";
  * in additional categories.
  */
 type CategoryResult = { labels: string[]; fixed: string };
-type Category = (content: string, file: string, structure: Structure) => CategoryResult | Promise<CategoryResult>;
+type Category = (content: string, file: string, structure: Structure, vaultRoot: string) => CategoryResult | Promise<CategoryResult>;
 
-const CATEGORIES: Category[] = [fixDates, fixTemplaterBlocks, fixAcceptanceEach, fixClosedSliceTodos, fixFrontmatterShape];
+const CATEGORIES: Category[] = [fixDates, fixTemplaterBlocks, fixAcceptanceEach, fixClosedScaffoldTodos, fixFrontmatterShape];
 
 export async function handleFmt(args: string[]): Promise<CliResult> {
   const parsed = parseCommand(args, ["project"], [], ["write"]);
@@ -143,12 +143,12 @@ export async function applyFmtFixes(
     let content = raw;
     const fileLabels: string[] = [];
     for (const category of CATEGORIES) {
-      const result = await category(content, file, structure);
+      const result = await category(content, file, structure, vaultRoot);
       fileLabels.push(...result.labels);
       content = result.fixed;
     }
     for (const diagnostic of DIAGNOSTICS) {
-      manual.push(...(await diagnostic(content, file, structure)));
+      manual.push(...(await diagnostic(content, file, structure, vaultRoot)));
     }
     if (fileLabels.length === 0) continue;
     total += fileLabels.length;
@@ -166,7 +166,7 @@ export async function applyFmtFixes(
  * with a manual-fix hint but never touches. They fail --check; --write lists
  * them under "needs manual attention" and still exits 0.
  */
-type Diagnostic = (content: string, file: string, structure: Structure) => string[] | Promise<string[]>;
+type Diagnostic = (content: string, file: string, structure: Structure, vaultRoot: string) => string[] | Promise<string[]>;
 
 const DIAGNOSTICS: Diagnostic[] = [
   diagnoseIdentity,
@@ -194,12 +194,12 @@ function diagnoseIdentity(content: string, file: string, structure: Structure): 
   return [];
 }
 
-async function diagnoseCoreFields(content: string, file: string, structure: Structure): Promise<string[]> {
+async function diagnoseCoreFields(content: string, file: string, structure: Structure, vaultRoot: string): Promise<string[]> {
   const type = artifactTypeOf(file, structure);
   if (type === undefined) return [];
   const data = frontmatterOf(content);
   if (data === undefined || typeof data.id !== "string") return []; // identity covers
-  const schema = await loadTemplate(type);
+  const schema = await loadTemplate(type, vaultRoot);
   const missing = schema.fields
     .filter((field) => field.required && field.name !== "id") // id is identity's job
     .filter((field) => data[field.name] === undefined)
@@ -213,12 +213,12 @@ async function diagnoseCoreFields(content: string, file: string, structure: Stru
  * one added) after an edit. Reuses the same template-derived contract validate
  * uses, so the two never disagree. Flag-only — authoring is a judgment call.
  */
-async function diagnoseBodySections(content: string, file: string, structure: Structure): Promise<string[]> {
+async function diagnoseBodySections(content: string, file: string, structure: Structure, vaultRoot: string): Promise<string[]> {
   const type = artifactTypeOf(file, structure);
   if (type === undefined) return [];
   const data = frontmatterOf(content);
   if (data === undefined || typeof data.id !== "string") return []; // identity covers id-less files
-  const kind = await loadKind(type);
+  const kind = await loadKind(type, vaultRoot);
   const drift = kind.sectionDrift(readFrontmatter(content).body);
   const findings: string[] = [];
   for (const heading of drift.missing) {
@@ -232,12 +232,12 @@ async function diagnoseBodySections(content: string, file: string, structure: St
 
 const ARTIFACT_ID = /^[A-Z]+-\d+$/;
 
-async function diagnoseLinkListProse(content: string, file: string, structure: Structure): Promise<string[]> {
+async function diagnoseLinkListProse(content: string, file: string, structure: Structure, vaultRoot: string): Promise<string[]> {
   const type = artifactTypeOf(file, structure);
   if (type === undefined) return [];
   const data = frontmatterOf(content);
   if (data === undefined || typeof data.id !== "string") return [];
-  const schema = await loadTemplate(type);
+  const schema = await loadTemplate(type, vaultRoot);
   const findings: string[] = [];
   for (const field of schema.fields) {
     if (field.type !== "link_list") continue;
@@ -250,19 +250,34 @@ async function diagnoseLinkListProse(content: string, file: string, structure: S
   return findings;
 }
 
-function diagnoseNarrativeFrontmatter(content: string, file: string, structure: Structure): string[] {
-  if (artifactTypeOf(file, structure) !== "decision") return [];
+/**
+ * Narrative prose stored in frontmatter (SLICE-0061), for ANY kind: an authored
+ * body section (a heading over a non-field `{{placeholder}}`) whose placeholder is
+ * instead present as a frontmatter string field. Driven off the template's authored
+ * sections (body.ts) so it can never drift from a kind's body contract — no
+ * hardcoded kind name or section list (F3).
+ */
+async function diagnoseNarrativeFrontmatter(content: string, file: string, structure: Structure, vaultRoot: string): Promise<string[]> {
+  const type = artifactTypeOf(file, structure);
+  if (type === undefined) return [];
   const data = frontmatterOf(content);
   if (data === undefined) return [];
-  const narrative = ["context", "decision", "consequences", "alternatives"].filter(
-    (name) => typeof data[name] === "string",
-  );
+  const authored = (await loadKind(type, vaultRoot)).authoredSections();
+  const narrative = authored.filter((section) => typeof data[section.placeholder] === "string");
   if (narrative.length === 0) return [];
-  return [`${file}: narrative stored in frontmatter (${narrative.join(", ")}) — hint: move it into the body ## Context / ## Decision / ## Consequences sections and drop the fields`];
+  const fields = narrative.map((section) => section.placeholder).join(", ");
+  const sections = narrative.map((section) => `## ${section.heading}`).join(" / ");
+  return [`${file}: narrative stored in frontmatter (${fields}) — hint: move it into the body ${sections} sections and drop the fields`];
 }
 
+/**
+ * A body H2 section left holding only template guidance — every non-empty line a
+ * `>` blockquote (the template's fill-me hint). Applies to ANY artifact kind (F3):
+ * the `>`-only shape is the structural signal, not a specific kind, so a bare
+ * scaffold in any kind is surfaced, not just a prd's.
+ */
 function diagnoseGuidanceOnlySections(content: string, file: string, structure: Structure): string[] {
-  if (artifactTypeOf(file, structure) !== "prd") return [];
+  if (artifactTypeOf(file, structure) === undefined) return [];
   const findings: string[] = [];
   let section: string | undefined;
   let lines: string[] = [];
@@ -449,29 +464,59 @@ function fixAcceptanceEach(content: string, file: string): CategoryResult {
   };
 }
 
-/** Closed slices predating the checkbox gate keep unchecked Todo scaffolding. */
-function fixClosedSliceTodos(content: string, file: string): CategoryResult {
-  if (!file.includes("/slices/")) return { labels: [], fixed: content };
+/**
+ * A closed artifact predating the checkbox gate keeps unchecked scaffold todos.
+ * Driven from the template (F3): the folder is any artifact kind, and the sections
+ * to tick are those whose TEMPLATE body ships STATIC unchecked-checkbox scaffolding
+ * (a `- [ ]` line with no `{{...}}` — e.g. slice's ## Todo). A dynamic checkbox
+ * section (`- [ ] {{this}}`, e.g. ## Acceptance criteria) is NOT a scaffold, so its
+ * boxes are the author's to tick. No `/slices/` or `## Todo` literal.
+ */
+async function fixClosedScaffoldTodos(content: string, file: string, structure: Structure, vaultRoot: string): Promise<CategoryResult> {
+  const type = artifactTypeOf(file, structure);
+  if (type === undefined) return { labels: [], fixed: content };
   if (frontmatterOf(content)?.status !== "closed") return { labels: [], fixed: content };
+  const scaffold = scaffoldTodoHeadings((await loadKind(type, vaultRoot)).templateBody);
+  if (scaffold.size === 0) return { labels: [], fixed: content };
   const lines = content.split("\n");
-  let inTodo = false;
+  let inScaffold = false;
   let ticked = 0;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i] ?? "";
-    if (/^## /.test(line)) {
-      inTodo = /^## Todo\s*$/.test(line);
+    const heading = /^## (.+?)\s*$/.exec(line);
+    if (heading !== null) {
+      inScaffold = scaffold.has(heading[1]!.trim().toLowerCase());
       continue;
     }
-    if (inTodo && line.startsWith("- [ ] ")) {
+    if (inScaffold && line.startsWith("- [ ] ")) {
       lines[i] = `- [x] ${line.slice(6)}`;
       ticked++;
     }
   }
   if (ticked === 0) return { labels: [], fixed: content };
   return {
-    labels: [`${file}: ${ticked} unchecked todo(s) in closed slice`],
+    labels: [`${file}: ${ticked} unchecked todo(s) in closed ${type}`],
     fixed: lines.join("\n"),
   };
+}
+
+/** Template H2 headings (lowercased) whose section body ships a STATIC unchecked
+ *  checkbox — a `- [ ]` line with no `{{...}}` placeholder. These are scaffold todos
+ *  the CLI ticks on close; dynamic (`{{this}}`) checkbox sections are left to the author. */
+function scaffoldTodoHeadings(templateBody: string): Set<string> {
+  const headings = new Set<string>();
+  let current: string | undefined;
+  for (const line of templateBody.split("\n")) {
+    const heading = /^## (.+?)\s*$/.exec(line);
+    if (heading !== null) {
+      current = heading[1]!.trim().toLowerCase();
+      continue;
+    }
+    if (current !== undefined && /^- \[ \] /.test(line) && !line.includes("{{")) {
+      headings.add(current);
+    }
+  }
+  return headings;
 }
 
 /**
@@ -480,7 +525,7 @@ function fixClosedSliceTodos(content: string, file: string): CategoryResult {
  * after the schema fields. Skips files outside artifact folders and files
  * without an id (pre-schema artifacts are flag-only territory).
  */
-async function fixFrontmatterShape(content: string, file: string, structure: Structure): Promise<CategoryResult> {
+async function fixFrontmatterShape(content: string, file: string, structure: Structure, vaultRoot: string): Promise<CategoryResult> {
   const noop = { labels: [], fixed: content };
   const type = artifactTypeOf(file, structure);
   if (type === undefined || !content.startsWith("---")) return noop;
@@ -501,7 +546,7 @@ async function fixFrontmatterShape(content: string, file: string, structure: Str
     labels.push(`${file}: missing aliases (backfilled [${id}])`);
   }
 
-  const schema = await loadTemplate(type);
+  const schema = await loadTemplate(type, vaultRoot);
   const originalKeys = Object.keys(parsed.data).join(" ");
   const orderedOriginalKeys = Object.keys(orderBySchema(schema, parsed.data)).join(" ");
   if (originalKeys !== orderedOriginalKeys) {

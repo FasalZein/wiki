@@ -1,4 +1,5 @@
 import { projectPath } from "../../artifacts/paths";
+import { markEmbedded } from "../../artifacts/embed-marker";
 import { writeProjectIndex, writeVaultIndex } from "../../artifacts/index-md";
 import { embedCollection, ensureCollection, QmdError, updateCollection } from "../../integrations/qmd";
 import { resolveQmdCommand } from "../../integrations/project-index";
@@ -53,6 +54,9 @@ export async function handleSync(args: string[]): Promise<CliResult> {
       await ensureCollection(qmdCommand, target.name, target.path);
       await updateCollection(qmdCommand, target.name, booleanValue(parsed.values, "pull"));
       await embedCollection(qmdCommand, target.name, booleanValue(parsed.values, "force-embed"));
+      // Stamp the last-embed marker only after embed succeeds (D6 makes a failed
+      // embed throw before here), so search's staleness check (F4) has a truthful baseline.
+      await markEmbedded(target.path);
       if (!jsonEnabled()) console.error(`synced collection ${target.name}`);
     }
     await writeProjectIndex(vaultRoot, project, structure);

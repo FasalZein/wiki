@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { listCollections, QmdError, runQuery, type QmdResult } from "../../integrations/qmd";
 import { resolveSharedQmdCommand } from "../../integrations/project-index";
 import { openArtifact } from "../../artifacts/artifact-file";
+import { countArtifactsNewerThanEmbed } from "../../artifacts/embed-marker";
 import { artifactFolder, projectPath } from "../../artifacts/paths";
 import { loadStructure, type Structure } from "../../artifacts/registry";
 import { recentArtifacts, RECENT_LIMIT, type RecentArtifact } from "../../artifacts/recent";
@@ -151,6 +152,17 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
       return { code: 0 };
     }
 
+    // F4: warn (stderr only, never blocking, stat-level work) when a queried
+    // collection has artifacts newer than its last embed — vector recall may be
+    // stale because the write path refreshes only the keyword index. stdout stays
+    // a clean array in --json mode.
+    for (const proj of collections) {
+      const stale = await countArtifactsNewerThanEmbed(vaultRoot, projectPath(vaultRoot, proj), structure);
+      if (stale > 0) {
+        console.error(`note: ${proj}: ${stale} artifact(s) newer than the last sync — vector recall may be stale; run: wiki sync --project ${proj}`);
+      }
+    }
+
     // Build structured query document instead of passing raw text
     const intent = classifyIntent(query);
     const queryDocument = buildStructuredQuery(query, { intent, project });
@@ -196,18 +208,13 @@ function filterByType(results: QmdResult[], type: TemplateType | undefined, stru
   if (type === undefined) {
     return results;
   }
-  // qmd returns paths as "qmd://<collection>/<path>" URIs; the artifact folder is
-  // the first path segment within the collection (e.g. qmd://rift/docs/DOC-0017.md).
-  const prefix = `/${artifactFolder(type, structure)}/`;
-  return results.filter((result) => uriPath(result.path).startsWith(prefix));
-}
-
-function uriPath(path: string): string {
-  try {
-    return new URL(path).pathname;
-  } catch {
-    return path;
-  }
+  // The artifact folder is the first segment of the collection-relative path the
+  // adapter already parsed (e.g. rel "docs/DOC-0017.md"). A raw fs path (no URI, so
+  // no rel) falls back to matching the folder segment anywhere in the path.
+  const folder = artifactFolder(type, structure);
+  return results.filter((result) =>
+    result.rel !== undefined ? result.rel.startsWith(`${folder}/`) : result.path.includes(`/${folder}/`),
+  );
 }
 
 type EnrichedHit = {
@@ -288,11 +295,11 @@ async function enrichHits(results: QmdResult[], collectionBases: Map<string, str
   const seen = new Set<string>();
   const hits: EnrichedHit[] = [];
   for (const result of results) {
-    const filePath = resolveFilePath(result.path, collectionBases);
+    const filePath = resolveFilePath(result, collectionBases);
     const dedupKey = filePath ?? result.path;
     if (seen.has(dedupKey)) continue;
     seen.add(dedupKey);
-    const { id, kind, title } = await readMeta(result.path, filePath, structure);
+    const { id, kind, title } = await readMeta(result.rel ?? result.path, filePath, structure);
     hits.push({
       id,
       kind,
@@ -305,25 +312,20 @@ async function enrichHits(results: QmdResult[], collectionBases: Map<string, str
   return hits;
 }
 
-/** Map a qmd://<collection>/<rel> URI (or a raw filesystem path) to a file on
- *  disk; null when the collection is unknown. */
-function resolveFilePath(path: string, collectionBases: Map<string, string>): string | null {
-  if (path.startsWith("qmd://")) {
-    const rest = path.slice("qmd://".length);
-    const slash = rest.indexOf("/");
-    if (slash === -1) return null;
-    const collection = rest.slice(0, slash);
-    const rel = rest.slice(slash + 1);
-    const base = collectionBases.get(collection);
-    return base === undefined ? null : join(base, rel);
-  }
-  return path; // already a filesystem path
+/** Map a result to a file on disk from the adapter-parsed collection/rel (F5);
+ *  null when the collection is unknown. A raw fs path (no URI) is used verbatim. */
+function resolveFilePath(result: QmdResult, collectionBases: Map<string, string>): string | null {
+  if (result.collection === undefined) return result.path; // already a filesystem path
+  const base = collectionBases.get(result.collection);
+  return base === undefined ? null : join(base, result.rel ?? "");
 }
 
 /** id/kind/title from frontmatter when the file is readable, else a filename/
- *  folder fallback (id from the basename stem, kind from the parent folder). */
-async function readMeta(uri: string, filePath: string | null, structure: Structure): Promise<{ id: string; kind: string; title: string }> {
-  const segments = uriPath(uri).split(/[\\/]/).filter((s) => s.length > 0);
+ *  folder fallback (id from the basename stem, kind from the parent folder). The
+ *  locator is a collection-relative or vault-relative path — only its last two
+ *  segments (folder + filename) drive the fallback. */
+async function readMeta(locator: string, filePath: string | null, structure: Structure): Promise<{ id: string; kind: string; title: string }> {
+  const segments = locator.split(/[\\/]/).filter((s) => s.length > 0);
   const fileName = segments[segments.length - 1] ?? "";
   const folder = segments[segments.length - 2] ?? "";
   const kind = structure.artifactTypeForVaultPath(`projects/x/${folder}/${fileName}`) ?? folder;

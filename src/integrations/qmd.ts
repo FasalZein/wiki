@@ -16,10 +16,27 @@ import { basename } from "node:path";
 import { isRecord } from "../util";
 
 export type QmdResult = {
+  /** The raw result locator qmd returned: a `qmd://<collection>/<rel>` URI or a
+   *  filesystem path. Prefer {@link QmdResult.collection}/{@link QmdResult.rel} —
+   *  the URI is parsed ONCE here (F5) so consumers stop re-parsing the scheme. */
   path: string;
   score: string;
   snippet: string;
+  /** Collection name from a `qmd://` URI; undefined for a raw filesystem path. */
+  collection?: string;
+  /** Collection-relative path from a `qmd://` URI (e.g. "docs/DOC-0017.md");
+   *  undefined for a raw filesystem path. */
+  rel?: string;
 };
+
+/** Parse a `qmd://<collection>/<rel>` locator once. Returns undefined for a raw
+ *  filesystem path (a non-URI backend), so consumers degrade to the raw `path`. */
+export function parseQmdUri(path: string): { collection: string; rel: string } | undefined {
+  if (!path.startsWith("qmd://")) return undefined;
+  const rest = path.slice("qmd://".length);
+  const slash = rest.indexOf("/");
+  return slash === -1 ? { collection: rest, rel: "" } : { collection: rest.slice(0, slash), rel: rest.slice(slash + 1) };
+}
 
 export class QmdError extends Error {
   /**
@@ -91,7 +108,9 @@ export async function runQuery(
     ...(options?.explain === true ? ["--explain"] : []),
     ...collections.flatMap((collection) => ["--collection", collection]),
   ];
-  const stdout = await runQmd(qmdCommand, args);
+  // query tolerates a nonzero exit that still printed results — partial results beat
+  // none for a read (F6). Every other invocation (embed/update/list) is strict.
+  const stdout = await runQmd(qmdCommand, args, { toleratePartial: true });
   if (stdout.trim().length === 0) {
     return [];
   }
@@ -99,34 +118,57 @@ export async function runQuery(
   // in the collection but are not artifacts — drop them so they never surface as a
   // search hit or a dedup candidate. Excluded here (the shared query path) so both
   // `search` and the dedup gate stay clean without re-embedding the corpus.
-  return parseQmdResults(stdout).filter((result) => basename(uriBasename(result.path)) !== "index.md");
+  return parseQmdResults(stdout).filter((result) => basename(result.rel ?? result.path) !== "index.md");
 }
 
-/** Basename of a qmd://<collection>/<rel> URI or a raw filesystem path. */
-function uriBasename(path: string): string {
-  return path.startsWith("qmd://") ? path.slice("qmd://".length) : path;
-}
+// Generous ceiling: embed can be slow (cold cache, large corpus, `--pull` fetch),
+// but a qmd that never returns (native-module deadlock, network stall) must not
+// block the CLI forever — kill it and surface a QmdError instead (F6).
+const QMD_TIMEOUT_MS = 120_000;
 
-async function runQmd(command: string, args: string[]): Promise<string> {
+/**
+ * Run one qmd subprocess. A nonzero exit is a FAILURE (F6): only `query` opts into
+ * `toleratePartial`, keeping partial stdout on a nonzero exit (partial results beat
+ * none for a read). Every other invocation — embed/update/collection — throws on a
+ * nonzero exit regardless of stdout, so `sync` can never report success on a failed
+ * embed. A run that exceeds {@link QMD_TIMEOUT_MS} is killed and raised as a QmdError.
+ */
+async function runQmd(command: string, args: string[], options?: { toleratePartial?: boolean }): Promise<string> {
   let proc: Bun.Subprocess<"ignore", "pipe", "pipe">;
   try {
     proc = Bun.spawn([command, ...args], { stdin: "ignore", stdout: "pipe", stderr: "pipe", env: { ...process.env } });
   } catch (error) {
     throw new QmdError(error instanceof Error ? error.message : String(error));
   }
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    proc.kill();
+  }, QMD_TIMEOUT_MS);
+  let stdout: string;
+  let stderr: string;
+  let exitCode: number;
+  try {
+    [stdout, stderr, exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+  if (timedOut) {
+    throw new QmdError(`qmd timed out after ${QMD_TIMEOUT_MS}ms: ${command} ${args.join(" ")}`);
+  }
   if (exitCode !== 0) {
-    if (stdout.trim().length === 0) {
-      throw new QmdError(stderr.length > 0 ? stderr : `qmd exited ${exitCode}`);
+    if (options?.toleratePartial === true && stdout.trim().length > 0) {
+      if (stderr.length > 0) {
+        const warning = stderr.split("\n").find((l) => l.startsWith("Error:")) ?? stderr.split("\n")[0] ?? "";
+        if (warning.length > 0) console.error(`qmd warning: ${warning}`);
+      }
+      return stdout;
     }
-    if (stderr.length > 0) {
-      const warning = stderr.split("\n").find(l => l.startsWith("Error:")) ?? stderr.split("\n")[0] ?? "";
-      if (warning.length > 0) console.error(`qmd warning: ${warning}`);
-    }
+    throw new QmdError(stderr.length > 0 ? stderr : `qmd exited ${exitCode}`);
   }
   return stdout;
 }
@@ -149,11 +191,13 @@ export function parseQmdResults(stdout: string): QmdResult[] {
     if (path === undefined) {
       return [];
     }
+    const uri = parseQmdUri(path);
     return [
       {
         path,
         score: scoreField(item),
         snippet: stringField(item, "snippet") ?? stringField(item, "text") ?? "",
+        ...(uri !== undefined ? { collection: uri.collection, rel: uri.rel } : {}),
       },
     ];
   });

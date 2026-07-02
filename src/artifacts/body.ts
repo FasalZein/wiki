@@ -54,19 +54,22 @@ export type Kind = {
   validate(fields: Record<string, unknown>): ReturnType<typeof validate>;
 };
 
-const kindCache = new Map<TemplateType, Promise<Kind>>();
+// Keyed on vaultRoot+type (F1): a vault-shipped template must not be poisoned by a
+// bundled-kind entry parsed earlier in the same process (bun test spans many vaults).
+const kindCache = new Map<string, Promise<Kind>>();
 
-export function loadKind(type: TemplateType): Promise<Kind> {
-  let cached = kindCache.get(type);
+export function loadKind(type: TemplateType, vaultRoot?: string): Promise<Kind> {
+  const key = `${vaultRoot ?? ""} ${type}`;
+  let cached = kindCache.get(key);
   if (cached === undefined) {
-    cached = buildKind(type);
-    kindCache.set(type, cached);
+    cached = buildKind(type, vaultRoot);
+    kindCache.set(key, cached);
   }
   return cached;
 }
 
-async function buildKind(type: TemplateType): Promise<Kind> {
-  const { schema, templateBody, templateDefaults } = await loadCompiledTemplate(type);
+async function buildKind(type: TemplateType, vaultRoot?: string): Promise<Kind> {
+  const { schema, templateBody, templateDefaults } = await loadCompiledTemplate(type, vaultRoot);
   const fieldNames = new Set(schema.fields.map((field) => field.name));
   const fieldTypes = new Map(schema.fields.map((field) => [field.name, field.type]));
   return {
