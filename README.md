@@ -13,10 +13,12 @@ them again with on-device hybrid search.
   `projects/<name>/`, version-controlled with git.
 - **Artifact kinds are data, not code.** `wiki.json` defines each kind — its id
   prefix, folder, whether the dedup gate runs, and the skill that authors it.
-  Add a kind there plus a `templates/<kind>.md`, and `wiki create <kind>` works
-  with no code change. The bundled default ships with `prd`, `slice`, `decision`
-  (ADR), `doc` (with sub-buckets), and `handoff` — but vaults customize freely;
-  run `wiki schema` to see what kinds the active vault defines.
+  Add a kind there plus a `templates/<kind>.md` (in the vault or beside the
+  binary), and `wiki create <kind>` works with no code change. The bundled
+  default ships 11 leaf kinds: `prd`, `slice`, `decision` (ADR), `architecture`,
+  `research`, `runbooks`, `specs`, `notes`, `bug`, `legacy`, and `handoff` —
+  but vaults customize freely; run `wiki schema` to see what the active vault
+  defines.
 - **The CLI is a lean artifact store, not a workflow engine.** It wraps only what
   an agent can't do safely itself: schema-validated writes, id allocation,
   comma-safe field/link edits, dedup, format normalization, and search. There
@@ -111,7 +113,8 @@ writes:
 
 **5. (Optional) Auto-persist skill output.** Wire native hooks so that when a
 skill that authors an artifact runs, the agent is reminded to save its result to
-the vault, plus a stateless session-end reminder:
+the vault. A debt-conditioned reminder fires at the next user prompt if an
+authoring skill ran without its output being captured:
 
 ```sh
 wiki hooks install --runtime claude-code --global   # or codex / pi
@@ -149,11 +152,12 @@ wiki search "auth flow" --project myproj   # ranked hybrid search, one line per 
 wiki search "what changed recently" --recent # order by last-modified instead of relevance (--since 2026-06-01 to bound it)
 wiki status --project myproj               # recent artifacts
 
-# create — one-shot, body via stdin, schema-validated
+# create — draft first (primary), or one-shot for short artifacts
+wiki draft handoff --project myproj              # fill-me skeleton to stdout
 wiki create prd      --project myproj --title "..." --body -
 wiki create slice    --project myproj --title "..." --acceptance "..." --body -
 wiki create decision --project myproj --title "..." --body -    # ADR
-wiki create handoff  --project myproj --body -
+wiki file ./my-draft.md                          # explicit capture of a stamped draft
 
 # mutate existing artifacts (never hand-edit frontmatter)
 wiki set      SLICE-0001 status closed       # schema-validated; type inferred from id (field names: kebab or snake)
@@ -179,10 +183,10 @@ Good to know:
   artifacts stay invisible to ranked search and the dedup gate.
 - **Kinds are config-driven.** The vault's `wiki.json` declares every kind the
   CLI knows about — including folder paths, id prefixes, and optional sub-buckets.
-  The bundled default uses a single `doc` kind with sub-buckets (architecture,
-  research, runbooks, specs, notes, legacy), but a vault can promote those to
-  first-class kinds or define entirely new ones. `wiki schema <kind>` shows the
-  active structure; `wiki --help` lists what `create` accepts.
+  A vault can define entirely new kinds by adding a `wiki.json` entry and a
+  `templates/<kind>.md` in the vault — no binary change. `wiki schema <kind>`
+  shows the active structure; `wiki create --help` lists what kinds the vault
+  accepts.
 
 ## Maintenance
 

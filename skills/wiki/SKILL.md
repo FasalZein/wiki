@@ -29,8 +29,9 @@ Four verbs carry almost every session: **search → create → set → sync**.
 |---|---|
 | Recall context (always do this first) | `wiki search "<query>" --project <p>`; skim `projects/<p>/index.md` — the **roster** of every artifact + one-line summary |
 | What changed lately | `wiki search --recent` · `wiki status` |
-| Write an artifact | `wiki create <kind> --project <p> --title <t> --summary <s> --body -` |
-| Discover a kind's contract before creating | `wiki schema <kind>` — fields, enums, `criteria`, and `body sections:` (authorable vs machine-owned) |
+| Scaffold an artifact (primary) | `wiki draft <kind>` — fill-me skeleton: frontmatter + authorable H2 sections; save with Write tool (hook captures it) or `wiki file <path>` |
+| Create one-shot (short artifacts) | `wiki create <kind> --project <p> --title <t> --summary <s> --body -` |
+| Discover a kind's contract | `wiki schema <kind>` — fields, enums, `criteria`, and `body sections:` (authorable vs machine-owned) |
 | Change one field | `wiki set <id> <field> <value…>` |
 | Make new/changed artifacts searchable | `wiki sync` |
 | Resolve id → file · see links | `wiki path <id>` · `wiki links <id>` |
