@@ -1,6 +1,7 @@
-import matter from "gray-matter";
 import { readFile, writeFile } from "node:fs/promises";
 import { basename } from "node:path";
+
+import { readFrontmatter, serializeArtifact } from "./artifact-file";
 
 import { getVaultRoot } from "../config/vault";
 import { readLinkedProject } from "../cli/repo-link";
@@ -76,9 +77,9 @@ export async function captureArtifact(input: { path: string; cwd: string }): Pro
   let data: Record<string, unknown>;
   let body: string;
   try {
-    const parsed = matter(content);
+    const parsed = readFrontmatter(content);
     data = parsed.data;
-    body = parsed.content;
+    body = parsed.body;
   } catch {
     return null; // not parseable frontmatter
   }
@@ -171,12 +172,12 @@ async function fileArtifact(args: {
       const title = typeof data.title === "string" && data.title.length > 0 ? data.title : id;
       const aliases = Array.isArray(data.aliases) ? [...new Set([id, ...data.aliases.map(String)])] : [id];
       const fields = { ...data, id, project, aliases, created: data.created ?? today, updated: today };
-      return { path: `${directory}/${id}-${slugifyTitle(title)}.md`, content: matter.stringify(body, fields), fields };
+      return { path: `${directory}/${id}-${slugifyTitle(title)}.md`, content: serializeArtifact(fields, body), fields };
     },
   );
 
   // Stamp the source draft with the assigned id so a re-fire is idempotent.
-  await writeFile(path, matter.stringify(body, { ...data, id: artifact.id, project }));
+  await writeFile(path, serializeArtifact({ ...data, id: artifact.id, project }, body));
   const captured: CaptureOutcome = { outcome: "captured", context: captureContext(kind, artifact.id, false) };
   return dedupNote !== undefined ? { ...captured, note: dedupNote } : captured;
 }

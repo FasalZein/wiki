@@ -1,7 +1,7 @@
-import matter from "gray-matter";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 
+import { readFrontmatter } from "../artifacts/artifact-file";
 import { type Structure } from "../artifacts/registry";
 import { isFileNotFound } from "../util";
 
@@ -80,7 +80,7 @@ export async function loadProjectConfig(projectPath: string): Promise<ProjectCon
     }
     throw error;
   }
-  const data = matter(content).data;
+  const data = readFrontmatter(content).data;
   return {
     repo: isNonEmptyString(data.repo) ? data.repo : projectPath,
     qmd_command: isNonEmptyString(data.qmd_command) ? data.qmd_command : "qmd",

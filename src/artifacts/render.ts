@@ -1,5 +1,4 @@
-import matter from "gray-matter";
-
+import { serializeArtifact } from "./artifact-file";
 import type { NormalizedRecord, Schema } from "../schema/types";
 
 export function renderArtifact(
@@ -31,7 +30,7 @@ export function renderArtifact(
     return String(value);
   });
 
-  return `${matter.stringify(body.trimStart(), values)}\n`;
+  return `${serializeArtifact(values, body.trimStart())}\n`;
 }
 
 /**

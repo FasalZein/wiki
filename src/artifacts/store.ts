@@ -1,10 +1,10 @@
-import matter from "gray-matter";
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, sep } from "node:path";
 
 import { loadTemplate, type TemplateType } from "../schema/load";
 import { BodyParseError, loadKind } from "./body";
 import { validate } from "../schema/validate";
+import { type ArtifactFile, openArtifact, serializeArtifact } from "./artifact-file";
 import type { NormalizedRecord, Schema, ValidationError } from "../schema/types";
 import { type Structure } from "./registry";
 import { nextId } from "./id";
@@ -78,23 +78,28 @@ export class ArtifactNotFoundError extends Error {
   }
 }
 
-export async function readArtifact(input: ReadArtifactInput, structure: Structure): Promise<Artifact> {
+/** Resolve an artifact's path and open it, mapping a missing file to the domain
+ *  {@link ArtifactNotFoundError}. The one read seam readArtifact and the narrowed
+ *  writers (supersede/relocate) share. */
+async function resolveAndOpen(input: ReadArtifactInput, structure: Structure): Promise<ArtifactFile> {
   const path = await resolveArtifactPath(input.type, input.vaultRoot, input.project, input.id, structure);
-  let content: string;
   try {
-    content = await readFile(path, "utf8");
+    return await openArtifact(path);
   } catch (error) {
     if (isFileNotFound(error)) {
       throw new ArtifactNotFoundError(input.id);
     }
     throw error;
   }
-  const parsed = matter(content);
+}
+
+export async function readArtifact(input: ReadArtifactInput, structure: Structure): Promise<Artifact> {
+  const file = await resolveAndOpen(input, structure);
   return {
     id: input.id,
-    path,
-    fields: parsed.data,
-    body: parsed.content.trimStart(),
+    path: file.path,
+    fields: file.data as NormalizedRecord,
+    body: file.body.trimStart(),
   };
 }
 
@@ -109,16 +114,18 @@ export async function setField(input: SetFieldInput, structure: Structure): Prom
 }
 
 export async function setFields(input: SetFieldsInput, structure: Structure): Promise<Artifact> {
-  const existing = await readArtifact(input, structure);
+  const file = await resolveAndOpen(input, structure);
   const kind = await loadKind(input.type);
   const placeholders = templatePlaceholders(kind.templateBody);
+  const existingFields = file.data as NormalizedRecord;
   for (const field of Object.keys(input.fields)) {
-    assertKnownField(kind.schema, existing, field, placeholders);
+    assertKnownField(kind.schema, existingFields, field, placeholders);
   }
-  return writeFields(input, existing, {
-    ...existing.fields,
-    ...input.fields,
-  });
+  const result = await file.replaceValidated(kind.schema, { ...existingFields, ...input.fields });
+  if (!result.ok) {
+    throw new ArtifactValidationError(result.errors);
+  }
+  return { id: input.id, path: file.path, fields: result.value, body: file.body.trimStart() };
 }
 
 /**
@@ -138,7 +145,7 @@ export async function setFields(input: SetFieldsInput, structure: Structure): Pr
  * relaxation is target-only.
  */
 export async function supersedeArtifact(input: ReadArtifactInput & { by: string }, structure: Structure): Promise<Artifact> {
-  const existing = await readArtifact(input, structure);
+  const file = await resolveAndOpen(input, structure);
   const schema = await loadTemplate(input.type);
   const statusField = schema.fields.find((field) => field.name === "status");
   const hasSupersededStatus = statusField?.constraints.values?.includes("superseded") ?? false;
@@ -152,15 +159,10 @@ export async function supersedeArtifact(input: ReadArtifactInput & { by: string 
       { field: "superseded_by", reason: `${input.type} ${input.id} cannot be superseded (no superseded_by field)` },
     ]);
   }
-  const fields: NormalizedRecord = {
-    ...existing.fields,
-    superseded_by: input.by,
-    updated: new Date().toISOString().slice(0, 10),
-  };
-  if (hasSupersededStatus) fields.status = "superseded";
-  const content = matter.stringify(existing.body, fields);
-  await writeArtifact(existing.path, content);
-  return { ...existing, fields };
+  const patch: Record<string, unknown> = { superseded_by: input.by };
+  if (hasSupersededStatus) patch.status = "superseded";
+  const fields = await file.rewriteFrontmatter(patch);
+  return { id: input.id, path: file.path, fields, body: file.body.trimStart() };
 }
 
 /** Delete an artifact file by absolute path (rollback for a half-applied create). */
@@ -185,8 +187,8 @@ export type ScrubResult = {
  * drift doctor exists to catch. Body `[[id]]` prose mentions are NOT rewritten
  * (lossy author content) — they are reported in {@link ScrubResult.bodyMentions}.
  *
- * Each rewrite is a NARROWED write (matter.stringify of the existing body +
- * pruned frontmatter): it does not re-validate the referrer against today's
+ * Each rewrite is a NARROWED write (the existing body verbatim + pruned
+ * frontmatter): it does not re-validate the referrer against today's
  * schema, so a schema-stale referrer can still be scrubbed (same relaxation
  * {@link supersedeArtifact} uses — pruning a link is not the moment to enforce an
  * unrelated field). `paths` is the inbound set the caller already computed.
@@ -195,14 +197,13 @@ export async function scrubInboundLinks(paths: string[], id: string): Promise<Sc
   const scrubbedFiles: string[] = [];
   const bodyMentions: string[] = [];
   for (const path of paths) {
-    let content: string;
+    let file: ArtifactFile;
     try {
-      content = await readFile(path, "utf8");
+      file = await openArtifact(path);
     } catch {
       continue;
     }
-    const parsed = matter(content);
-    const data = parsed.data as Record<string, unknown>;
+    const data = { ...file.data };
     let changed = false;
     for (const [name, value] of Object.entries(data)) {
       if (name === "id") continue;
@@ -218,10 +219,10 @@ export async function scrubInboundLinks(paths: string[], id: string): Promise<Sc
       }
     }
     if (changed) {
-      await writeArtifact(path, matter.stringify(parsed.content, data));
+      await writeArtifact(path, serializeArtifact(data, file.body));
       scrubbedFiles.push(path);
     }
-    if (new RegExp(`\\[\\[${id}(?=[\\]|#])`).test(parsed.content)) bodyMentions.push(path);
+    if (new RegExp(`\\[\\[${id}(?=[\\]|#])`).test(file.body)) bodyMentions.push(path);
   }
   return { scrubbedFiles, bodyMentions };
 }
@@ -396,8 +397,8 @@ async function refreshKeywordIndex(vaultRoot: string, project: string): Promise<
  */
 export async function relocateArtifact(input: RelocateArtifactInput, structure: Structure): Promise<Artifact> {
   assertSafeSegment(input.id, "artifact id");
-  const existing = await readArtifact(input, structure);
-  const nextTitle = input.title ?? (typeof existing.fields.title === "string" ? existing.fields.title : input.id);
+  const file = await resolveAndOpen(input, structure);
+  const nextTitle = input.title ?? (typeof file.data.title === "string" ? file.data.title : input.id);
 
   const resolved = input.bucket !== undefined ? structure.bucketFor(input.bucket) : undefined;
   if (input.bucket !== undefined && resolved === undefined) {
@@ -413,9 +414,9 @@ export async function relocateArtifact(input: RelocateArtifactInput, structure: 
     const moved = await mintAndWrite(
       { type: resolved.section.name, vaultRoot: input.vaultRoot, project: input.project, structure },
       (id) => {
-        const aliases = remintAliases(existing.fields.aliases, existing.id, id);
+        const aliases = remintAliases(file.data.aliases, input.id, id);
         const fields: NormalizedRecord = {
-          ...existing.fields,
+          ...(file.data as NormalizedRecord),
           id,
           ...(aliases !== undefined ? { aliases } : {}),
           title: nextTitle,
@@ -425,44 +426,39 @@ export async function relocateArtifact(input: RelocateArtifactInput, structure: 
         // id so the re-minted file stays internally consistent (mirrors doctor's
         // reassignId). Inbound links from OTHER files are still not rewritten — the
         // settled cross-section rule; doctor flags those as the documented ceiling.
-        const body = existing.body.replace(new RegExp(`\\[\\[${existing.id}(?=[\\]|#])`, "g"), `[[${id}`);
+        const body = file.body.trimStart().replace(new RegExp(`\\[\\[${input.id}(?=[\\]|#])`, "g"), `[[${id}`);
         const path = join(projectPath(input.vaultRoot, input.project), resolved.bucket.folder, `${id}-${slugifyTitle(nextTitle)}.md`);
-        return { path, content: matter.stringify(body, fields), fields };
+        return { path, content: serializeArtifact(fields, body), fields };
       },
     );
-    await rm(existing.path, { force: true });
+    await rm(file.path, { force: true });
     return moved;
   }
 
   // Same-section move or pure retitle: id preserved so [[id]] links keep resolving.
-  const fields: NormalizedRecord = { ...existing.fields };
-  if (input.title !== undefined) {
-    fields.title = input.title;
-  }
-
   const fileName = `${input.id}-${slugifyTitle(nextTitle)}.md`;
   const destinationDir = resolved !== undefined
     ? join(projectPath(input.vaultRoot, input.project), resolved.bucket.folder)
-    : dirname(existing.path);
+    : dirname(file.path);
   const destination = join(destinationDir, fileName);
 
-  if (destination !== existing.path && (await Bun.file(destination).exists())) {
+  if (destination !== file.path && (await Bun.file(destination).exists())) {
     throw new ArtifactValidationError([
       { field: "id", reason: `destination already exists: ${destination}` },
     ]);
   }
 
-  const content = matter.stringify(existing.body, { ...fields, updated: new Date().toISOString().slice(0, 10) });
-  await writeArtifact(destination, content);
-  if (destination !== existing.path) {
-    await rm(existing.path, { force: true });
+  // Narrowed write to the destination: merge the (optional) new title, re-stamp
+  // updated, keep the body verbatim — a move repositions, it does not re-validate.
+  const fields = await file.rewriteFrontmatter(input.title !== undefined ? { title: input.title } : {}, destination);
+  if (destination !== file.path) {
+    await rm(file.path, { force: true });
   }
   // Review follow-up (P2): a same-section move/retitle writes outside mintAndWrite,
   // so refresh the keyword index here too — otherwise the relocated artifact's new
   // path/title stays stale in the keyword index until the next `wiki sync`.
   await refreshKeywordIndex(input.vaultRoot, input.project);
-  const parsed = matter(content);
-  return { id: input.id, path: destination, fields: parsed.data, body: parsed.content.trimStart() };
+  return { id: input.id, path: destination, fields, body: file.body.trimStart() };
 }
 
 /** Re-mint an artifact's `aliases` on a cross-section move: swap the old id for the
@@ -473,10 +469,10 @@ function remintAliases(aliases: unknown, oldId: string, newId: string): string[]
   return swapped.includes(newId) ? swapped : [newId, ...swapped];
 }
 
-function assertKnownField(schema: Schema, existing: Artifact, fieldName: string, placeholders: Set<string>): void {
+function assertKnownField(schema: Schema, existingFields: Record<string, unknown>, fieldName: string, placeholders: Set<string>): void {
   if (
     !schema.fields.some((field) => field.name === fieldName) &&
-    existing.fields[fieldName] === undefined &&
+    existingFields[fieldName] === undefined &&
     !placeholders.has(fieldName)
   ) {
     throw new ArtifactValidationError([{ field: fieldName, reason: "unknown field" }]);
@@ -489,21 +485,6 @@ function templatePlaceholders(template: string): Set<string> {
 
 function isString(value: string | undefined): value is string {
   return value !== undefined;
-}
-
-async function writeFields(input: ReadArtifactInput, existing: Artifact, fields: NormalizedRecord): Promise<Artifact> {
-  const schema = await loadTemplate(input.type);
-  const result = validate(schema, {
-    ...fields,
-    updated: new Date().toISOString().slice(0, 10),
-  });
-  if (!result.ok) {
-    throw new ArtifactValidationError(result.errors);
-  }
-
-  const content = matter.stringify(existing.body, result.value);
-  await writeArtifact(existing.path, content);
-  return { ...existing, fields: result.value };
 }
 
 async function writeArtifact(path: string, content: string): Promise<void> {

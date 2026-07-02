@@ -1,8 +1,7 @@
 import { readdir, readFile, rename } from "node:fs/promises";
 import { join, relative } from "node:path";
 
-import matter from "gray-matter";
-
+import { readFrontmatter, serializeArtifact } from "../../artifacts/artifact-file";
 import { orderBySchema } from "../../artifacts/render";
 import { loadKind } from "../../artifacts/body";
 import { loadStructure, type Structure } from "../../artifacts/registry";
@@ -220,7 +219,7 @@ async function diagnoseBodySections(content: string, file: string, structure: St
   const data = frontmatterOf(content);
   if (data === undefined || typeof data.id !== "string") return []; // identity covers id-less files
   const kind = await loadKind(type);
-  const drift = kind.sectionDrift(matter(content).content);
+  const drift = kind.sectionDrift(readFrontmatter(content).body);
   const findings: string[] = [];
   for (const heading of drift.missing) {
     findings.push(`${file}: missing required body section "## ${heading}" — hint: add the section back`);
@@ -486,13 +485,13 @@ async function fixFrontmatterShape(content: string, file: string, structure: Str
   const type = artifactTypeOf(file, structure);
   if (type === undefined || !content.startsWith("---")) return noop;
 
-  let parsed: matter.GrayMatterFile<string>;
+  let parsed: { data: Record<string, unknown>; body: string };
   try {
-    parsed = matter(content);
+    parsed = readFrontmatter(content);
   } catch {
     return noop;
   }
-  const data = { ...(parsed.data as Record<string, unknown>) };
+  const data = { ...parsed.data };
   const id = data.id;
   if (typeof id !== "string") return noop;
 
@@ -504,18 +503,18 @@ async function fixFrontmatterShape(content: string, file: string, structure: Str
 
   const schema = await loadTemplate(type);
   const originalKeys = Object.keys(parsed.data).join(" ");
-  const orderedOriginalKeys = Object.keys(orderBySchema(schema, parsed.data as Record<string, unknown>)).join(" ");
+  const orderedOriginalKeys = Object.keys(orderBySchema(schema, parsed.data)).join(" ");
   if (originalKeys !== orderedOriginalKeys) {
     labels.push(`${file}: frontmatter field order differs from schema order`);
   }
   if (labels.length === 0) return noop;
 
-  return { labels, fixed: matter.stringify(parsed.content.trimStart(), orderBySchema(schema, data)) };
+  return { labels, fixed: serializeArtifact(orderBySchema(schema, data), parsed.body.trimStart()) };
 }
 
 function frontmatterOf(content: string): Record<string, unknown> | undefined {
   try {
-    return matter(content).data as Record<string, unknown>;
+    return readFrontmatter(content).data;
   } catch {
     return undefined;
   }

@@ -6,9 +6,7 @@
  * doctor (drift), `links` (graph read), and `mutate` (delete guard) share one
  * implementation instead of reaching across layers.
  */
-import matter from "gray-matter";
-import { readFile } from "node:fs/promises";
-
+import { openArtifact } from "./artifact-file";
 import { type Structure } from "./registry";
 
 /** A bare `PREFIX-NNNN` id, the only wikilink form the dangling-link check validates.
@@ -40,15 +38,14 @@ export function isLocalIdRef(id: string, structure: Structure): boolean {
 /** Every link reference in one file: frontmatter string/array values plus body
  *  `[[..]]` wikilinks. Validation/skip decisions are the caller's; this just gathers. */
 export async function collectReferences(path: string): Promise<string[]> {
-  let content: string;
+  let file;
   try {
-    content = await readFile(path, "utf8");
+    file = await openArtifact(path);
   } catch {
     return [];
   }
   const refs: string[] = [];
-  const parsed = matter(content);
-  for (const [name, value] of Object.entries(parsed.data as Record<string, unknown>)) {
+  for (const [name, value] of Object.entries(file.data)) {
     if (name === "id") continue;
     if (typeof value === "string") refs.push(value);
     else if (Array.isArray(value)) {
@@ -57,7 +54,7 @@ export async function collectReferences(path: string): Promise<string[]> {
   }
   let match: RegExpExecArray | null;
   WIKILINK_RE.lastIndex = 0;
-  while ((match = WIKILINK_RE.exec(parsed.content)) !== null) refs.push(match[1]!);
+  while ((match = WIKILINK_RE.exec(file.body)) !== null) refs.push(match[1]!);
   return refs;
 }
 
@@ -67,17 +64,16 @@ export async function collectReferences(path: string): Promise<string[]> {
  *  (those starting with `projects/` or lacking `..`) are included — relative
  *  cross-project traversals are excluded by design. */
 export async function collectPathLinks(path: string): Promise<string[]> {
-  let content: string;
+  let file;
   try {
-    content = await readFile(path, "utf8");
+    file = await openArtifact(path);
   } catch {
     return [];
   }
-  const parsed = matter(content);
   const targets: string[] = [];
   WIKILINK_RE.lastIndex = 0;
   let match: RegExpExecArray | null;
-  while ((match = WIKILINK_RE.exec(parsed.content)) !== null) {
+  while ((match = WIKILINK_RE.exec(file.body)) !== null) {
     let target = match[1]!.split("|")[0]!.split("#")[0]!.trim();
     if (!target.includes("/")) continue; // bare id, not a path link
     if (target.includes("..")) continue; // relative cross-project traversal — skip

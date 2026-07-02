@@ -1,8 +1,8 @@
-import matter from "gray-matter";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
+import { readFrontmatter } from "../../artifacts/artifact-file";
 import { captureArtifact, type CaptureOutcome } from "../../artifacts/capture";
 import { DEFAULT_STRUCTURE } from "../../artifacts/registry";
 import { readLinkedProject } from "../repo-link";
@@ -405,7 +405,7 @@ async function agentReachability(home: string): Promise<AgentReach[]> {
   for (const file of names) {
     let data: Record<string, unknown>;
     try {
-      data = matter(await readFile(join(dir, file), "utf8")).data;
+      data = readFrontmatter(await readFile(join(dir, file), "utf8")).data;
     } catch {
       continue; // unparseable agent file — skip
     }

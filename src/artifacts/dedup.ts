@@ -1,5 +1,4 @@
-import matter from "gray-matter";
-import { readdir, readFile } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 import { basename, join } from "node:path";
 
 import { ensureCollection, QmdError, refreshCollections, runQuery, type QmdResult } from "../integrations/qmd";
@@ -7,6 +6,7 @@ import type { ProjectConfig } from "../config/project";
 import type { TemplateType } from "../schema/load";
 import { classifyIntent } from "../search/intent";
 import { buildStructuredQuery } from "../search/query-builder";
+import { openArtifact } from "./artifact-file";
 import { artifactFolder } from "./paths";
 import type { Structure } from "./registry";
 
@@ -188,8 +188,7 @@ function idOfFile(filePath: string): string {
 
 async function readTitle(filePath: string): Promise<string> {
   try {
-    const data = matter(await readFile(filePath, "utf8")).data as Record<string, unknown>;
-    return typeof data.title === "string" ? data.title : "";
+    return (await openArtifact(filePath)).field("title") ?? "";
   } catch {
     return "";
   }
@@ -217,16 +216,16 @@ async function scanUnsyncedSameKind(
   const files = await listMarkdown(dir);
   const out: DedupResult[] = [];
   for (const file of files) {
-    let data: Record<string, unknown>;
+    let af;
     try {
-      data = matter(await readFile(file, "utf8")).data as Record<string, unknown>;
+      af = await openArtifact(file);
     } catch {
       continue;
     }
-    const id = typeof data.id === "string" ? data.id : undefined;
+    const id = af.field("id");
     if (id === undefined) continue;
-    const title = typeof data.title === "string" ? data.title : "";
-    const summary = typeof data.summary === "string" ? data.summary : "";
+    const title = af.field("title") ?? "";
+    const summary = af.field("summary") ?? "";
     const score = cosine(queryTokens, tokenize(`${title} ${summary}`));
     if (score >= thresholds.weak) {
       out.push({

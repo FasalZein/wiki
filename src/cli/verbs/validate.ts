@@ -1,7 +1,7 @@
-import matter from "gray-matter";
 import { readFile } from "node:fs/promises";
 import { basename, relative } from "node:path";
 
+import { readFrontmatter } from "../../artifacts/artifact-file";
 import { loadKind } from "../../artifacts/body";
 import { validate } from "../../schema/validate";
 import { loadStructure } from "../../artifacts/registry";
@@ -34,14 +34,14 @@ export async function handleValidate(args: string[]): Promise<CliResult> {
     return { code: 1 };
   }
 
-  const parsed = matter(content);
+  const parsed = readFrontmatter(content);
   const kind = await loadKind(type);
   const result = validate(kind.schema, parsed.data);
 
   // Body-section contract (SLICE-0087): the compiled-structure rules enforced at
   // create time also apply after edits. Report required H2 sections that were
   // removed (and unknown ones added) using the same template as the source of truth.
-  const drift = kind.sectionDrift(parsed.content);
+  const drift = kind.sectionDrift(parsed.body);
 
   // SLICE-0088: a uniform {field,reason,expected} error list across schema and
   // body checks, so --json emits {ok,type,errors:[...]} and human mode prints

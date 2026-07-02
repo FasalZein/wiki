@@ -1,7 +1,7 @@
 import { access, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import matter from "gray-matter";
 
+import { openArtifact, readFrontmatter, serializeArtifact } from "../artifacts/artifact-file";
 import { buildIdIndex } from "../artifacts/id-index";
 import { nextId } from "../artifacts/id";
 import { bareIdOf, collectPathLinks, collectReferences, isLocalIdRef } from "../artifacts/references";
@@ -168,8 +168,8 @@ async function repairDuplicateIdsLocked(
 /** Rewrite one file's frontmatter `id` (and matching `aliases`) plus any self
  *  `[[oldId]]` body links to `newId`, then rename it to `<newId>-<slug>.md`. */
 async function reassignId(filePath: string, oldId: string, newId: string): Promise<void> {
-  const parsed = matter(await readFile(filePath, "utf8"));
-  const data = parsed.data as Record<string, unknown>;
+  const file = await openArtifact(filePath);
+  const data = { ...file.data };
   data.id = newId;
   if (Array.isArray(data.aliases)) {
     const aliases = data.aliases.map((a) => (a === oldId ? newId : a));
@@ -177,8 +177,8 @@ async function reassignId(filePath: string, oldId: string, newId: string): Promi
     data.aliases = aliases;
   }
   // Self-references only: a file that links to its own old id now links to the new one.
-  const body = parsed.content.replace(new RegExp(`\\[\\[${oldId}(?=[\\]|#])`, "g"), `[[${newId}`);
-  const content = matter.stringify(body, data);
+  const body = file.body.replace(new RegExp(`\\[\\[${oldId}(?=[\\]|#])`, "g"), `[[${newId}`);
+  const content = serializeArtifact(data, body);
   const title = typeof data.title === "string" ? data.title : newId;
   const target = join(dirname(filePath), `${newId}-${slugifyTitle(title)}.md`);
   await writeFile(target, content);
@@ -254,7 +254,7 @@ export async function checkProjectRepoBindings(vaultPath: string, project: strin
     return issues; // No _project.md — skip
   }
 
-  const parsed = matter(raw);
+  const parsed = readFrontmatter(raw);
   const linkedRepos = parsed.data.linked_repos;
   if (!Array.isArray(linkedRepos) || linkedRepos.length === 0) return issues;
 

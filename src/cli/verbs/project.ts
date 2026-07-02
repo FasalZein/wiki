@@ -1,7 +1,7 @@
 import { mkdir, readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import matter from "gray-matter";
 
+import { readFrontmatter, serializeArtifact } from "../../artifacts/artifact-file";
 import { projectPath } from "../../artifacts/paths";
 import { loadStructure } from "../../artifacts/registry";
 import { listProjects } from "../../config/project";
@@ -152,11 +152,11 @@ async function linkProject(args: string[]): Promise<CliResult> {
 
   // Record repo in _project.md linked_repos list (idempotent).
   const raw = await readFile(projectMdPath, "utf8");
-  const parsed2 = matter(raw);
+  const parsed2 = readFrontmatter(raw);
   const existing: string[] = Array.isArray(parsed2.data.linked_repos) ? parsed2.data.linked_repos : [];
   if (!existing.includes(repoDir)) {
     existing.push(repoDir);
-    await Bun.write(projectMdPath, matter.stringify(parsed2.content, { ...parsed2.data, linked_repos: existing }));
+    await Bun.write(projectMdPath, serializeArtifact({ ...parsed2.data, linked_repos: existing }, parsed2.body));
   }
 
   console.error(`linked repo ${repoDir} to project ${projectName}`);

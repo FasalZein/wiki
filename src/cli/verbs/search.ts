@@ -8,11 +8,10 @@
  * exposes richer frontmatter, this can move into runQuery.
  */
 
-import matter from "gray-matter";
-import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { listCollections, QmdError, runQuery, type QmdResult } from "../../integrations/qmd";
+import { openArtifact } from "../../artifacts/artifact-file";
 import { artifactFolder, projectPath } from "../../artifacts/paths";
 import { loadStructure, type Structure } from "../../artifacts/registry";
 import { recentArtifacts, RECENT_LIMIT, type RecentArtifact } from "../../artifacts/recent";
@@ -351,9 +350,11 @@ async function readMeta(uri: string, filePath: string | null, structure: Structu
   let title = "";
   if (filePath !== null) {
     try {
-      const data = matter(await readFile(filePath, "utf8")).data;
-      if (typeof data.id === "string" && data.id.length > 0) id = data.id;
-      if (typeof data.title === "string") title = data.title;
+      const af = await openArtifact(filePath);
+      const fmId = af.field("id");
+      if (fmId !== undefined && fmId.length > 0) id = fmId;
+      const fmTitle = af.field("title");
+      if (fmTitle !== undefined) title = fmTitle;
     } catch {
       // file not on disk (e.g. stale index) — keep the filename/folder fallback
     }

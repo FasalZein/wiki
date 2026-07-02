@@ -1,9 +1,9 @@
-import matter from "gray-matter";
 import { readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join, sep } from "node:path";
 
 import type { TemplateType } from "../schema/load";
 import { listProjects } from "../config/project";
+import { openArtifact } from "./artifact-file";
 import { type Structure } from "./registry";
 import { projectPath } from "./paths";
 
@@ -86,7 +86,7 @@ export async function writeProjectIndex(vaultRoot: string, project: string, stru
     }
 
     parsed += 1;
-    const data = matter(await readFile(full, "utf8")).data as Record<string, unknown>;
+    const data = (await openArtifact(full)).data;
     const id = field(data, "id");
     if (id === "") {
       unindexed.push(relPath); // skipped for lacking an id — listed in the Unindexed trailer

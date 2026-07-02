@@ -1,7 +1,7 @@
-import matter from "gray-matter";
-import { readdir, readFile } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 
+import { openArtifact } from "./artifact-file";
 import { projectPath } from "./paths";
 import { type Structure } from "./registry";
 
@@ -43,12 +43,11 @@ async function collectIds(directory: string, index: Map<string, string[]>): Prom
 }
 
 async function readFrontmatterId(path: string): Promise<string | undefined> {
-  let content: string;
+  let id: string | undefined;
   try {
-    content = await readFile(path, "utf8");
+    id = (await openArtifact(path)).field("id");
   } catch {
     return undefined;
   }
-  const id = matter(content).data.id;
-  return typeof id === "string" && id.length > 0 ? id : undefined;
+  return id !== undefined && id.length > 0 ? id : undefined;
 }
