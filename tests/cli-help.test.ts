@@ -140,7 +140,7 @@ describe("dynamic kind list in help", () => {
     expect(output).toContain("<prd|slice|decision|architecture|research|runbooks|specs|notes|legacy|handoff>");
   });
 
-  test("create --help falls back to default 5 kinds when no vault is configured", async () => {
+  test("create --help falls back to the bundled default kinds when no vault is configured", async () => {
     // Point at a non-existent path so getVaultRoot throws
     const home = await mkdtemp(join(tmpdir(), "wiki-help-"));
     tempPaths.push(home);
@@ -152,18 +152,18 @@ describe("dynamic kind list in help", () => {
     cap.restore();
     expect(result.code).toBe(0);
     const output = cap.output();
-    // Default 5 kinds
-    for (const kind of ["prd", "slice", "decision", "doc", "handoff"]) {
+    // PRD-0023: the bundled default is the promoted-kinds model (10 leaf kinds).
+    for (const kind of [
+      "prd", "slice", "decision", "architecture", "research",
+      "runbooks", "specs", "notes", "legacy", "handoff",
+    ]) {
       expect(output, `should list default kind: ${kind}`).toContain(kind);
     }
-    // Should NOT list promoted kinds that only exist in a configured vault.
-    // Check for their subcommand entries specifically — the bare word
-    // "architecture" legitimately appears in the ADR description line.
-    expect(output).not.toContain("Create a architecture artifact");
-    expect(output).not.toContain("Create a runbooks artifact");
+    // The removed `doc` kind must not appear as a create subcommand.
+    expect(output).not.toContain("Create a doc artifact");
   });
 
-  test("next-id --help falls back to default 5 kinds when no vault is configured", async () => {
+  test("next-id --help falls back to the bundled default kinds when no vault is configured", async () => {
     const home = await mkdtemp(join(tmpdir(), "wiki-help-"));
     tempPaths.push(home);
     process.env.HOME = home;
@@ -174,7 +174,7 @@ describe("dynamic kind list in help", () => {
     cap.restore();
     expect(result.code).toBe(0);
     const output = cap.output();
-    expect(output).toContain("<prd|slice|decision|doc|handoff>");
+    expect(output).toContain("<prd|slice|decision|architecture|research|runbooks|specs|notes|legacy|handoff>");
   });
 });
 

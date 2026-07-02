@@ -16,11 +16,11 @@ describe("doc CLI", () => {
     const result = await runWiki(createArgs(), vaultRoot);
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe("DOC-0001\n");
-    expect(result.stderr).toContain("created DOC-0001");
+    expect(result.stdout).toBe("NOTE-0001\n");
+    expect(result.stderr).toContain("created NOTE-0001");
 
-    const file = await readDoc(vaultRoot, "DOC-0001");
-    expect(file).toContain("id: DOC-0001");
+    const file = await readDoc(vaultRoot, "NOTE-0001");
+    expect(file).toContain("id: NOTE-0001");
     expect(file).toContain("title: Pre-deploy checklist for Kamal services");
     expect(file).toContain("project: test-project");
     // SLICE-0117: the doc `type` enum is gone; docs carry no type field.
@@ -31,7 +31,7 @@ describe("doc CLI", () => {
     const vaultRoot = await createFixtureVault("test-project");
 
     const result = await runWiki([
-      "create", "doc",
+      "create", "notes",
       "--title", "Evidence-first architecture",
       "--summary", "Evidence-first architecture overview.",
       "--project", "test-project",
@@ -39,8 +39,8 @@ describe("doc CLI", () => {
     ], vaultRoot);
 
     expect(result.exitCode).toBe(0);
-    const path = join(vaultRoot, "projects", "test-project", "docs", "architecture", "DOC-0001-evidence-first-architecture.md");
-    expect(await readFile(path, "utf8")).toContain("id: DOC-0001");
+    const path = join(vaultRoot, "projects", "test-project", "docs", "architecture", "NOTE-0001-evidence-first-architecture.md");
+    expect(await readFile(path, "utf8")).toContain("id: NOTE-0001");
   });
 
   test("doc create with no --category defaults to the notes bucket (SLICE-0117)", async () => {
@@ -49,21 +49,21 @@ describe("doc CLI", () => {
     // With the doc `type` enum removed, a bare create files into notes/, the
     // catch-all bucket, not loose in docs/.
     await runWiki([
-      "create", "doc",
+      "create", "notes",
       "--title", "Some reference doc title",
       "--summary", "A reference doc for routing test.",
       "--project", "test-project",
     ], vaultRoot);
 
-    const notesPath = join(vaultRoot, "projects", "test-project", "docs", "notes", "DOC-0001-some-reference-doc-title.md");
-    expect(await readFile(notesPath, "utf8")).toContain("id: DOC-0001");
+    const notesPath = join(vaultRoot, "projects", "test-project", "docs", "notes", "NOTE-0001-some-reference-doc-title.md");
+    expect(await readFile(notesPath, "utf8")).toContain("id: NOTE-0001");
   });
 
   test("doc create exits 1 for an unknown category", async () => {
     const vaultRoot = await createFixtureVault("test-project");
 
     const result = await runWiki([
-      "create", "doc",
+      "create", "notes",
       "--title", "Some valid title here",
       "--project", "test-project",
       "--category", "blueprints",
@@ -77,7 +77,7 @@ describe("doc CLI", () => {
     const vaultRoot = await createFixtureVault("test-project");
 
     const result = await runWiki([
-      "create", "doc",
+      "create", "notes",
       "--title", "AWS migration research",
       "--summary", "Research on the AWS migration.",
       "--project", "test-project",
@@ -86,7 +86,7 @@ describe("doc CLI", () => {
     ], vaultRoot);
 
     expect(result.exitCode).toBe(0);
-    const file = await readDoc(vaultRoot, "DOC-0001");
+    const file = await readDoc(vaultRoot, "NOTE-0001");
     expect(file).toContain("aws");
     expect(file).toContain("migration");
   });
@@ -95,7 +95,7 @@ describe("doc CLI", () => {
     const vaultRoot = await createFixtureVault("test-project");
 
     const result = await runWiki([
-      "create", "doc",
+      "create", "notes",
       "--project", "test-project",
     ], vaultRoot);
 
@@ -107,14 +107,14 @@ describe("doc CLI", () => {
     const vaultRoot = await createFixtureVault("test-project");
 
     const result = await runWiki([
-      "create", "doc",
+      "create", "notes",
       "--title", "Some doc title here",
       "--summary", "A doc with no type field.",
       "--project", "test-project",
     ], vaultRoot);
 
     expect(result.exitCode).toBe(0);
-    const file = await readDoc(vaultRoot, "DOC-0001");
+    const file = await readDoc(vaultRoot, "NOTE-0001");
     expect(file).not.toContain("type:");
   });
 
@@ -123,7 +123,7 @@ describe("doc CLI", () => {
 
     // The doc `type` enum is gone, so --type is an unknown flag and fails parsing.
     const result = await runWiki([
-      "create", "doc",
+      "create", "notes",
       "--title", "Some valid title here",
       "--summary", "A doc summary line here.",
       "--project", "test-project",
@@ -138,7 +138,7 @@ describe("doc CLI", () => {
 
     await runWiki(createArgs(), vaultRoot);
     const result = await runWiki([
-      "create", "doc",
+      "create", "notes",
       "--title", "Another knowledge doc here",
       "--summary", "Another knowledge doc for IDs.",
       "--project", "test-project",
@@ -146,55 +146,55 @@ describe("doc CLI", () => {
     ], vaultRoot);
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe("DOC-0002\n");
+    expect(result.stdout).toBe("NOTE-0002\n");
   });
 
   test("validate recognizes docs/ path", async () => {
     const vaultRoot = await createFixtureVault("test-project");
     await runWiki(createArgs(), vaultRoot);
 
-    const docPath = join(vaultRoot, "projects", "test-project", "docs", "runbooks", "DOC-0001-pre-deploy-checklist-for-kamal-services.md");
+    const docPath = join(vaultRoot, "projects", "test-project", "docs", "runbooks", "NOTE-0001-pre-deploy-checklist-for-kamal-services.md");
     const result = await runWiki(["validate", docPath], vaultRoot);
 
     expect(result.exitCode).toBe(0);
-    expect(result.stderr).toContain("valid doc");
+    expect(result.stderr).toContain("valid notes");
   });
 
   test("doc retitle updates the title and renames the file, still resolvable by id", async () => {
     const vaultRoot = await createFixtureVault("test-project");
-    await runWiki(createArgs(), vaultRoot); // DOC-0001 in docs/runbooks/
+    await runWiki(createArgs(), vaultRoot); // NOTE-0001 in docs/runbooks/
 
     const result = await runWiki([
-      "doc", "retitle", "DOC-0001",
+      "doc", "retitle", "NOTE-0001",
       "--project", "test-project",
       "--title", "Kamal deploy preflight checklist",
     ], vaultRoot);
 
     expect(result.exitCode).toBe(0);
-    const oldPath = join(vaultRoot, "projects", "test-project", "docs", "runbooks", "DOC-0001-pre-deploy-checklist-for-kamal-services.md");
-    const newPath = join(vaultRoot, "projects", "test-project", "docs", "runbooks", "DOC-0001-kamal-deploy-preflight-checklist.md");
+    const oldPath = join(vaultRoot, "projects", "test-project", "docs", "runbooks", "NOTE-0001-pre-deploy-checklist-for-kamal-services.md");
+    const newPath = join(vaultRoot, "projects", "test-project", "docs", "runbooks", "NOTE-0001-kamal-deploy-preflight-checklist.md");
     expect(await fileExists(oldPath)).toBe(false);
     const file = await readFile(newPath, "utf8");
     expect(file).toContain("title: Kamal deploy preflight checklist");
-    expect(file).toContain("id: DOC-0001");
+    expect(file).toContain("id: NOTE-0001");
   });
 
   test("doc recategorize moves the file to docs/<category>, still resolvable by id", async () => {
     const vaultRoot = await createFixtureVault("test-project");
-    await runWiki(createArgs(), vaultRoot); // DOC-0001 in docs/runbooks/
+    await runWiki(createArgs(), vaultRoot); // NOTE-0001 in docs/runbooks/
 
     const result = await runWiki([
-      "doc", "recategorize", "DOC-0001",
+      "doc", "recategorize", "NOTE-0001",
       "--project", "test-project",
       "--category", "architecture",
     ], vaultRoot);
 
     expect(result.exitCode).toBe(0);
-    const oldPath = join(vaultRoot, "projects", "test-project", "docs", "runbooks", "DOC-0001-pre-deploy-checklist-for-kamal-services.md");
-    const newPath = join(vaultRoot, "projects", "test-project", "docs", "architecture", "DOC-0001-pre-deploy-checklist-for-kamal-services.md");
+    const oldPath = join(vaultRoot, "projects", "test-project", "docs", "runbooks", "NOTE-0001-pre-deploy-checklist-for-kamal-services.md");
+    const newPath = join(vaultRoot, "projects", "test-project", "docs", "architecture", "NOTE-0001-pre-deploy-checklist-for-kamal-services.md");
     expect(await fileExists(oldPath)).toBe(false);
     expect(await fileExists(newPath)).toBe(true);
-    expect(await readFile(newPath, "utf8")).toContain("id: DOC-0001");
+    expect(await readFile(newPath, "utf8")).toContain("id: NOTE-0001");
   });
 
   test("doc recategorize exits 1 for an unknown category", async () => {
@@ -202,7 +202,7 @@ describe("doc CLI", () => {
     await runWiki(createArgs(), vaultRoot);
 
     const result = await runWiki([
-      "doc", "recategorize", "DOC-0001",
+      "doc", "recategorize", "NOTE-0001",
       "--project", "test-project",
       "--category", "blueprints",
     ], vaultRoot);
@@ -231,16 +231,16 @@ describe("doc CLI", () => {
 
   test("doc recategorize works on branch section (5-kind vault)", async () => {
     const vaultRoot = await createFixtureVault("test-project");
-    await runWiki(createArgs(), vaultRoot); // DOC-0001 in docs/runbooks/
+    await runWiki(createArgs(), vaultRoot); // NOTE-0001 in docs/runbooks/
 
     const result = await runWiki([
-      "doc", "recategorize", "DOC-0001",
+      "doc", "recategorize", "NOTE-0001",
       "--project", "test-project",
       "--category", "architecture",
     ], vaultRoot);
 
     expect(result.exitCode).toBe(0);
-    const newPath = join(vaultRoot, "projects", "test-project", "docs", "architecture", "DOC-0001-pre-deploy-checklist-for-kamal-services.md");
+    const newPath = join(vaultRoot, "projects", "test-project", "docs", "architecture", "NOTE-0001-pre-deploy-checklist-for-kamal-services.md");
     expect(await fileExists(newPath)).toBe(true);
   });
 
@@ -275,7 +275,7 @@ describe("doc CLI", () => {
     const vaultRoot = await createFixtureVault("test-project");
 
     const result = await runWiki([
-      "doc", "retitle", "DOC-0099",
+      "doc", "retitle", "NOTE-0099",
       "--project", "test-project",
       "--title", "Whatever new title here",
     ], vaultRoot);
@@ -286,10 +286,10 @@ describe("doc CLI", () => {
 
   test("doc retitle --json emits {id,path} (SLICE-0088)", async () => {
     const vaultRoot = await createFixtureVault("test-project");
-    await runWiki(createArgs(), vaultRoot); // DOC-0001 in docs/runbooks/
+    await runWiki(createArgs(), vaultRoot); // NOTE-0001 in docs/runbooks/
 
     const result = await runWiki([
-      "doc", "retitle", "DOC-0001",
+      "doc", "retitle", "NOTE-0001",
       "--project", "test-project",
       "--title", "Kamal deploy preflight checklist",
       "--json",
@@ -297,13 +297,13 @@ describe("doc CLI", () => {
 
     expect(result.exitCode).toBe(0);
     const parsed = JSON.parse(result.stdout);
-    expect(parsed.id).toBe("DOC-0001");
-    expect(parsed.path).toContain("DOC-0001-kamal-deploy-preflight-checklist.md");
+    expect(parsed.id).toBe("NOTE-0001");
+    expect(parsed.path).toContain("NOTE-0001-kamal-deploy-preflight-checklist.md");
   });
 });
 
 function createArgs(): string[] {
-  return ["create", "doc", "--title", "Pre-deploy checklist for Kamal services", "--summary", "Pre-deploy checklist for Kamal.", "--project", "test-project", "--category", "runbooks"];
+  return ["create", "notes", "--title", "Pre-deploy checklist for Kamal services", "--summary", "Pre-deploy checklist for Kamal.", "--project", "test-project", "--category", "runbooks"];
 }
 
 type CommandResult = {
@@ -327,9 +327,37 @@ async function runWiki(args: string[], vaultRoot: string): Promise<CommandResult
   return { exitCode, stdout, stderr };
 }
 
+// PRD-0023 promoted the old `doc` BRANCH kind into first-class leaf kinds, so the
+// bundled default no longer has a branch section (and templates/doc.md is gone).
+// These tests exercise create-into-category + the generic `doc` relocate verb on a
+// custom branch `notes` section (folder docs/, NOTE id-space) whose buckets reuse the
+// existing `notes` template (## Content) — reproducing the old doc structure intact.
+const branchConfig = JSON.stringify({
+  kinds: {
+    prd: { prefix: "PRD", folder: "prds", dedup: true },
+    slice: { prefix: "SLICE", folder: "slices", dedup: true },
+    decision: { prefix: "ADR", folder: "adrs", dedup: true },
+    handoff: { prefix: "HANDOFF", folder: "handoffs", dedup: false },
+    notes: {
+      prefix: "NOTE",
+      folder: "docs",
+      dedup: true,
+      buckets: {
+        architecture: { criteria: "How the system is built." },
+        research: { criteria: "External findings." },
+        runbooks: { criteria: "Operational how-to." },
+        specs: { criteria: "Precise contracts." },
+        notes: { criteria: "Catch-all." },
+        legacy: { criteria: "Historical material." },
+      },
+    },
+  },
+});
+
 async function createFixtureVault(project: string): Promise<string> {
   const vaultRoot = await mkdtemp(join(tmpdir(), "wiki-vault-"));
   tempPaths.push(vaultRoot);
+  await writeFile(join(vaultRoot, "wiki.json"), branchConfig);
   const projectPath = join(vaultRoot, "projects", project);
   await mkdir(join(projectPath, "prds"), { recursive: true });
   await mkdir(join(projectPath, "slices"));

@@ -42,10 +42,10 @@ describe("advisory dedup", () => {
     expect(result.exitCode).toBe(0);
     const state = await readFile(fixture.stateFile, "utf8");
     const queryLine = state.split("\n").find((l) => l.startsWith("query "))!;
-    // Structured-query document: same intent/lex/vec lines search builds.
+    // ADR-0044: the dedup query is title + summary (query-side only).
     expect(queryLine).toBe("query intent: Answer a question about project wiki-v2.");
-    expect(state).toContain("\nlex: Use SQLite Need a durable local index. Use SQLite for local persistence. Keep migrations small and explicit.");
-    expect(state).toContain("\nvec: Use SQLite Need a durable local index. Use SQLite for local persistence. Keep migrations small and explicit. --json --collection wiki-v2");
+    expect(state).toContain("\nlex: Use SQLite Use SQLite for the local index.");
+    expect(state).toContain("\nvec: Use SQLite Use SQLite for the local index. --json --collection wiki-v2");
   });
 
   test("create no longer nags to run wiki sync (SLICE-0064: lean delivery loop)", async () => {
@@ -68,8 +68,10 @@ describe("advisory dedup", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("PRD-0001\n");
-    expect(result.stderr).toContain("possible duplicate artifacts found");
-    expect(result.stderr).toContain("advisory");
+    // ADR-0044: one-line same-kind advisory (no path/snippet hunk).
+    expect(result.stderr).toContain("dedup: possible 0.70 vs PRD-0007");
+    expect(result.stderr).toContain("--supersedes / --related-to / --force-new");
+    expect(result.stderr).not.toContain("@@");
   });
 
   test("slice create honors a custom weak threshold", async () => {
@@ -163,7 +165,7 @@ describe("advisory dedup", () => {
     const result = await runWiki(["create", "prd", "--title", "Core wiki CLI", "--summary", "The core wiki CLI surface.", "--project", "wiki-v2"], fixture);
 
     expect(result.exitCode).toBe(0);
-    expect(result.stderr).toContain("advisory");
+    expect(result.stderr).toContain("dedup: strong 0.95 vs PRD-0007");
     const prds = (await readdir(join(fixture.projectPath, "prds"))).filter((name) => name.startsWith("PRD-"));
     expect(prds.length).toBe(1);
   });

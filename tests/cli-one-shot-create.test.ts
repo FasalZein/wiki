@@ -78,17 +78,17 @@ describe("one-shot create with --body", () => {
     expect(parsed.content).not.toContain("{{");
   });
 
-  test("doc create --body - fills the Content section", async () => {
+  test("research create --body - fills the Content section", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
 
     const result = await runWiki(
-      ["create", "doc", "--title", "Research findings", "--summary", "The research findings summary.", "--project", "wiki-v2", "--category", "research", "--body", "-"],
+      ["create", "research", "--title", "Research findings", "--summary", "The research findings summary.", "--project", "wiki-v2", "--body", "-"],
       vaultRoot,
       "## Content\n\nThe findings are extensive.\n",
     );
 
     expect(result.exitCode).toBe(0);
-    const file = await readDocFile(vaultRoot, "DOC-0001");
+    const file = await readArtifactFile(vaultRoot, "research", "RES-0001");
     expect(matter(file).content).toContain("The findings are extensive.");
     expect(matter(file).content).not.toContain("{{");
   });
@@ -173,12 +173,4 @@ async function readArtifactFile(vaultRoot: string, folder: string, id: string): 
   const match = files.find((f) => f.startsWith(id));
   expect(match).toBeDefined();
   return readFile(join(dir, match as string), "utf8");
-}
-
-async function readDocFile(vaultRoot: string, id: string): Promise<string> {
-  const dir = join(vaultRoot, "projects", "wiki-v2", "docs");
-  const entries = await readdir(dir, { recursive: true });
-  const match = entries.find((f) => String(f).includes(id));
-  expect(match).toBeDefined();
-  return readFile(join(dir, String(match)), "utf8");
 }

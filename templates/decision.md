@@ -4,8 +4,8 @@ version: 1
 schema:
   id:           { type: string,    required: true,  pattern: "ADR-\\d{3,}|DECISION-\\d{4,}", description: "ADR-NNNN (DECISION-NNNN legacy alias still accepted)" }
   aliases:         { type: list,      default: [] }
-  title:        { type: string,    required: true,  min: 5, max: 100 }
-  summary:      { type: string,    required: true,  min: 10, max: 200, description: "One-line scannable summary, rendered atop the body" }
+  title:        { type: string,    required: true,  min: 5 }
+  summary:      { type: string,    required: true,  min: 10, description: "One-line scannable summary, rendered atop the body" }
   group:        { type: string,    description: "Optional section heading for this artifact in the generated index.md" }
   project:      { type: string,    required: true }
   status:       { type: enum,      required: true,  values: [proposed, accepted, superseded, rejected], default: accepted }

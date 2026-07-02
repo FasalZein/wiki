@@ -34,7 +34,7 @@ afterEach(async () => {
 
 // All five created artifacts must be free of Templater/INPUT/guidance bleed (SLICE-0074).
 async function readArtifact(folder: string): Promise<string> {
-  const dir = folder === "docs" ? join(vaultRoot, "projects", "p", "docs", "runbooks") : join(vaultRoot, "projects", "p", folder);
+  const dir = join(vaultRoot, "projects", "p", folder);
   const file = (await readdir(dir)).find((f) => f.endsWith(".md"));
   if (file === undefined) throw new Error(`no artifact written in ${dir}`);
   return readFile(join(dir, file), "utf8");
@@ -45,7 +45,7 @@ describe("templates carry no bleed markers (SLICE-0074)", () => {
     ["prds", ["create", "prd", "--project", "p", "--title", "Some requirement", "--summary", "A requirement summary line."]],
     ["slices", ["create", "slice", "--project", "p", "--title", "Some slice", "--summary", "A slice summary line."]],
     ["adrs", ["create", "decision", "--project", "p", "--title", "Some decision", "--summary", "A decision summary line."]],
-    ["docs", ["create", "doc", "--project", "p", "--title", "Some runbook", "--category", "runbooks", "--summary", "A runbook summary line."]],
+    ["runbooks", ["create", "runbooks", "--project", "p", "--title", "Some runbook", "--summary", "A runbook summary line."]],
     ["handoffs", ["create", "handoff", "--project", "p", "--phase", "plan", "--title", "Session handoff", "--summary", "A handoff summary line."]],
   ];
 

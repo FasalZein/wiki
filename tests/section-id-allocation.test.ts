@@ -80,16 +80,18 @@ describe("SLICE-0111: default-tree regression — existing kinds keep their id s
     expect(await nextId("slice", vault, "p", structure)).toBe("SLICE-0001");
   });
 
-  test("doc (the default branch section) stays globally unique across its category buckets", async () => {
+  test("a promoted knowledge kind (research) keeps a flat per-section id sequence", async () => {
+    // PRD-0023: the old `doc` BRANCH section was promoted into first-class LEAF
+    // kinds. A leaf section files flat into its own folder; nextId is highest + 1
+    // in that folder, keyed on the section prefix.
     const vault = await makeVault();
     const structure = await loadStructure(vault);
     await makeProject(vault, "p");
-    const docs = join(vault, "projects", "p", "docs");
-    await mkdir(join(docs, "research"), { recursive: true });
-    await mkdir(join(docs, "runbooks"), { recursive: true });
-    await writeFile(join(docs, "research", "DOC-0004-a.md"), "---\nid: DOC-0004\n---\n");
-    await writeFile(join(docs, "runbooks", "DOC-0009-b.md"), "---\nid: DOC-0009\n---\n");
+    const research = join(vault, "projects", "p", "research");
+    await mkdir(research, { recursive: true });
+    await writeFile(join(research, "RES-0004-a.md"), "---\nid: RES-0004\n---\n");
+    await writeFile(join(research, "RES-0009-b.md"), "---\nid: RES-0009\n---\n");
 
-    expect(await nextId("doc", vault, "p", structure)).toBe("DOC-0010");
+    expect(await nextId("research", vault, "p", structure)).toBe("RES-0010");
   });
 });

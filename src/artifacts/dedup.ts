@@ -1,10 +1,14 @@
-import { relative } from "node:path";
+import matter from "gray-matter";
+import { readdir, readFile } from "node:fs/promises";
+import { basename, join } from "node:path";
 
 import { ensureCollection, QmdError, refreshCollections, runQuery, type QmdResult } from "../integrations/qmd";
 import type { ProjectConfig } from "../config/project";
 import type { TemplateType } from "../schema/load";
 import { classifyIntent } from "../search/intent";
 import { buildStructuredQuery } from "../search/query-builder";
+import { artifactFolder } from "./paths";
+import type { Structure } from "./registry";
 
 export type DedupThresholds = {
   weak: number;
@@ -20,8 +24,16 @@ export type DedupOverride =
 export type DedupResult = {
   path: string;
   score: number;
-  snippet: string;
   strength: "possible" | "strong";
+  /** Candidate artifact id (e.g. ADR-0012), read from the filename stem. */
+  id: string;
+  /** Candidate kind, inferred from the id prefix (undefined if unrecognized). */
+  kind: TemplateType | undefined;
+  /** Candidate title, read from frontmatter ("" when unreadable). */
+  title: string;
+  /** True when the candidate's kind equals the kind being created — the only
+   *  class that can gate a create (ADR-0044). Cross-kind matches never block. */
+  sameKind: boolean;
 };
 
 export type DedupGateInput = {
@@ -31,6 +43,7 @@ export type DedupGateInput = {
   config: ProjectConfig;
   query: string;
   override: DedupOverride;
+  structure: Structure;
 };
 
 export class DedupBlockedError extends Error {
@@ -53,6 +66,8 @@ export async function runDedupGate(input: DedupGateInput): Promise<void> {
     return;
   }
 
+  const thresholds = { weak: input.config.dedup_threshold_weak, strong: input.config.dedup_threshold_strong };
+
   const qmdCommand = process.env.QMD_COMMAND ?? input.config.qmd_command;
   await ensureCollection(qmdCommand, input.project, input.projectPath);
   await refreshCollections(qmdCommand, [input.project]);
@@ -62,15 +77,20 @@ export async function runDedupGate(input: DedupGateInput): Promise<void> {
     intent: classifyIntent(input.query),
     project: input.project,
   });
-  const results = thresholdResults(
-    await runQuery(qmdCommand, queryDocument, [input.project]),
-    { weak: input.config.dedup_threshold_weak, strong: input.config.dedup_threshold_strong },
+  const qmdResults = thresholdResults(await runQuery(qmdCommand, queryDocument, [input.project]), thresholds);
+  const qmdMatches = await Promise.all(
+    qmdResults.map((result) => enrichMatch(result, input.projectPath, input.project, input.type, input.structure)),
   );
-  if (results.length > 0) {
-    throw new DedupBlockedError(results, {
-      weak: input.config.dedup_threshold_weak,
-      strong: input.config.dedup_threshold_strong,
-    }, input.projectPath);
+
+  // BUG-F (ADR-0044): also scan the target project's same-kind folder for
+  // near-duplicates the last sync missed (a file created earlier this session with
+  // no sync in between is not yet in the qmd index). Compares title+summary locally
+  // — create stays pure, no index write. Merged with the qmd matches, deduped by id.
+  const localMatches = await scanUnsyncedSameKind(input.type, input.projectPath, input.query, input.structure, thresholds);
+
+  const merged = mergeById([...qmdMatches, ...localMatches]);
+  if (merged.length > 0) {
+    throw new DedupBlockedError(merged, thresholds, input.projectPath);
   }
 }
 
@@ -111,41 +131,161 @@ export function fieldsForDedupOverride(override: DedupOverride): Record<string, 
   return {};
 }
 
-export function formatDedupBlocked(error: DedupBlockedError): string {
-  const lines = [
-    `possible duplicate artifacts found (weak >= ${formatThreshold(error.thresholds.weak)}, strong >= ${formatThreshold(error.thresholds.strong)}):`,
-  ];
-  for (const match of error.matches) {
-    lines.push(
-      `- ${match.strength} ${relative(error.projectPath, match.path)} (score: ${formatScore(match.score)})`,
-      `  ${match.snippet.replaceAll(/\s*\n\s*/g, " ").trim()}`,
-    );
-  }
-  lines.push("choose one: --supersedes <id>, --related-to <id>, or --force-new \"reason at least 30 characters\"");
-  return lines.join("\n");
+/** One-line advisory for a same-kind match — no path, no snippet hunk (ADR-0044). */
+export function formatSameKindAdvisory(match: DedupResult): string {
+  return `dedup: ${match.strength} ${match.score.toFixed(2)} vs ${match.id} "${match.title}" — choose --supersedes / --related-to / --force-new`;
 }
 
-function thresholdResults(results: QmdResult[], thresholds: DedupThresholds): DedupResult[] {
+/** One non-blocking info line for a cross-kind overlap (ADR-0044). */
+export function formatCrossKindNote(match: DedupResult): string {
+  return `note: overlaps ${match.id} "${match.title}" (${match.kind ?? "unknown"}, ${match.score.toFixed(2)}) — cross-kind, not a duplicate`;
+}
+
+function thresholdResults(results: QmdResult[], thresholds: DedupThresholds): Array<{ path: string; score: number; strength: "possible" | "strong" }> {
   return results.flatMap((result) => {
     const score = Number.parseFloat(result.score);
     if (!Number.isFinite(score) || score < thresholds.weak) {
       return [];
     }
-    return [
-      {
-        path: result.path,
-        score,
-        snippet: result.snippet,
-        strength: score >= thresholds.strong ? "strong" : "possible",
-      },
-    ];
+    return [{ path: result.path, score, strength: score >= thresholds.strong ? "strong" : "possible" }];
   });
 }
 
-function formatThreshold(value: number): string {
-  return value.toFixed(2);
+/** Turn a raw scored qmd hit into a DedupResult: derive id from the filename, kind
+ *  from the id prefix, title from frontmatter, and whether it is the same kind as
+ *  the create. Never blocks on a read failure — a missing title falls back to "". */
+async function enrichMatch(
+  raw: { path: string; score: number; strength: "possible" | "strong" },
+  projectPath: string,
+  project: string,
+  createKind: TemplateType,
+  structure: Structure,
+): Promise<DedupResult> {
+  const filePath = resolveMatchFile(raw.path, projectPath, project);
+  const id = idOfFile(filePath);
+  const kind = structure.typeForId(id);
+  const title = await readTitle(filePath);
+  return { path: raw.path, score: raw.score, strength: raw.strength, id, kind, title, sameKind: kind === createKind };
 }
 
-function formatScore(value: number): string {
-  return Number.isInteger(value) ? value.toFixed(1) : String(value);
+/** Resolve a qmd://<collection>/<rel> URI (or raw fs path) to a file on disk. Dedup
+ *  queries only the current project's collection, so <rel> is under projectPath. */
+function resolveMatchFile(path: string, projectPath: string, project: string): string {
+  if (path.startsWith("qmd://")) {
+    const rest = path.slice("qmd://".length);
+    const slash = rest.indexOf("/");
+    const rel = slash === -1 ? rest : rest.slice(slash + 1);
+    return join(projectPath, rel);
+  }
+  return path;
+}
+
+/** The artifact id a match points at — the filename's PREFIX-NNNN stem. */
+function idOfFile(filePath: string): string {
+  const stem = basename(filePath).replace(/\.md$/, "");
+  return stem.match(/^([A-Za-z]+-\d+)/)?.[1] ?? stem;
+}
+
+async function readTitle(filePath: string): Promise<string> {
+  try {
+    const data = matter(await readFile(filePath, "utf8")).data as Record<string, unknown>;
+    return typeof data.title === "string" ? data.title : "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * BUG-F: local same-kind near-duplicate scan (ADR-0044). Reads every artifact in
+ * the create-kind's folder, scores its title+summary against the new artifact's
+ * title+summary with a lexical cosine, and returns candidates over the weak
+ * threshold — so a file created earlier this session (not yet in the qmd index)
+ * still surfaces as a same-kind candidate. Pure read; create writes no index.
+ * ponytail: scans the whole same-kind folder each create — fine for typical
+ * project sizes; add an mtime cursor if a folder ever grows large enough to matter.
+ */
+async function scanUnsyncedSameKind(
+  type: TemplateType,
+  projectPath: string,
+  query: string,
+  structure: Structure,
+  thresholds: DedupThresholds,
+): Promise<DedupResult[]> {
+  const dir = join(projectPath, artifactFolder(type, structure));
+  const queryTokens = tokenize(query);
+  if (queryTokens.size === 0) return [];
+  const files = await listMarkdown(dir);
+  const out: DedupResult[] = [];
+  for (const file of files) {
+    let data: Record<string, unknown>;
+    try {
+      data = matter(await readFile(file, "utf8")).data as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    const id = typeof data.id === "string" ? data.id : undefined;
+    if (id === undefined) continue;
+    const title = typeof data.title === "string" ? data.title : "";
+    const summary = typeof data.summary === "string" ? data.summary : "";
+    const score = cosine(queryTokens, tokenize(`${title} ${summary}`));
+    if (score >= thresholds.weak) {
+      out.push({
+        path: file,
+        score,
+        strength: score >= thresholds.strong ? "strong" : "possible",
+        id,
+        kind: type,
+        title,
+        sameKind: true,
+      });
+    }
+  }
+  return out;
+}
+
+/** Recursively list *.md files under a directory (branch kinds nest into buckets). */
+async function listMarkdown(dir: string): Promise<string[]> {
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const files: string[] = [];
+  for (const entry of entries) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) files.push(...(await listMarkdown(full)));
+    else if (entry.isFile() && entry.name.endsWith(".md")) files.push(full);
+  }
+  return files;
+}
+
+function tokenize(text: string): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const token of text.toLowerCase().match(/[a-z0-9]+/g) ?? []) {
+    counts.set(token, (counts.get(token) ?? 0) + 1);
+  }
+  return counts;
+}
+
+/** Cosine similarity of two term-frequency vectors (0..1). Identical text → 1. */
+function cosine(a: Map<string, number>, b: Map<string, number>): number {
+  let dot = 0;
+  for (const [term, count] of a) {
+    const other = b.get(term);
+    if (other !== undefined) dot += count * other;
+  }
+  const magA = Math.sqrt([...a.values()].reduce((sum, n) => sum + n * n, 0));
+  const magB = Math.sqrt([...b.values()].reduce((sum, n) => sum + n * n, 0));
+  return magA === 0 || magB === 0 ? 0 : dot / (magA * magB);
+}
+
+/** Merge candidates from qmd + the local scan, keeping the highest score per id. */
+function mergeById(matches: DedupResult[]): DedupResult[] {
+  const byId = new Map<string, DedupResult>();
+  for (const match of matches) {
+    const existing = byId.get(match.id);
+    if (existing === undefined || match.score > existing.score) byId.set(match.id, match);
+  }
+  return [...byId.values()].sort((a, b) => b.score - a.score);
 }

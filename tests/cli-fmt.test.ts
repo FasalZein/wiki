@@ -720,11 +720,13 @@ Filename no longer matches the title.
     expect(handoffFiles).toContain("0001-grilling-session-1.md");
   });
 
-  const LEGACY_DOC = `---
-id: DOC-001
+  // PRD-0023: the `doc` kind is gone; use a promoted knowledge kind (notes, NOTE
+  // prefix, notes/ folder) to prove renumber is registry-driven, not PRD/SLICE-only.
+  const LEGACY_NOTE = `---
+id: NOTE-001
 aliases:
-  - DOC-001
-title: Legacy padded doc
+  - NOTE-001
+title: Legacy padded note
 project: wiki-v2
 status: published
 created: '2026-05-25'
@@ -732,20 +734,21 @@ updated: '2026-05-25'
 ---
 ## Overview
 
-Old doc.
+Old note.
 `;
 
   test("--write renumbers a legacy id for any registry kind, not just PRD/SLICE (SLICE-0079)", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
-    await writeFile(join(vaultRoot, "projects", "wiki-v2", "docs", "DOC-001-legacy-padded-doc.md"), LEGACY_DOC);
+    await mkdir(join(vaultRoot, "projects", "wiki-v2", "notes"), { recursive: true });
+    await writeFile(join(vaultRoot, "projects", "wiki-v2", "notes", "NOTE-001-legacy-padded-note.md"), LEGACY_NOTE);
 
     const write = await runWiki(["fmt", "--project", "wiki-v2", "--write"], vaultRoot);
     expect(write.exitCode).toBe(0);
-    expect(write.stdout).toContain("DOC-001 -> DOC-0001");
+    expect(write.stdout).toContain("NOTE-001 -> NOTE-0001");
 
-    const docFiles = await readdir(join(vaultRoot, "projects", "wiki-v2", "docs"));
-    expect(docFiles).toContain("DOC-0001-legacy-padded-doc.md");
-    expect(docFiles).not.toContain("DOC-001-legacy-padded-doc.md");
+    const noteFiles = await readdir(join(vaultRoot, "projects", "wiki-v2", "notes"));
+    expect(noteFiles).toContain("NOTE-0001-legacy-padded-note.md");
+    expect(noteFiles).not.toContain("NOTE-001-legacy-padded-note.md");
   });
 
   test("fmt --help documents check-default and --write semantics", async () => {

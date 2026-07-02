@@ -45,9 +45,37 @@ async function run(args: string[]): Promise<{ code: number; out: string }> {
   return { code, out: cap.out() };
 }
 
+// A custom tree with a BRANCH `notes` section (folder docs/, NOTE id-space) whose
+// buckets reproduce the old doc categories, driven off the existing `notes`
+// template (## Content). This exercises SLICE-0112 bucket resolution — create by
+// bucket name, --category subsumption — which the bundled all-leaf default no
+// longer carries after the PRD-0023 doc-kind promotion.
+const branchConfig = JSON.stringify({
+  kinds: {
+    prd: { prefix: "PRD", folder: "prds", dedup: true },
+    slice: { prefix: "SLICE", folder: "slices", dedup: true },
+    decision: { prefix: "ADR", folder: "adrs", dedup: true },
+    handoff: { prefix: "HANDOFF", folder: "handoffs", dedup: false },
+    notes: {
+      prefix: "NOTE",
+      folder: "docs",
+      dedup: true,
+      buckets: {
+        architecture: { criteria: "How the system is built." },
+        research: { criteria: "External findings." },
+        runbooks: { criteria: "Operational how-to." },
+        specs: { criteria: "Precise contracts." },
+        notes: { criteria: "Catch-all." },
+        legacy: { criteria: "Historical material." },
+      },
+    },
+  },
+});
+
 async function makeVault(project: string): Promise<string> {
   const vaultRoot = await mkdtemp(join(tmpdir(), "wiki-bucket-"));
   tempPaths.push(vaultRoot);
+  await writeFile(join(vaultRoot, "wiki.json"), branchConfig);
   const proj = join(vaultRoot, "projects", project);
   for (const folder of ["prds", "slices", "adrs", "handoffs", "docs"]) {
     await mkdir(join(proj, folder), { recursive: true });
@@ -67,8 +95,8 @@ describe("SLICE-0112: create by bucket/leaf name", () => {
   test("create <branch-bucket> files into the bucket folder with a section-prefixed id and the section template", async () => {
     const vault = await makeVault("p");
 
-    // `architecture` is a bucket of the `doc` branch section: files into
-    // docs/architecture/ with a DOC id and the doc template — no --category.
+    // `architecture` is a bucket of the `notes` branch section: files into
+    // docs/architecture/ with a NOTE id and the notes template — no --category.
     const result = await run([
       "create", "architecture",
       "--project", "p",
@@ -77,10 +105,10 @@ describe("SLICE-0112: create by bucket/leaf name", () => {
     ]);
 
     expect(result.code).toBe(0);
-    const path = join(vault, "projects", "p", "docs", "architecture", "DOC-0001-evidence-first-architecture.md");
+    const path = join(vault, "projects", "p", "docs", "architecture", "NOTE-0001-evidence-first-architecture.md");
     const file = await readFile(path, "utf8");
-    expect(file).toContain("id: DOC-0001"); // section prefix
-    expect(file).toContain("## Content"); // doc template body sections applied
+    expect(file).toContain("id: NOTE-0001"); // section prefix
+    expect(file).toContain("## Content"); // notes template body sections applied
   });
 
   test("create <leaf-name> still files straight into the section folder", async () => {
@@ -103,14 +131,14 @@ describe("SLICE-0112: create by bucket/leaf name", () => {
     const result = await run(["create", "blueprints", "--project", "p", "--title", "x", "--summary", "xxxxxxxxxx"]);
     expect(result.code).toBe(1);
     expect(result.out).toContain("unknown artifact type: blueprints");
-    expect(result.out).toContain("doc");
+    expect(result.out).toContain("notes");
   });
 
   test("--category is subsumed: it names a bucket of the section and files there", async () => {
     const vault = await makeVault("p");
 
     const result = await run([
-      "create", "doc",
+      "create", "notes",
       "--project", "p",
       "--title", "Deploy runbook for prod",
       "--summary", "Deploy runbook for prod summary.",
@@ -118,14 +146,14 @@ describe("SLICE-0112: create by bucket/leaf name", () => {
     ]);
 
     expect(result.code).toBe(0);
-    const path = join(vault, "projects", "p", "docs", "research", "DOC-0001-deploy-runbook-for-prod.md");
-    expect(await readFile(path, "utf8")).toContain("id: DOC-0001");
+    const path = join(vault, "projects", "p", "docs", "research", "NOTE-0001-deploy-runbook-for-prod.md");
+    expect(await readFile(path, "utf8")).toContain("id: NOTE-0001");
   });
 
   test("an unknown --category bucket errors against the loaded tree", async () => {
     await makeVault("p");
     const result = await run([
-      "create", "doc",
+      "create", "notes",
       "--project", "p",
       "--title", "Some valid title here",
       "--summary", "Some valid summary here.",

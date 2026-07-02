@@ -24,8 +24,8 @@ describe("status and repo-project binding CLI", () => {
   test("status lists the most-recently-modified artifacts", async () => {
     const fixture = await createFixture();
     await writeFile(
-      join(fixture.vaultRoot, "projects", "wiki-v2", "docs", "DOC-0001-thing.md"),
-      "---\nid: DOC-0001\n---\n# Thing\n",
+      join(fixture.vaultRoot, "projects", "wiki-v2", "notes", "NOTE-0001-thing.md"),
+      "---\nid: NOTE-0001\n---\n# Thing\n",
     );
 
     const result = await runWiki(["status", "--project", "wiki-v2"], fixture);
@@ -33,14 +33,14 @@ describe("status and repo-project binding CLI", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("Project: wiki-v2");
     expect(result.stdout).toContain("Recent artifacts (1):");
-    expect(result.stdout).toContain(join("projects", "wiki-v2", "docs", "DOC-0001-thing.md"));
+    expect(result.stdout).toContain(join("projects", "wiki-v2", "notes", "NOTE-0001-thing.md"));
   });
 
   test("status --json emits project and recent artifact paths", async () => {
     const fixture = await createFixture();
     await writeFile(
-      join(fixture.vaultRoot, "projects", "wiki-v2", "docs", "DOC-0001-thing.md"),
-      "---\nid: DOC-0001\n---\n# Thing\n",
+      join(fixture.vaultRoot, "projects", "wiki-v2", "notes", "NOTE-0001-thing.md"),
+      "---\nid: NOTE-0001\n---\n# Thing\n",
     );
 
     const result = await runWiki(["status", "--project", "wiki-v2", "--json"], fixture);
@@ -48,7 +48,7 @@ describe("status and repo-project binding CLI", () => {
     expect(result.exitCode).toBe(0);
     const payload = JSON.parse(result.stdout);
     expect(payload.project).toBe("wiki-v2");
-    expect(payload.recent).toEqual([join("projects", "wiki-v2", "docs", "DOC-0001-thing.md")]);
+    expect(payload.recent).toEqual([join("projects", "wiki-v2", "notes", "NOTE-0001-thing.md")]);
   });
 
   test("status reads the repo's linked project from the pointer block without --project", async () => {
@@ -86,7 +86,7 @@ async function createFixture(): Promise<Fixture> {
   await mkdir(join(projectPath, "slices"));
   await mkdir(join(projectPath, "adrs"));
   await mkdir(join(projectPath, "handoffs"));
-  await mkdir(join(projectPath, "docs"));
+  await mkdir(join(projectPath, "notes"));
   await writeFile(join(projectPath, "_project.md"), `---\nproject: ${project}\nrepo: ${repoPath}\ntest_command: bun test\n---\n# ${project}\n`);
   return { vaultRoot, repoPath, cwd };
 }

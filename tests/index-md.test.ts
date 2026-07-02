@@ -52,7 +52,7 @@ describe("writeVaultIndex (SLICE-0091)", () => {
 describe("incremental roster regeneration (SLICE-0091)", () => {
   test("first run parses all files; an added artifact reparses only the new file", async () => {
     const vaultRoot = await makeVault();
-    await addArtifact(vaultRoot, "alpha", "docs", "DOC-0001", "first");
+    await addArtifact(vaultRoot, "alpha", "notes", "NOTE-0001", "first");
     await addArtifact(vaultRoot, "alpha", "slices", "SLICE-0001", "second");
 
     const cold = await writeProjectIndex(vaultRoot, "alpha");
@@ -71,22 +71,22 @@ describe("incremental roster regeneration (SLICE-0091)", () => {
     expect(incremental.reused).toBe(2);
 
     const roster = await readFile(join(vaultRoot, "projects", "alpha", "index.md"), "utf8");
-    expect(roster).toContain("DOC-0001");
+    expect(roster).toContain("NOTE-0001");
     expect(roster).toContain("SLICE-0001");
     expect(roster).toContain("ADR-0001");
   });
 
   test("a removed artifact drops out of the roster on the next regen", async () => {
     const vaultRoot = await makeVault();
-    await addArtifact(vaultRoot, "alpha", "docs", "DOC-0001", "keep");
-    await addArtifact(vaultRoot, "alpha", "docs", "DOC-0002", "drop");
+    await addArtifact(vaultRoot, "alpha", "notes", "NOTE-0001", "keep");
+    await addArtifact(vaultRoot, "alpha", "notes", "NOTE-0002", "drop");
     await writeProjectIndex(vaultRoot, "alpha");
 
-    await rm(join(vaultRoot, "projects", "alpha", "docs", "DOC-0002.md"));
+    await rm(join(vaultRoot, "projects", "alpha", "notes", "NOTE-0002.md"));
     const after = await writeProjectIndex(vaultRoot, "alpha");
     expect(after.reused).toBe(1); // only the surviving file
     const roster = await readFile(join(vaultRoot, "projects", "alpha", "index.md"), "utf8");
-    expect(roster).toContain("DOC-0001");
-    expect(roster).not.toContain("DOC-0002");
+    expect(roster).toContain("NOTE-0001");
+    expect(roster).not.toContain("NOTE-0002");
   });
 });

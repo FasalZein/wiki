@@ -55,13 +55,13 @@ describe("create echoes destination path", () => {
     expect(all).toMatch(/PRD-0001-[a-z0-9-]+\.md/);
   });
 
-  test("create doc prints the docs/<category>/ path", async () => {
+  test("create runbooks prints the runbooks/ path (a promoted knowledge kind, PRD-0023)", async () => {
     const cap = capture();
-    const result = await dispatch(["create", "doc", "--project", "p", "--title", "Deploy runbook for prod", "--category", "runbooks", "--summary", "Deploy runbook for prod summary."]);
+    const result = await dispatch(["create", "runbooks", "--project", "p", "--title", "Deploy runbook for prod", "--summary", "Deploy runbook for prod summary."]);
     cap.restore();
     expect(result.code).toBe(0);
     const all = cap.out() + cap.err();
-    expect(all).toContain("projects/p/docs/runbooks/DOC-0001");
+    expect(all).toContain("projects/p/runbooks/RUN-0001");
   });
 
   test("create handoff works through the generic config-driven path (ADR-0035)", async () => {

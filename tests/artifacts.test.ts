@@ -107,32 +107,30 @@ describe("artifact store", () => {
     expect(artifact.fields.title).toBe("Core wiki CLI");
   });
 
-  test("creates a doc inside its category subfolder", async () => {
+  test("creates a promoted knowledge kind in its own folder", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
     const artifact = await createArtifact({
-      type: "doc",
+      type: "research",
       vaultRoot,
       project: "wiki-v2",
-      category: "research",
-      fields: { title: "Native search benchmark", type: "research", summary: "Benchmark of native search options." },
+      fields: { title: "Native search benchmark", summary: "Benchmark of native search options." },
     });
 
-    expect(artifact.id).toBe("DOC-0001");
-    expect(artifact.path).toBe(join(vaultRoot, "projects", "wiki-v2", "docs", "research", "DOC-0001-native-search-benchmark.md"));
+    expect(artifact.id).toBe("RES-0001");
+    expect(artifact.path).toBe(join(vaultRoot, "projects", "wiki-v2", "research", "RES-0001-native-search-benchmark.md"));
   });
 
-  test("reads a doc by id from its category subfolder", async () => {
+  test("reads a promoted knowledge kind by id from its folder", async () => {
     const vaultRoot = await createFixtureVault("wiki-v2");
     await createArtifact({
-      type: "doc",
+      type: "runbooks",
       vaultRoot,
       project: "wiki-v2",
-      category: "runbooks",
-      fields: { title: "Deploy runbook", type: "runbook", summary: "How to deploy to prod." },
+      fields: { title: "Deploy runbook", summary: "How to deploy to prod." },
     });
 
-    const artifact = await readArtifact({ type: "doc", vaultRoot, project: "wiki-v2", id: "DOC-0001" });
-    expect(artifact.path).toBe(join(vaultRoot, "projects", "wiki-v2", "docs", "runbooks", "DOC-0001-deploy-runbook.md"));
+    const artifact = await readArtifact({ type: "runbooks", vaultRoot, project: "wiki-v2", id: "RUN-0001" });
+    expect(artifact.path).toBe(join(vaultRoot, "projects", "wiki-v2", "runbooks", "RUN-0001-deploy-runbook.md"));
     expect(artifact.fields.title).toBe("Deploy runbook");
   });
 

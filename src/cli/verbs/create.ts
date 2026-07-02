@@ -4,7 +4,8 @@ import { join, relative } from "node:path";
 import {
   DedupBlockedError,
   fieldsForDedupOverride,
-  formatDedupBlocked,
+  formatCrossKindNote,
+  formatSameKindAdvisory,
   parseDedupOverride,
   QmdError,
   runDedupGate,
@@ -14,6 +15,7 @@ import {
   ArtifactNotFoundError,
   ArtifactValidationError,
   createArtifact,
+  preflightCreate,
   readArtifact,
   removeArtifactFile,
   setField,
@@ -95,6 +97,23 @@ function normalizeFlagToken(token: string): string {
 }
 
 /**
+ * Find the first `--flag` token that isn't a known flag for this kind, returning
+ * its bare name (no leading `--`), or undefined when every flag is known. Only
+ * `--`-prefixed tokens are inspected, so a value like `-` (the `--body` stdin
+ * sentinel) or a flag value is never mistaken for an unknown flag. A token that
+ * carries `=value` is split on the first `=`.
+ */
+function findUnknownFlag(args: string[], known: ReadonlySet<string>): string | undefined {
+  for (const token of args) {
+    if (!token.startsWith("--") || token === "--") continue;
+    const eq = token.indexOf("=");
+    const name = (eq === -1 ? token : token.slice(0, eq)).slice(2);
+    if (name.length > 0 && !known.has(name)) return name;
+  }
+  return undefined;
+}
+
+/**
  * Fields the CLI sets itself, the dedup override owns, or other verbs manage —
  * never create-time flags. Every other schema field becomes a flag.
  */
@@ -150,7 +169,18 @@ async function createGeneric(kind: TemplateType, args: string[], presetCategory?
 
   // SLICE-0088: normalize incoming flag tokens to kebab so a snake_case name
   // copied from `wiki schema` (e.g. --parent_prd) matches the kebab CLI flags.
-  const parsed = parseCommand(args.map(normalizeFlagToken), stringFlags, multipleFlags, booleanFlags);
+  const normalizedArgs = args.map(normalizeFlagToken);
+  // BUG-D (ADR-0044): reject an unknown flag BY NAME per kind, before parsing —
+  // so `--tags` on a decision (which has no tags field) errors `decision has no
+  // field: tags`, never the downstream "value beginning with '-' is ambiguous"
+  // that the `--body -` stdin sentinel used to trip. Derived from the kind schema.
+  const knownFlags = new Set([...stringFlags, ...booleanFlags]);
+  const unknownFlag = findUnknownFlag(normalizedArgs, knownFlags);
+  if (unknownFlag !== undefined) {
+    console.error(`${kind} has no field: ${unknownFlag}`);
+    return { code: 1 };
+  }
+  const parsed = parseCommand(normalizedArgs, stringFlags, multipleFlags, booleanFlags);
 
   const project = await resolveProject(parsed);
   const missing = missingFields({ project });
@@ -195,13 +225,24 @@ async function createGeneric(kind: TemplateType, args: string[], presetCategory?
     : undefined;
   const category = presetCategory ?? explicitCategory ?? defaultBucket;
 
-  // Dedup query: title plus every authored body section the user supplied, in
-  // template order — a uniform signal across kinds (no per-kind composition).
+  // Dedup query: title + summary (ADR-0044). Query-side only — sync still indexes
+  // the full artifact; this is just the signal a create scores against.
   const title = stringValue(parsed.values, "title");
-  const dedupQuery = [title, ...placeholders.map((p) => fields[p])]
+  const summary = stringValue(parsed.values, "summary");
+  const dedupQuery = [title, summary]
     .filter((v): v is string => typeof v === "string" && v.length > 0)
     .join(" ");
   const body = await stdinOrValue(stringValue(parsed.values, "body"));
+
+  // BUG-C (ADR-0044): all cheap schema validation (field bounds + body sections)
+  // runs BEFORE the dedup/embedding pass, so a create can never print a dedup
+  // advisory and then abort on a bad field. Unknown flags are already rejected above.
+  try {
+    await preflightCreate(kind, { ...fields, project }, body);
+  } catch (error) {
+    return handleCreateError(error);
+  }
+
   return createWithSupersede({
     type: kind,
     project,
@@ -333,22 +374,31 @@ async function advisoryDedup(type: TemplateType, project: string, projectPath: s
     throw error;
   }
   try {
-    await runDedupGate({ type, project, projectPath, config, query, override });
+    await runDedupGate({ type, project, projectPath, config, query, override, structure });
     return null;
   } catch (error) {
     if (error instanceof DedupBlockedError) {
-      const strong = error.matches.some((match) => match.strength === "strong");
+      // ADR-0044: only SAME-kind matches can gate a create; cross-kind overlaps
+      // print at most one non-blocking info line and never block. Advisory lines
+      // always go to stderr (even in --json mode) so they never corrupt stdout.
+      const sameKind = error.matches.filter((m) => m.sameKind);
+      const crossKind = error.matches.filter((m) => !m.sameKind);
+      const topCross = crossKind.sort((a, b) => b.score - a.score)[0];
+      if (topCross !== undefined) console.error(formatCrossKindNote(topCross));
+      for (const match of sameKind) console.error(formatSameKindAdvisory(match));
+
+      const strong = sameKind.some((match) => match.strength === "strong");
       if (strong && config.dedup_strong_blocks) {
         if (jsonEnabled()) {
-          emitJsonError({ error: "strong duplicate match — refusing to create", matches: error.matches.map((m) => ({ path: m.path, score: m.score, strength: m.strength })) });
+          emitJsonError({
+            error: "strong duplicate match — refusing to create",
+            matches: sameKind.map((m) => ({ id: m.id, kind: m.kind, score: m.score, strength: m.strength })),
+          });
         } else {
-          console.error(formatDedupBlocked(error));
           console.error("strong duplicate match — refusing to create. Pass --supersedes <id>, --related-to <id>, or --force-new \"reason\" to proceed.");
         }
         return { code: 1 };
       }
-      console.error(formatDedupBlocked(error));
-      console.error("(advisory — proceeding with create)");
       return null;
     }
     if (error instanceof QmdError) {

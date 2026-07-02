@@ -5,8 +5,8 @@ schema:
   id:             { type: string,    required: true,  pattern: "HANDOFF-\\d{4,}" }
   aliases:         { type: list,      default: [] }
   project:        { type: string,    required: true }
-  title:          { type: string,    required: true,  min: 5, max: 80, description: "Session headline, rendered in the handoff header and index roster" }
-  summary:        { type: string,    required: true,  min: 10, max: 200, description: "One-line scannable summary, rendered atop the body" }
+  title:          { type: string,    required: true,  min: 5, description: "Session headline, rendered in the handoff header and index roster" }
+  summary:        { type: string,    required: true,  min: 10, description: "One-line scannable summary, rendered atop the body" }
   group:          { type: string,    description: "Optional section heading for this artifact in the generated index.md" }
   session_date:   { type: date,      required: true, auto: true }
   phase:          { type: enum,      required: true,  values: [plan, prd, slice, handoff, ad-hoc] }

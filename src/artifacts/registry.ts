@@ -13,6 +13,9 @@ export interface ArtifactSpec {
   dedup: boolean;
   /** Skill that authors this kind, if any; read by per-runtime hooks to route output. */
   skill?: string;
+  /** What-goes-where signal for a leaf kind (ADR-0044); surfaced by `wiki schema`
+   *  and `wiki create <kind> --help`. Branch kinds carry criteria per bucket instead. */
+  criteria?: string;
   /** Parent kind this child backlinks to (SLICE-0114). On create, the child's id
    *  is appended to the parent's `child_list` field. The parent id is read from
    *  the child's `parent_<parent>` field (e.g. parent: "prd" -> field parent_prd). */
@@ -108,6 +111,9 @@ function parseKinds(raw: unknown): Record<TemplateType, ArtifactSpec> {
     if (s.child_list !== undefined && typeof s.child_list !== "string") {
       throw new Error(`wiki.json: kind '${name}' field 'child_list' must be a string`);
     }
+    if (s.criteria !== undefined && typeof s.criteria !== "string") {
+      throw new Error(`wiki.json: kind '${name}' field 'criteria' must be a string`);
+    }
     kinds[name] = {
       prefix: s.prefix,
       folder: s.folder,
@@ -115,6 +121,7 @@ function parseKinds(raw: unknown): Record<TemplateType, ArtifactSpec> {
       ...(typeof s.skill === "string" ? { skill: s.skill } : {}),
       ...(typeof s.parent === "string" ? { parent: s.parent } : {}),
       ...(typeof s.child_list === "string" ? { child_list: s.child_list } : {}),
+      ...(typeof s.criteria === "string" ? { criteria: s.criteria } : {}),
     };
   }
   return kinds;
@@ -180,9 +187,11 @@ function buildSections(
     let buckets: BucketSpec[];
     let tree: "leaf" | "branch";
     if (declared === undefined) {
-      // LEAF: one self-named bucket filing into the section folder.
+      // LEAF: one self-named bucket filing into the section folder. A leaf kind's
+      // config `criteria` (ADR-0044) rides on its bucket so `create <kind> --help`
+      // and `wiki schema` can surface it.
       tree = "leaf";
-      buckets = [{ name, folder: spec.folder, template: name }];
+      buckets = [{ name, folder: spec.folder, template: name, ...(spec.criteria !== undefined ? { criteria: spec.criteria } : {}) }];
     } else {
       const bucketNames = Object.keys(declared);
       if (bucketNames.length === 0) {
@@ -285,39 +294,33 @@ function buildStructure(
 }
 
 /**
- * The bundled default kinds (today's five), inlined as data so nothing reads a
- * file at import time. A vault with its own `wiki.json` overrides these via
- * `loadStructure`; a vault without one falls back to exactly this set. Mirrors
- * the repo-root `wiki.json` doc, which stays as the human-readable reference.
+ * The bundled default kinds, inlined as data so nothing reads a file at import
+ * time. A vault with its own `wiki.json` overrides these via `loadStructure`; a
+ * vault without one falls back to exactly this set. Mirrors the repo-root
+ * `wiki.json` doc, which stays as the human-readable reference.
+ *
+ * PRD-0023 promoted the former single `doc` BRANCH kind (DOC prefix, docs/ with
+ * architecture/research/runbooks/specs/notes/legacy buckets) into six first-class
+ * LEAF kinds, each owning its own folder + id prefix. The old `doc` kind is gone;
+ * each promoted kind carries the criteria the bucket used to hold (ADR-0044).
  */
 const DEFAULT_KINDS: Record<TemplateType, ArtifactSpec> = {
   prd: { prefix: "PRD", folder: "prds", dedup: true, skill: "to-prd", child_list: "slices" },
   slice: { prefix: "SLICE", folder: "slices", dedup: true, skill: "to-slices", parent: "prd" },
   decision: { prefix: "ADR", folder: "adrs", dedup: true, skill: "grill-with-docs" },
-  doc: { prefix: "DOC", folder: "docs", dedup: true },
+  architecture: { prefix: "ARCH", folder: "architecture", dedup: true, criteria: "How the system is built: components, boundaries, data flow, structural decisions." },
+  research: { prefix: "RES", folder: "research", dedup: true, criteria: "External findings, investigations, comparisons, and explorations feeding a decision." },
+  runbooks: { prefix: "RUN", folder: "runbooks", dedup: true, criteria: "Operational how-to: step-by-step procedures for running, deploying, or recovering." },
+  specs: { prefix: "SPEC", folder: "specs", dedup: true, criteria: "Specifications: precise contracts, formats, schemas, and interface definitions." },
+  notes: { prefix: "NOTE", folder: "notes", dedup: true, criteria: "Catch-all for durable notes that fit no other bucket." },
+  legacy: { prefix: "LEG", folder: "legacy", dedup: true, criteria: "Imported or historical material kept for reference, not actively maintained." },
   handoff: { prefix: "HANDOFF", folder: "handoffs", dedup: false, skill: "handoff" },
 };
 
-/** The bundled default buckets: `doc` is the one BRANCH section, its six buckets
- *  reproducing today's locked DOC_CATEGORIES (ADR-0028) exactly — each files into
- *  docs/<category>/ and shares the DOC id-space. Every other default kind is a
- *  LEAF (no declared buckets). Criteria mirrors the locked-category intent. */
-const DEFAULT_BUCKETS: Record<TemplateType, Record<string, BucketConfig>> = {
-  doc: {
-    architecture: { criteria: "How the system is built: components, boundaries, data flow, structural decisions." },
-    research: { criteria: "External findings, investigations, comparisons, and explorations feeding a decision." },
-    runbooks: { criteria: "Operational how-to: step-by-step procedures for running, deploying, or recovering." },
-    specs: { criteria: "Specifications: precise contracts, formats, schemas, and interface definitions." },
-    notes: { criteria: "Catch-all for durable notes that fit no other bucket." },
-    legacy: { criteria: "Imported or historical material kept for reference, not actively maintained." },
-  },
-};
-
-/** The bundled default structure (today's five kinds + six doc buckets), used
- *  when a vault has no wiki.json of its own. The only static Structure; every
- *  per-vault read goes through `loadStructure`, and consumers thread the result
- *  explicitly. */
-export const DEFAULT_STRUCTURE: Structure = buildStructure(DEFAULT_KINDS, DEFAULT_BUCKETS);
+/** The bundled default structure (the promoted-kinds model), used when a vault has
+ *  no wiki.json of its own. The only static Structure; every per-vault read goes
+ *  through `loadStructure`, and consumers thread the result explicitly. */
+export const DEFAULT_STRUCTURE: Structure = buildStructure(DEFAULT_KINDS);
 
 /**
  * Load the structure for a vault: read `<vaultRoot>/wiki.json` at runtime and

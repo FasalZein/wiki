@@ -209,29 +209,23 @@ async function captureDedupNote(args: {
     if (error instanceof ProjectConfigError) return undefined; // unconfigured project — skip dedup
     throw error;
   }
-  // Same query shape create uses: title plus the authored body, a uniform signal.
+  // ADR-0044: the dedup query is title + summary (query-side only).
   const title = typeof data.title === "string" ? data.title : "";
-  const query = [title, body].filter((v) => v.length > 0).join(" ");
+  const summary = typeof data.summary === "string" ? data.summary : "";
+  const query = [title, summary].filter((v) => v.length > 0).join(" ");
   try {
-    await runDedupGate({ type: kind, project, projectPath: projPath, config, query, override: { kind: "none" } });
+    await runDedupGate({ type: kind, project, projectPath: projPath, config, query, override: { kind: "none" }, structure });
     return undefined; // no match
   } catch (error) {
     if (error instanceof DedupBlockedError) {
-      const strong = error.matches.find((match) => match.strength === "strong");
-      if (strong === undefined) return undefined; // only a weak match — stay silent, file it
-      return `possible duplicate of [[${dedupMatchId(strong.path)}]] — review`;
+      // ADR-0044: only a strong SAME-kind match warrants a duplicate note.
+      const strong = error.matches.find((match) => match.sameKind && match.strength === "strong");
+      if (strong === undefined) return undefined; // no strong same-kind match — stay silent, file it
+      return `possible duplicate of [[${strong.id}]] — review`;
     }
     if (error instanceof QmdError) return undefined; // qmd missing / never synced — best-effort
     throw error;
   }
-}
-
-/** The artifact id a dedup match points at — the filename's id-slug stem, e.g.
- *  `PRD-0007` from `.../prds/PRD-0007-core-cli.md`. Falls back to the basename. */
-function dedupMatchId(path: string): string {
-  const stem = basename(path).replace(/\.md$/, "");
-  const match = stem.match(/^([A-Z]+-\d+)/);
-  return match?.[1] ?? stem;
 }
 
 /** Advisory injected after a capture so the author knows the artifact is filed. */

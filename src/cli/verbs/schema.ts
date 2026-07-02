@@ -8,9 +8,12 @@
  * bucket's config-declared `criteria`.
  */
 
+import matter from "gray-matter";
+
+import { classifyBodySections } from "../../artifacts/body";
 import { loadStructure, type Structure } from "../../artifacts/registry";
 import { getVaultRoot } from "../../config/vault";
-import { loadTemplate, type TemplateType } from "../../schema/load";
+import { loadTemplate, normalizeInlineMaps, resolveTemplatePath, type TemplateType } from "../../schema/load";
 import type { CliResult } from "../dispatch";
 import { emitJson, emitJsonError, jsonEnabled } from "../output";
 import { parseCommand } from "../parse";
@@ -36,8 +39,25 @@ export async function handleSchema(args: string[]): Promise<CliResult> {
     ...(field.constraints.values !== undefined ? { values: field.constraints.values } : {}),
   }));
 
+  // BUG-E (ADR-0044): the create-time structure contract is the body's H2
+  // sections, derived from the template — not the frontmatter fields. Split into
+  // the ones an author supplies via --body (authorable) and the ones the CLI
+  // renders from fields (machine-owned), so the contract is discoverable, not
+  // learnable only by failing.
+  const templateText = await Bun.file(resolveTemplatePath(`${resolved.template}.md`)).text();
+  const fieldNames = new Set(schema.fields.map((field) => field.name));
+  const sections = classifyBodySections(matter(normalizeInlineMaps(templateText)).content, fieldNames);
+
   if (jsonEnabled()) {
-    emitJson({ type: resolved.name, fields, ...(resolved.criteria !== undefined ? { criteria: resolved.criteria } : {}) });
+    emitJson({
+      type: resolved.name,
+      fields,
+      bodySections: {
+        authorable: sections.authorable.map((h) => `## ${h}`),
+        machineOwned: sections.machineOwned.map((m) => ({ heading: `## ${m.heading}`, flags: m.flags })),
+      },
+      ...(resolved.criteria !== undefined ? { criteria: resolved.criteria } : {}),
+    });
     return { code: 0 };
   }
 
@@ -46,6 +66,16 @@ export async function handleSchema(args: string[]): Promise<CliResult> {
     const flags = [field.type, field.required ? "required" : "optional"].join(", ");
     const values = field.values !== undefined ? `  [${field.values.join(" | ")}]` : "";
     console.log(`  ${field.name.padEnd(20)} ${flags}${values}`);
+  }
+  console.log("");
+  console.log("body sections:");
+  console.log(`  authorable (supply via --body): ${sections.authorable.map((h) => `## ${h}`).join(", ") || "(none)"}`);
+  if (sections.machineOwned.length > 0) {
+    console.log("  machine-owned (do not author):");
+    for (const section of sections.machineOwned) {
+      const via = section.flags.length > 0 ? ` → set via ${section.flags.join(" / ")}` : "";
+      console.log(`    ## ${section.heading}${via}`);
+    }
   }
   if (resolved.criteria !== undefined) {
     console.log("");
@@ -60,7 +90,8 @@ function resolveSchemaTarget(
   structure: Structure,
   name: string,
 ): { name: string; template: TemplateType; criteria?: string } | undefined {
-  if (structure.kinds[name] !== undefined) return { name, template: name };
+  const kind = structure.kinds[name];
+  if (kind !== undefined) return { name, template: name, ...(kind.criteria !== undefined ? { criteria: kind.criteria } : {}) };
   const bucket = structure.bucketFor(name);
   if (bucket !== undefined) {
     return {

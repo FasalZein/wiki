@@ -62,13 +62,62 @@ export function parseBodySections(
       continue;
     }
     if (machineOwned.has(normalize(part.heading))) {
+      const flags = machineOwnedFlags(templateBody, schemaFields, part.heading);
+      const hint = flags.length > 0
+        ? ` — set that content with ${flags.join(" / ")}, not by authoring this section`
+        : " — remove it from --body";
       throw new BodyParseError(
-        `body section "## ${part.heading}" is machine-owned and rendered by the CLI — remove it from --body`,
+        `body section "## ${part.heading}" is machine-owned and rendered by the CLI${hint}`,
       );
     }
     throw new BodyParseError(`unknown body section "## ${part.heading}"; expected sections: ${expected}`);
   }
   return result;
+}
+
+/**
+ * BUG-E / addendum (ADR-0044): classify a template's H2 sections into the ones an
+ * author supplies via `--body` (authorable — a heading over a non-field
+ * `{{placeholder}}`) and the ones the CLI renders from fields (machine-owned).
+ * Each machine-owned section carries the flag(s) that set its content, so
+ * `wiki schema` and the reject error can point the author at the right flag.
+ */
+export type BodySectionInfo = {
+  authorable: string[];
+  machineOwned: Array<{ heading: string; flags: string[] }>;
+};
+
+export function classifyBodySections(templateBody: string, schemaFields: Set<string>): BodySectionInfo {
+  const authored = new Set(authoredSections(templateBody, schemaFields).map((s) => normalize(s.heading)));
+  const authorable: string[] = [];
+  const machineOwned: Array<{ heading: string; flags: string[] }> = [];
+  for (const part of splitByH2(templateBody)) {
+    if (authored.has(normalize(part.heading))) {
+      authorable.push(part.heading);
+    } else {
+      machineOwned.push({ heading: part.heading, flags: fieldFlagsIn(part.content, schemaFields) });
+    }
+  }
+  return { authorable, machineOwned };
+}
+
+/** The flags (`--field-name`) that render a machine-owned section named `heading`. */
+function machineOwnedFlags(templateBody: string, schemaFields: Set<string>, heading: string): string[] {
+  const part = splitByH2(templateBody).find((p) => normalize(p.heading) === normalize(heading));
+  return part === undefined ? [] : fieldFlagsIn(part.content, schemaFields);
+}
+
+/** Schema fields referenced in a section's template content, as CLI flags. Catches
+ *  both `{{field}}` and `{{#each field}}` forms; `{{this}}`/`{{else}}` are dropped. */
+function fieldFlagsIn(content: string, schemaFields: Set<string>): string[] {
+  const flags: string[] = [];
+  for (const match of content.matchAll(/{{\s*(?:#each\s+)?([A-Za-z0-9_]+)/g)) {
+    const name = match[1];
+    if (name !== undefined && schemaFields.has(name) && !flags.includes(name)) {
+      flags.push(`--${name.replace(/_/g, "-")}`);
+    }
+  }
+  return flags;
 }
 
 function templateHeadings(templateBody: string): string[] {

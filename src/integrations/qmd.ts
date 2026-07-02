@@ -11,6 +11,8 @@
  * qmd's list format does not masquerade as 'collection never synced'.
  */
 
+import { basename } from "node:path";
+
 import { isRecord } from "../util";
 
 export type QmdResult = {
@@ -93,7 +95,16 @@ export async function runQuery(
   if (stdout.trim().length === 0) {
     return [];
   }
-  return parseQmdResults(stdout);
+  // ADR-0044: the sync-generated index.md rosters (per-project + vault root) are
+  // in the collection but are not artifacts — drop them so they never surface as a
+  // search hit or a dedup candidate. Excluded here (the shared query path) so both
+  // `search` and the dedup gate stay clean without re-embedding the corpus.
+  return parseQmdResults(stdout).filter((result) => basename(uriBasename(result.path)) !== "index.md");
+}
+
+/** Basename of a qmd://<collection>/<rel> URI or a raw filesystem path. */
+function uriBasename(path: string): string {
+  return path.startsWith("qmd://") ? path.slice("qmd://".length) : path;
 }
 
 async function runQmd(command: string, args: string[]): Promise<string> {

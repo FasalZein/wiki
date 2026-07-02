@@ -5,11 +5,10 @@ import { join } from "node:path";
 
 import { loadStructure, DEFAULT_STRUCTURE } from "../src/artifacts/registry";
 
-// SLICE-0110: the section/bucket tree is a walking skeleton — the type and
-// loader carry the tree end-to-end and validate it; create/doctor/relocation
-// behavior changes land in later slices. The bundled default tree must
-// reproduce today's five kinds + six doc categories exactly so an unconfigured
-// vault is byte-for-byte unaffected.
+// SLICE-0110 / PRD-0023: the section/bucket tree carries the kind set end-to-end.
+// The bundled default is now the promoted-kinds model: ten LEAF sections (the old
+// `doc` BRANCH kind was promoted into six first-class leaf kinds, each with its own
+// folder + id prefix + criteria). An unconfigured vault falls back to exactly this.
 
 const tempPaths: string[] = [];
 
@@ -29,7 +28,7 @@ const section = (name: string) => DEFAULT_STRUCTURE.sections.find((s) => s.name 
 describe("SLICE-0110: bundled default section/bucket tree", () => {
   test("the default exposes one section per kind", () => {
     expect(DEFAULT_STRUCTURE.sections.map((s) => s.name).sort()).toEqual(
-      ["decision", "doc", "handoff", "prd", "slice"],
+      ["architecture", "decision", "handoff", "legacy", "notes", "prd", "research", "runbooks", "slice", "specs"],
     );
   });
 
@@ -47,42 +46,55 @@ describe("SLICE-0110: bundled default section/bucket tree", () => {
     }
   });
 
-  test("doc is the one BRANCH section: six buckets reproducing the locked doc categories, sharing the DOC id-space", () => {
-    const doc = section("doc");
-    expect(doc?.tree).toBe("branch");
-    expect(doc?.prefix).toBe("DOC");
-    expect(doc?.buckets.map((b) => b.name)).toEqual([
-      "architecture",
-      "research",
-      "runbooks",
-      "specs",
-      "notes",
-      "legacy",
-    ]);
-    // Each bucket files into docs/<category>/, shares the DOC prefix, uses the doc template, and carries criteria.
-    for (const bucket of doc?.buckets ?? []) {
-      expect(bucket.folder).toBe(`docs/${bucket.name}`);
-      expect(bucket.template).toBe("doc");
-      expect(typeof bucket.criteria).toBe("string");
+  test("the six promoted knowledge kinds are LEAF sections with their own folder, prefix, and criteria", () => {
+    for (const [name, folder, prefix] of [
+      ["architecture", "architecture", "ARCH"],
+      ["research", "research", "RES"],
+      ["runbooks", "runbooks", "RUN"],
+      ["specs", "specs", "SPEC"],
+      ["notes", "notes", "NOTE"],
+      ["legacy", "legacy", "LEG"],
+    ] as const) {
+      const s = section(name);
+      expect(s?.tree).toBe("leaf");
+      expect(s?.prefix).toBe(prefix);
+      // A leaf section has exactly one self-named bucket filing into the section folder.
+      expect(s?.buckets).toHaveLength(1);
+      expect(s?.buckets[0]?.name).toBe(name);
+      expect(s?.buckets[0]?.folder).toBe(folder);
+      expect(s?.buckets[0]?.template).toBe(name);
+      // The promoted kinds carry the criteria the bucket used to hold (ADR-0044).
+      expect(typeof s?.buckets[0]?.criteria).toBe("string");
     }
   });
 
-  test("existing flat lookups are byte-identical (no privileged kinds, methods unchanged)", () => {
-    expect(DEFAULT_STRUCTURE.specFor("doc")).toEqual({ prefix: "DOC", folder: "docs", dedup: true });
+  test("flat lookups resolve every kind (no privileged kinds, methods unchanged)", () => {
+    expect(DEFAULT_STRUCTURE.specFor("research")).toEqual({
+      prefix: "RES",
+      folder: "research",
+      dedup: true,
+      criteria: "External findings, investigations, comparisons, and explorations feeding a decision.",
+    });
     expect(DEFAULT_STRUCTURE.specFor("handoff").dedup).toBe(false);
     expect(DEFAULT_STRUCTURE.typeForId("SLICE-0032")).toBe("slice");
-    expect(DEFAULT_STRUCTURE.artifactTypeForVaultPath("projects/p/docs/x.md")).toBe("doc");
+    expect(DEFAULT_STRUCTURE.artifactTypeForVaultPath("projects/p/research/x.md")).toBe("research");
     expect(DEFAULT_STRUCTURE.kindForSkill("to-prd")).toBe("prd");
-    expect([...DEFAULT_STRUCTURE.folders].sort()).toEqual(["adrs", "docs", "handoffs", "prds", "slices"]);
+    expect([...DEFAULT_STRUCTURE.folders].sort()).toEqual(
+      ["adrs", "architecture", "handoffs", "legacy", "notes", "prds", "research", "runbooks", "slices", "specs"],
+    );
   });
 });
 
 describe("SLICE-0110: tree carried end-to-end through the loader", () => {
-  test("a no-config vault falls back to the default tree (six doc buckets present)", async () => {
+  test("a no-config vault falls back to the default tree (all promoted kinds present as leaves)", async () => {
     const structure = await loadStructure(await makeVault());
-    const doc = structure.sections.find((s) => s.name === "doc");
-    expect(doc?.tree).toBe("branch");
-    expect(doc?.buckets.map((b) => b.name)).toEqual(DEFAULT_STRUCTURE.sections.find((s) => s.name === "doc")?.buckets.map((b) => b.name));
+    expect(structure.sections.map((s) => s.name).sort()).toEqual(
+      DEFAULT_STRUCTURE.sections.map((s) => s.name).sort(),
+    );
+    const research = structure.sections.find((s) => s.name === "research");
+    expect(research?.tree).toBe("leaf");
+    expect(research?.prefix).toBe("RES");
+    expect(research?.buckets[0]?.folder).toBe("research");
   });
 
   test("a custom branch section declared in wiki.json becomes a tree with its buckets", async () => {

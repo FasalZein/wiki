@@ -22,8 +22,13 @@ describe("project CLI", () => {
     expect(entries).toContain("slices");
     expect(entries).toContain("adrs");
     expect(entries).toContain("handoffs");
-    expect(entries).toContain("docs");
-    expect(entries).not.toContain("architecture");
+    // PRD-0023: the promoted knowledge kinds each own a top-level folder; there is
+    // no longer a single `docs/` branch folder.
+    expect(entries).toContain("architecture");
+    expect(entries).toContain("research");
+    expect(entries).toContain("runbooks");
+    expect(entries).toContain("notes");
+    expect(entries).not.toContain("docs");
   });
 
   test("project create creates _project.md with correct frontmatter", async () => {

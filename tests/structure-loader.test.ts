@@ -30,7 +30,7 @@ describe("loadStructure (per-vault runtime config read)", () => {
     const vault = await makeVault();
     const structure = await loadStructure(vault);
     expect(structure.specFor("prd").prefix).toBe("PRD");
-    expect(structure.specFor("doc").folder).toBe("docs");
+    expect(structure.specFor("research").folder).toBe("research");
     expect(structure.specFor("handoff").dedup).toBe(false);
     // Same shape as the bundled default.
     expect(structure.specFor("slice")).toEqual(DEFAULT_STRUCTURE.specFor("slice"));

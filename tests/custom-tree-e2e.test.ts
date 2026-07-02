@@ -30,16 +30,16 @@ afterEach(async () => {
 });
 
 // A custom tree the bundled default does not contain:
-//  - `doc` reshaped to a branch section in a non-default folder (knowledge/),
-//    with a `bugs` bucket the default tree has never seen (shares the DOC id-space).
+//  - `notes` reshaped to a branch section in a non-default folder (knowledge/),
+//    with a `bugs` bucket the default tree has never seen (shares the NOTE id-space).
 //  - `decision` reshaped to a top-level `architecture` section (folder architecture/),
 //    a branch with two buckets (components/boundaries) sharing the ADR id-space.
-// Both reuse a bundled template (doc / decision) selected by section name — the
+// Both reuse a bundled template (notes / decision) selected by section name — the
 // folders, buckets, and criteria are all config-driven.
 const customConfig = JSON.stringify({
   kinds: {
-    doc: {
-      prefix: "DOC",
+    notes: {
+      prefix: "NOTE",
       folder: "knowledge",
       dedup: false,
       buckets: {
@@ -105,8 +105,8 @@ describe("SLICE-0118: custom tree end-to-end", () => {
   test("creating into custom buckets drives folders/prefixes/templates from config and mints section-prefixed ids", async () => {
     const vault = await makeVault("p");
 
-    // `bugs` is a bucket of the `doc` section (folder knowledge/) the default tree
-    // has never seen. Files into knowledge/bugs/ with a DOC id and the doc template.
+    // `bugs` is a bucket of the `notes` section (folder knowledge/) the default tree
+    // has never seen. Files into knowledge/bugs/ with a NOTE id and the notes template.
     const bug = await run([
       "create", "bugs",
       "--project", "p",
@@ -114,12 +114,12 @@ describe("SLICE-0118: custom tree end-to-end", () => {
       "--summary", "Null deref crashes the boot path.",
     ]);
     expect(bug.code).toBe(0);
-    const bugPath = join(vault, "projects", "p", "knowledge", "bugs", "DOC-0001-null-deref-on-startup.md");
+    const bugPath = join(vault, "projects", "p", "knowledge", "bugs", "NOTE-0001-null-deref-on-startup.md");
     const bugFile = await readFile(bugPath, "utf8");
-    expect(bugFile).toContain("id: DOC-0001");
-    expect(bugFile).toContain("## Content"); // doc template body sections applied
+    expect(bugFile).toContain("id: NOTE-0001");
+    expect(bugFile).toContain("## Content"); // notes template body sections applied
 
-    // A second doc-section bucket shares the SAME id-space → DOC-0002, not DOC-0001.
+    // A second notes-section bucket shares the SAME id-space → NOTE-0002, not NOTE-0001.
     const runbook = await run([
       "create", "runbooks",
       "--project", "p",
@@ -127,8 +127,8 @@ describe("SLICE-0118: custom tree end-to-end", () => {
       "--summary", "How to restart the worker pool safely.",
     ]);
     expect(runbook.code).toBe(0);
-    const runbookPath = join(vault, "projects", "p", "knowledge", "runbooks", "DOC-0002-restart-the-worker-pool.md");
-    expect(await readFile(runbookPath, "utf8")).toContain("id: DOC-0002");
+    const runbookPath = join(vault, "projects", "p", "knowledge", "runbooks", "NOTE-0002-restart-the-worker-pool.md");
+    expect(await readFile(runbookPath, "utf8")).toContain("id: NOTE-0002");
 
     // A bucket in the OTHER section (architecture/) mints from the ADR id-space.
     const comp = await run([
@@ -142,21 +142,21 @@ describe("SLICE-0118: custom tree end-to-end", () => {
     expect(await readFile(compPath, "utf8")).toContain("id: ADR-0001");
   });
 
-  test("a bare `wiki create <branch-section>` with no --category defaults to the first declared bucket (this tree has no `notes`)", async () => {
+  test("a bare `wiki create <branch-section>` with no --category defaults to the first declared bucket (this section has no `notes` bucket)", async () => {
     const vault = await makeVault("p");
 
-    // The custom doc section declares buckets [bugs, runbooks] and NO `notes`.
-    // A bare create must file into a DECLARED bucket (first one: bugs), never an
-    // undeclared `notes/` folder that doctor would then flag.
+    // The custom notes section declares buckets [bugs, runbooks] and NO `notes`
+    // bucket. A bare create must file into a DECLARED bucket (first one: bugs),
+    // never an undeclared folder that doctor would then flag.
     const doc = await run([
-      "create", "doc",
+      "create", "notes",
       "--project", "p",
       "--title", "Bare doc with no category",
       "--summary", "A bare doc create with no explicit bucket.",
     ]);
     expect(doc.code).toBe(0);
-    const docPath = join(vault, "projects", "p", "knowledge", "bugs", "DOC-0001-bare-doc-with-no-category.md");
-    expect(await readFile(docPath, "utf8")).toContain("id: DOC-0001");
+    const docPath = join(vault, "projects", "p", "knowledge", "bugs", "NOTE-0001-bare-doc-with-no-category.md");
+    expect(await readFile(docPath, "utf8")).toContain("id: NOTE-0001");
     // No undeclared notes/ folder was created, so doctor stays clean.
     expect((await runDoctor(vault)).clean).toBe(true);
   });
@@ -170,10 +170,10 @@ describe("SLICE-0118: custom tree end-to-end", () => {
     const result = await runDoctor(vault);
     expect(result.clean).toBe(true);
 
-    // nextId is per-section: the doc section is at DOC-0002 (one bug filed), the
+    // nextId is per-section: the notes section is at NOTE-0002 (one bug filed), the
     // architecture section at ADR-0002 (one component filed) — independent spaces.
     const structure = await loadStructure(vault);
-    expect(await nextId("doc", vault, "p", structure)).toBe("DOC-0002");
+    expect(await nextId("notes", vault, "p", structure)).toBe("NOTE-0002");
     expect(await nextId("decision", vault, "p", structure)).toBe("ADR-0002");
   });
 
@@ -181,7 +181,7 @@ describe("SLICE-0118: custom tree end-to-end", () => {
     const vault = await makeVault("p");
     // A folder the custom wiki.json never declared.
     await mkdir(join(vault, "projects", "p", "knowledge", "blueprints"), { recursive: true });
-    await writeFile(join(vault, "projects", "p", "knowledge", "blueprints", "DOC-0009-x.md"), "---\nid: DOC-0009\n---\nx\n");
+    await writeFile(join(vault, "projects", "p", "knowledge", "blueprints", "NOTE-0009-x.md"), "---\nid: NOTE-0009\n---\nx\n");
 
     const result = await runDoctor(vault);
     expect(result.clean).toBe(false);
@@ -197,7 +197,7 @@ describe("SLICE-0118: bucket criteria surfaced through the CLI", () => {
     expect(help.code).toBe(0);
     expect(help.out).toContain("Defect reports: symptom, root cause, fix.");
     expect(help.out).toContain("knowledge/bugs"); // config-declared folder
-    expect(help.out).toContain("DOC"); // section prefix
+    expect(help.out).toContain("NOTE"); // section prefix
   });
 
   test("`wiki schema <bucket>` lists the bucket's template fields and prints its criteria", async () => {

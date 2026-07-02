@@ -10,8 +10,19 @@ afterEach(async () => {
 });
 
 describe("sync CLI", () => {
-  test("sync refuses (exit 1) when docs/ has a rogue folder, before embedding", async () => {
+  test("sync refuses (exit 1) when a branch section has a rogue folder, before embedding", async () => {
     const fixture = await createSyncFixture("wiki-v2");
+    // The bundled default is all-leaf (PRD-0023); declare a branch `doc` section so
+    // the no-loose/undeclared-bucket gate has a branch to police.
+    await writeFile(join(fixture.vaultRoot, "wiki.json"), JSON.stringify({
+      kinds: {
+        prd: { prefix: "PRD", folder: "prds", dedup: true },
+        slice: { prefix: "SLICE", folder: "slices", dedup: true },
+        decision: { prefix: "ADR", folder: "adrs", dedup: true },
+        handoff: { prefix: "HANDOFF", folder: "handoffs", dedup: false },
+        doc: { prefix: "DOC", folder: "docs", dedup: true, buckets: { notes: { criteria: "x" }, research: { criteria: "y" } } },
+      },
+    }));
     await mkdir(join(fixture.projectPath, "docs", "cracking"), { recursive: true });
     await writeFile(join(fixture.projectPath, "docs", "cracking", "note.md"), "# raw\n");
 

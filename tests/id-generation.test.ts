@@ -111,16 +111,15 @@ describe("nextId", () => {
     expect(await nextId("prd", vault, "test")).toBe("PRD-0011");
   });
 
-  test("doc ids are globally unique across category subfolders", async () => {
+  test("a promoted leaf kind (research) continues from the highest existing id in its folder", async () => {
+    // PRD-0023: the old `doc` BRANCH kind was promoted into first-class LEAF kinds.
     const vault = await createVault("test");
-    const docs = join(vault, "projects", "test", "docs");
-    await mkdir(join(docs, "research"), { recursive: true });
-    await mkdir(join(docs, "runbooks"), { recursive: true });
-    await writeFile(join(docs, "research", "DOC-0004-a.md"), "existing");
-    await writeFile(join(docs, "runbooks", "DOC-0009-b.md"), "existing");
-    await writeFile(join(docs, "DOC-0002-flat.md"), "existing");
+    const research = join(vault, "projects", "test", "research");
+    await mkdir(research, { recursive: true });
+    await writeFile(join(research, "RES-0004-a.md"), "existing");
+    await writeFile(join(research, "RES-0009-b.md"), "existing");
 
-    expect(await nextId("doc", vault, "test")).toBe("DOC-0010");
+    expect(await nextId("research", vault, "test")).toBe("RES-0010");
   });
 
   test("counts a frontmatter id higher than any filename id", async () => {

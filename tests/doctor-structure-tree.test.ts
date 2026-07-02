@@ -27,12 +27,28 @@ async function makeVault(project: string): Promise<{ vaultRoot: string; projectD
 }
 
 describe("doctor structure-only validation (config tree)", () => {
+  // The bundled default is now all-leaf (PRD-0023), so the branch-section
+  // invariants are exercised against a custom wiki.json declaring a branch `doc`
+  // section (folder docs/, config-declared buckets).
+  const branchConfig = JSON.stringify({
+    kinds: {
+      doc: {
+        prefix: "DOC",
+        folder: "docs",
+        dedup: true,
+        buckets: { architecture: { criteria: "x" }, notes: { criteria: "y" } },
+      },
+    },
+  });
+
   test("flags an undeclared folder inside a branch section", async () => {
     const { vaultRoot, projectDir } = await makeVault("p");
+    await writeFile(join(vaultRoot, "wiki.json"), branchConfig);
+    const structure = await loadStructure(vaultRoot);
     await mkdir(join(projectDir, "docs", "architecture"), { recursive: true });
     await mkdir(join(projectDir, "docs", "cracking"), { recursive: true });
 
-    const issues = await checkProjectDocsStructure(vaultRoot, "p", DEFAULT_STRUCTURE);
+    const issues = await checkProjectDocsStructure(vaultRoot, "p", structure);
 
     expect(issues).toHaveLength(1);
     expect(issues[0]!.type).toBe("docs-structure");
@@ -41,10 +57,12 @@ describe("doctor structure-only validation (config tree)", () => {
 
   test("flags a loose file sitting directly in a branch section", async () => {
     const { vaultRoot, projectDir } = await makeVault("p");
+    await writeFile(join(vaultRoot, "wiki.json"), branchConfig);
+    const structure = await loadStructure(vaultRoot);
     await mkdir(join(projectDir, "docs", "notes"), { recursive: true });
     await writeFile(join(projectDir, "docs", "loose.md"), "# loose\n");
 
-    const issues = await checkProjectDocsStructure(vaultRoot, "p", DEFAULT_STRUCTURE);
+    const issues = await checkProjectDocsStructure(vaultRoot, "p", structure);
 
     expect(issues).toHaveLength(1);
     expect(issues[0]!.message).toContain("docs/loose.md sits directly under docs/");

@@ -227,6 +227,47 @@ export async function scrubInboundLinks(paths: string[], id: string): Promise<Sc
   return { scrubbedFiles, bodyMentions };
 }
 
+/**
+ * BUG-C (ADR-0044): cheap schema validation run BEFORE the embedding/dedup pass,
+ * so a create can never print a dedup advisory and then abort on a bad field.
+ * Checks the same things create ultimately enforces — body-section shape and
+ * field bounds (length/count/enum/pattern) — minus the CLI-minted fields
+ * (id/aliases/created/updated), which aren't known until write time. Throws
+ * {@link ArtifactValidationError} on the first failure; the caller maps it to a
+ * clean exit before any qmd work. Re-validated in full inside createArtifact.
+ */
+export async function preflightCreate(
+  type: TemplateType,
+  fields: Record<string, unknown>,
+  body: string | undefined,
+): Promise<void> {
+  const schema = await loadTemplate(type);
+  const template = await Bun.file(resolveTemplatePath(`${type}.md`)).text();
+
+  if (body !== undefined) {
+    const fieldNames = new Set(schema.fields.map((field) => field.name));
+    try {
+      parseBodySections(matter(normalizeInlineMaps(template)).content, fieldNames, body);
+    } catch (error) {
+      if (error instanceof BodyParseError) {
+        throw new ArtifactValidationError([{ field: "body", reason: error.message }]);
+      }
+      throw error;
+    }
+  }
+
+  // Validate every field except the ones the CLI mints at write time — so a
+  // missing/short title or over-long summary is caught here, but the not-yet-minted
+  // id is not spuriously flagged as required.
+  const minted = new Set(["id", "aliases", "created", "updated", "session_date"]);
+  const checkSchema: Schema = { ...schema, fields: schema.fields.filter((field) => !minted.has(field.name)) };
+  const withDefaults = applyDefaults(schema, template, { ...fields });
+  const result = validate(checkSchema, withDefaults);
+  if (!result.ok) {
+    throw new ArtifactValidationError(result.errors);
+  }
+}
+
 export async function createArtifact(input: CreateArtifactInput): Promise<Artifact> {
   const structure = input.structure;
   const schema = await loadTemplate(input.type);

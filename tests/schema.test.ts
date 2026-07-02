@@ -119,7 +119,7 @@ describe("template schemas", () => {
 
     expect(validate(schema, { tags: ["only-one"] })).toEqual({
       ok: false,
-      errors: [{ field: "tags", reason: "below minimum count", expected: "at least 2 item" }],
+      errors: [{ field: "tags", reason: "1 items, min 2 — add 1", expected: "at least 2 item" }],
     });
   });
 
@@ -128,7 +128,7 @@ describe("template schemas", () => {
 
     expect(validate(schema, { id: "PRD-001", title: "Tiny", summary: "A populated summary here.", project: "wiki-v2", status: "draft" })).toEqual({
       ok: false,
-      errors: [{ field: "title", reason: "below minimum length", expected: "at least 5 characters" }],
+      errors: [{ field: "title", reason: "4 chars, min 5 — add 1", expected: "at least 5 characters" }],
     });
   });
 
@@ -183,7 +183,7 @@ describe("template schemas", () => {
     };
     expect(validate(schema, { title: "way too long to fit" })).toEqual({
       ok: false,
-      errors: [{ field: "title", reason: "above maximum length", expected: "at most 10 characters" }],
+      errors: [{ field: "title", reason: "19 chars, max 10 — trim 9", expected: "at most 10 characters" }],
     });
     expect(validate(schema, { title: "just ok" }).ok).toBe(true);
   });
@@ -196,7 +196,7 @@ describe("template schemas", () => {
     };
     expect(validate(schema, { tags: ["a", "b", "c"] })).toEqual({
       ok: false,
-      errors: [{ field: "tags", reason: "above maximum count", expected: "at most 2 item" }],
+      errors: [{ field: "tags", reason: "3 items, max 2 — drop 1", expected: "at most 2 item" }],
     });
   });
 
@@ -208,11 +208,11 @@ describe("template schemas", () => {
     };
     expect(validate(schema, { n: 9 })).toEqual({
       ok: false,
-      errors: [{ field: "n", reason: "above maximum", expected: "at most 5" }],
+      errors: [{ field: "n", reason: "9, max 5", expected: "at most 5" }],
     });
     expect(validate(schema, { n: 0 })).toEqual({
       ok: false,
-      errors: [{ field: "n", reason: "below minimum", expected: "at least 1" }],
+      errors: [{ field: "n", reason: "0, min 1", expected: "at least 1" }],
     });
     expect(validate(schema, { n: 3 }).ok).toBe(true);
   });
