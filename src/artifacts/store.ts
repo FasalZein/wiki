@@ -3,10 +3,11 @@ import { dirname, join, sep } from "node:path";
 
 import { loadTemplate, type TemplateType } from "../schema/load";
 import { BodyParseError, loadKind } from "./body";
-import { validate } from "../schema/validate";
 import { type ArtifactFile, openArtifact, serializeArtifact } from "./artifact-file";
 import type { NormalizedRecord, Schema, ValidationError } from "../schema/types";
-import { type Structure } from "./registry";
+import { parentBacklink, type Structure } from "./registry";
+import type { CreatePlan } from "./create-plan";
+import { fieldsForDedupOverride } from "./dedup";
 import { nextId } from "./id";
 import { withProjectLock } from "./lock";
 import { buildIdIndex } from "./id-index";
@@ -227,45 +228,93 @@ export async function scrubInboundLinks(paths: string[], id: string): Promise<Sc
   return { scrubbedFiles, bodyMentions };
 }
 
+/** The outcome of a completed create transaction: the written artifact and the id
+ *  it superseded (null when the create did not supersede). No console — the verb
+ *  formats stdout/JSON from this. */
+export type CreateResult = {
+  artifact: Artifact;
+  supersededId: string | null;
+};
+
 /**
- * BUG-C (ADR-0044): cheap schema validation run BEFORE the embedding/dedup pass,
- * so a create can never print a dedup advisory and then abort on a bad field.
- * Checks the same things create ultimately enforces — body-section shape and
- * field bounds (length/count/enum/pattern) — minus the CLI-minted fields
- * (id/aliases/created/updated), which aren't known until write time. Throws
- * {@link ArtifactValidationError} on the first failure; the caller maps it to a
- * clean exit before any qmd work. Re-validated in full inside createArtifact.
+ * The create transaction (ADR-0045 item 3): consume a validated {@link CreatePlan}
+ * and own the ordered write → supersede → backlink sequence with rollback. Pure of
+ * console/exit — throws the domain errors (ArtifactValidationError / ArtifactNotFound)
+ * the verb maps to an exit code. The plan is already validated (see
+ * {@link CreatePlan}), so this never re-does the field checks; it does the I/O.
+ *
+ * Rollback (P0.2/P0.3): the superseded target is snapshotted (byte-for-byte) before
+ * the write, and every post-write mutation of OTHER artifacts (supersede, parent
+ * backlink) runs under a try that, on any failure, removes the new file AND restores
+ * the superseded target's exact bytes — so a half-applied create never leaves an
+ * orphan or a target flipped to `superseded` pointing at a rolled-back id.
  */
-export async function preflightCreate(
-  type: TemplateType,
-  fields: Record<string, unknown>,
-  body: string | undefined,
-): Promise<void> {
-  const kind = await loadKind(type);
+export async function executeCreate(
+  plan: CreatePlan,
+  ctx: { vaultRoot: string; structure: Structure },
+): Promise<CreateResult> {
+  const { vaultRoot, structure } = ctx;
+  const { type, project, override } = plan;
 
-  let absorbed: Record<string, unknown> = {};
-  if (body !== undefined) {
-    try {
-      absorbed = kind.parseBody(body).absorbed;
-    } catch (error) {
-      if (error instanceof BodyParseError) {
-        throw new ArtifactValidationError([{ field: "body", reason: error.message }]);
-      }
-      throw error;
+  // Snapshot the to-be-superseded artifact (single read) so a post-write failure
+  // can byte-restore it. supersedeArtifact merges onto the CURRENT frontmatter, so
+  // a field-level revert can't undo it — only the byte snapshot can.
+  const supersededBefore = override.kind === "supersedes"
+    ? await readArtifact({ type, vaultRoot, project, id: override.id }, structure)
+    : null;
+  const supersededSnapshot = supersededBefore ? await Bun.file(supersededBefore.path).text() : null;
+
+  // Pre-flight the resolution targets before any write, mirroring backlinkParent's
+  // guard: a missing/garbage parent or --related-to id fails before the write runs.
+  if (plan.parentRef !== undefined) {
+    await readArtifact({ type: plan.parentRef.type, vaultRoot, project, id: plan.parentRef.id }, structure);
+  }
+  if (plan.relatedRef !== undefined) {
+    await readArtifact({ type: plan.relatedRef.type, vaultRoot, project, id: plan.relatedRef.id }, structure);
+  }
+
+  const artifact = await createArtifact({
+    type,
+    vaultRoot,
+    project,
+    category: plan.category,
+    body: plan.body,
+    fields: { ...plan.fields, ...fieldsForDedupOverride(override) },
+    structure,
+  });
+
+  try {
+    if (override.kind === "supersedes") {
+      await supersedeArtifact({ type, vaultRoot, project, id: override.id, by: artifact.id }, structure);
     }
+    await backlinkParent(plan, vaultRoot, artifact.id, structure);
+  } catch (postWriteError) {
+    await removeArtifactFile(artifact.path);
+    if (supersededBefore && supersededSnapshot !== null) {
+      await Bun.write(supersededBefore.path, supersededSnapshot);
+    }
+    throw postWriteError;
   }
 
-  // Validate every field except the ones the CLI mints at write time — so a
-  // missing/short title or over-long summary is caught here, but the not-yet-minted
-  // id is not spuriously flagged as required. Absorbed body fields (a machine-owned
-  // section parsed into its backing field) are validated alongside the flags.
-  const minted = new Set(["id", "aliases", "created", "updated", "session_date"]);
-  const checkSchema: Schema = { ...kind.schema, fields: kind.schema.fields.filter((field) => !minted.has(field.name)) };
-  const withDefaults = kind.applyDefaults({ ...fields, ...absorbed });
-  const result = validate(checkSchema, withDefaults);
-  if (!result.ok) {
-    throw new ArtifactValidationError(result.errors);
-  }
+  return { artifact, supersededId: override.kind === "supersedes" ? override.id : null };
+}
+
+/**
+ * SLICE-0114 generic backlink: when a child kind that declares `parent: <kind>` is
+ * created with a `parent_<kind>` id, append the child's id to the parent's
+ * config-declared `child_list` field. That field is in the CLI's non-flag set, so
+ * create never populates it from the child side — this is the only writer. Dedup-safe
+ * (no double-add), create-if-absent. Runs in executeCreate's rollback try block, so a
+ * missing/invalid parent rolls the child back rather than orphaning it.
+ */
+async function backlinkParent(plan: CreatePlan, vaultRoot: string, childId: string, structure: Structure): Promise<void> {
+  if (plan.parentRef === undefined) return;
+  const backlink = parentBacklink(structure, plan.type);
+  if (backlink === undefined) return;
+  const parent = await readArtifact({ type: plan.parentRef.type, vaultRoot, project: plan.project, id: plan.parentRef.id }, structure);
+  const current = Array.isArray(parent.fields[backlink.childListField]) ? (parent.fields[backlink.childListField] as unknown[]).map(String) : [];
+  if (current.includes(childId)) return;
+  await setField({ type: backlink.parentType, vaultRoot, project: plan.project, id: plan.parentRef.id, field: backlink.childListField, value: [...current, childId] }, structure);
 }
 
 export async function createArtifact(input: CreateArtifactInput): Promise<Artifact> {

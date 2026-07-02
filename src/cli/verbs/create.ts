@@ -2,10 +2,8 @@ import { join, relative } from "node:path";
 
 import {
   DedupBlockedError,
-  fieldsForDedupOverride,
   formatCrossKindNote,
   formatSameKindAdvisory,
-  parseDedupOverride,
   QmdError,
   runDedupGate,
   type DedupOverride,
@@ -13,16 +11,13 @@ import {
 import {
   ArtifactNotFoundError,
   ArtifactValidationError,
-  createArtifact,
-  preflightCreate,
-  readArtifact,
-  removeArtifactFile,
-  setField,
-  supersedeArtifact,
+  type CreateResult,
+  executeCreate,
 } from "../../artifacts/store";
+import { planCreate, type CreatePlan, type CreatePlanError } from "../../artifacts/create-plan";
 import { loadKind } from "../../artifacts/body";
 import { projectPath } from "../../artifacts/paths";
-import { DEFAULT_STRUCTURE, loadStructure, parentBacklink, type Structure } from "../../artifacts/registry";
+import { DEFAULT_STRUCTURE, loadStructure, type Structure } from "../../artifacts/registry";
 import { assertProjectStructure, loadProjectConfig, ProjectConfigError } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
 import { type TemplateType } from "../../schema/load";
@@ -223,134 +218,66 @@ async function createGeneric(kind: TemplateType, args: string[], presetCategory?
     : undefined;
   const category = presetCategory ?? explicitCategory ?? defaultBucket;
 
-  // Dedup query: title + summary (ADR-0044). Query-side only — sync still indexes
-  // the full artifact; this is just the signal a create scores against.
-  const title = stringValue(parsed.values, "title");
-  const summary = stringValue(parsed.values, "summary");
-  const dedupQuery = [title, summary]
-    .filter((v): v is string => typeof v === "string" && v.length > 0)
-    .join(" ");
   const body = await stdinOrValue(stringValue(parsed.values, "body"));
 
-  // BUG-C (ADR-0044): all cheap schema validation (field bounds + body sections)
-  // runs BEFORE the dedup/embedding pass, so a create can never print a dedup
-  // advisory and then abort on a bad field. Unknown flags are already rejected above.
-  try {
-    await preflightCreate(kind, { ...fields, project }, body);
-  } catch (error) {
-    return handleCreateError(error);
-  }
-
-  return createWithSupersede({
-    type: kind,
+  // Plan the create: cheap validation (BUG-C/NOTE-0010) + override + target
+  // resolution, all pure. The plan cannot exist unvalidated, so the dedup gate
+  // below physically cannot run against a bad field.
+  const planned = planCreate(kind, kindDef, structure, {
     project,
-    dedupQuery,
     fields,
-    rawValues: parsed.values,
-    category,
     body,
-    vaultRoot,
-    structure,
+    category,
+    forceNew: stringValue(parsed.values, "force-new"),
+    relatedTo: stringValue(parsed.values, "related-to"),
+    supersedes: stringValue(parsed.values, "supersedes"),
   });
-}
-
-type CreateRequest = {
-  type: TemplateType;
-  project: string;
-  dedupQuery: string;
-  fields: Record<string, unknown>;
-  rawValues: Record<string, string | string[] | boolean | undefined>;
-  category?: string;
-  body?: string;
-  vaultRoot: string;
-  structure: Structure;
-};
-
-async function createWithSupersede(req: CreateRequest): Promise<CliResult> {
-  const { type, project, dedupQuery, fields, rawValues, category, body, vaultRoot, structure } = req;
-  const override = parseOverride(rawValues);
-  if (typeof override === "string") { console.error(override); return { code: 1 }; }
+  if (!planned.ok) return handlePlanError(planned.error);
+  const plan = planned.plan;
 
   const projPath = projectPath(vaultRoot, project);
   await assertProjectStructure(projPath, structure);
+
+  // Dedup gate (advisory / interactive I/O stays in the verb) runs on the plan,
+  // between plan and execute — it can abort the create or wave it through.
+  const dedupBlock = await advisoryDedup(plan.type, project, projPath, plan.dedupQuery, plan.override, structure);
+  if (dedupBlock !== null) return dedupBlock;
+
   try {
-    // Snapshot the to-be-superseded artifact (single read) so a post-write
-    // failure can byte-restore it. setFields can't undo the supersede: it merges
-    // onto the *current* (already-mutated) frontmatter, so the added
-    // `superseded_by` would survive a field-level revert.
-    const supersededBefore = override.kind === "supersedes"
-      ? await readArtifact({ type, vaultRoot, project, id: override.id }, structure)
-      : null;
-    const supersededSnapshot = supersededBefore ? await Bun.file(supersededBefore.path).text() : null;
-    // Pre-flight the parent before any write, mirroring backlinkParent's guard,
-    // so a missing/garbage parent id fails before supersede runs. The parent
-    // relationship is config-declared (SLICE-0114), not a slice/prd special.
-    const backlink = parentBacklink(structure, type);
-    if (backlink !== undefined) {
-      const parentId = fields[backlink.parentField];
-      if (typeof parentId === "string" && parentId.length > 0) {
-        await readArtifact({ type: backlink.parentType, vaultRoot, project, id: parentId }, structure);
-      }
-    }
-    // Pre-flight --related-to the same way --supersedes is read above, so a typo'd
-    // `--related-to PRD-9999` fails before the write instead of filing a dangling
-    // link. The related id is resolved against its own kind (inferred from the id).
-    if (override.kind === "related-to") {
-      const relatedType = structure.typeForId(override.id);
-      if (relatedType === undefined) {
-        console.error(`--related-to: cannot infer artifact type from id: ${override.id}`);
-        return { code: 1 };
-      }
-      await readArtifact({ type: relatedType, vaultRoot, project, id: override.id }, structure);
-    }
-    const dedupBlock = await advisoryDedup(type, project, projPath, dedupQuery, override, structure);
-    if (dedupBlock !== null) return dedupBlock;
-    const artifact = await createArtifact({
-      type,
-      vaultRoot,
-      project,
-      category,
-      body,
-      fields: { ...fields, ...fieldsForDedupOverride(override) },
-      structure,
-    });
-    // Post-write steps mutate *other* artifacts and can fail (e.g. supersede a
-    // type without a `superseded` status). If any throws, roll back the new
-    // artifact AND restore the superseded one so a half-applied create never
-    // leaves an orphan (P0.2/P0.3).
-    try {
-      if (override.kind === "supersedes") {
-        await supersedeArtifact({ type, vaultRoot, project, id: override.id, by: artifact.id }, structure);
-      }
-      await backlinkParent(type, vaultRoot, project, artifact.id, fields, structure);
-    } catch (postWriteError) {
-      await removeArtifactFile(artifact.path);
-      if (supersededBefore && supersededSnapshot !== null) {
-        await Bun.write(supersededBefore.path, supersededSnapshot);
-      }
-      throw postWriteError;
-    }
-    if (jsonEnabled()) {
-      emitJson({
-        id: artifact.id,
-        type,
-        project,
-        path: relative(vaultRoot, artifact.path),
-        status: artifact.fields.status ?? null,
-        supersedes: override.kind === "supersedes" ? override.id : null,
-      });
-    } else {
-      console.log(artifact.id);
-      console.error(`created ${artifact.id} at ${relative(vaultRoot, artifact.path)}`);
-      // SLICE-0064: no "run wiki sync" nag here. Coupling create to qmd makes
-      // every write pay a slow, fragile index call — the opposite of the lean
-      // delivery loop (PRD-0012). Indexing is owned by `wiki sync`; the wiki
-      // skill guides syncing at the right altitude.
-    }
-    return { code: 0 };
+    const result = await executeCreate(plan, { vaultRoot, structure });
+    return formatCreateOutput(result, plan, vaultRoot);
   } catch (error) {
     return handleCreateError(error);
   }
+}
+
+/** Emit the create result — id to stdout (or the JSON record), the `created … at`
+ *  note to stderr. SLICE-0064: no "run wiki sync" nag; indexing is `wiki sync`'s job. */
+function formatCreateOutput(result: CreateResult, plan: CreatePlan, vaultRoot: string): CliResult {
+  const { artifact } = result;
+  if (jsonEnabled()) {
+    emitJson({
+      id: artifact.id,
+      type: plan.type,
+      project: plan.project,
+      path: relative(vaultRoot, artifact.path),
+      status: artifact.fields.status ?? null,
+      supersedes: result.supersededId,
+    });
+  } else {
+    console.log(artifact.id);
+    console.error(`created ${artifact.id} at ${relative(vaultRoot, artifact.path)}`);
+  }
+  return { code: 0 };
+}
+
+/** Format a planCreate rejection to the same stderr/exit the old inline checks did:
+ *  a validation error rides the shared handleCreateError (JSON field/expected shape);
+ *  a bad override / unresolvable --related-to prints its one-liner at exit 1. */
+function handlePlanError(error: CreatePlanError): CliResult {
+  if (error.kind === "validation") return handleCreateError(new ArtifactValidationError(error.errors));
+  console.error(error.message);
+  return { code: 1 };
 }
 
 /**
@@ -405,42 +332,6 @@ async function advisoryDedup(type: TemplateType, project: string, projectPath: s
     }
     throw error;
   }
-}
-
-/**
- * SLICE-0114 generic backlink (was the SLICE-0054 PRD<->slice special): when a
- * child kind that declares `parent: <kind>` is created with a `parent_<kind>` id,
- * append the child's id to the parent's config-declared `child_list` field. That
- * field is in NON_FLAG_FIELDS, so create never populates it from the child side —
- * this is the only place the backlink is written. Dedup-safe (no double-add),
- * create-if-absent (setField writes the list whether or not the parent had one).
- * Runs in createWithSupersede's rollback try block, so a missing/invalid parent
- * rolls back the child rather than orphaning it.
- */
-async function backlinkParent(
-  type: TemplateType,
-  vaultRoot: string,
-  project: string,
-  childId: string,
-  fields: Record<string, unknown>,
-  structure: Structure,
-): Promise<void> {
-  const backlink = parentBacklink(structure, type);
-  if (backlink === undefined) return;
-  const parentId = fields[backlink.parentField];
-  if (typeof parentId !== "string" || parentId.length === 0) return;
-  const parent = await readArtifact({ type: backlink.parentType, vaultRoot, project, id: parentId }, structure);
-  const current = Array.isArray(parent.fields[backlink.childListField]) ? (parent.fields[backlink.childListField] as unknown[]).map(String) : [];
-  if (current.includes(childId)) return;
-  await setField({ type: backlink.parentType, vaultRoot, project, id: parentId, field: backlink.childListField, value: [...current, childId] }, structure);
-}
-
-function parseOverride(values: Record<string, string | string[] | boolean | undefined>) {
-  return parseDedupOverride({
-    forceNew: stringValue(values, "force-new"),
-    relatedTo: stringValue(values, "related-to"),
-    supersedes: stringValue(values, "supersedes"),
-  });
 }
 
 function handleCreateError(error: unknown): CliResult {
