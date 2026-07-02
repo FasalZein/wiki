@@ -103,8 +103,9 @@ writes:
 - `to-slices` → authors `slice`
 - `grill-with-docs` → authors `decision`
 - `improve-codebase-architecture` → authors `architecture`
+- `improve` → authors `architecture`
 - `research` → authors `research`
-- `diagnosing-bugs` → authors `notes`
+- `diagnosing-bugs` → authors `bug`
 - `handoff` → authors `handoff`
 <!-- skill-map:end -->
 

@@ -11,8 +11,9 @@ export interface ArtifactSpec {
   folder: string;
   /** Whether `wiki create` runs the advisory dedup gate for this type. */
   dedup: boolean;
-  /** Skill that authors this kind, if any; read by per-runtime hooks to route output. */
-  skill?: string;
+  /** Skill(s) that author this kind, if any; read by per-runtime hooks to route output.
+   *  A string or a list — several skills may produce the same kind. */
+  skill?: string | readonly string[];
   /** What-goes-where signal for a leaf kind (ADR-0044); surfaced by `wiki schema`
    *  and `wiki create <kind> --help`. Branch kinds carry criteria per bucket instead. */
   criteria?: string;
@@ -58,7 +59,7 @@ export interface SectionSpec {
   /** Top-level section folder, e.g. "docs". */
   readonly folder: string;
   readonly dedup: boolean;
-  readonly skill?: string;
+  readonly skill?: string | readonly string[];
   readonly tree: "leaf" | "branch";
   readonly buckets: readonly BucketSpec[];
 }
@@ -114,11 +115,18 @@ function parseKinds(raw: unknown): Record<TemplateType, ArtifactSpec> {
     if (s.criteria !== undefined && typeof s.criteria !== "string") {
       throw new Error(`wiki.json: kind '${name}' field 'criteria' must be a string`);
     }
+    const skillOk =
+      s.skill === undefined ||
+      typeof s.skill === "string" ||
+      (Array.isArray(s.skill) && s.skill.every((v) => typeof v === "string"));
+    if (!skillOk) {
+      throw new Error(`wiki.json: kind '${name}' field 'skill' must be a string or a list of strings`);
+    }
     kinds[name] = {
       prefix: s.prefix,
       folder: s.folder,
       dedup: s.dedup,
-      ...(typeof s.skill === "string" ? { skill: s.skill } : {}),
+      ...(s.skill !== undefined ? { skill: s.skill as string | string[] } : {}),
       ...(typeof s.parent === "string" ? { parent: s.parent } : {}),
       ...(typeof s.child_list === "string" ? { child_list: s.child_list } : {}),
       ...(typeof s.criteria === "string" ? { criteria: s.criteria } : {}),
@@ -250,9 +258,18 @@ function buildStructure(
       throw new Error(`wiki.json: kind '${type}' declares parent '${spec.parent}', which is not a defined kind`);
     }
   }
-  const skillToKind = new Map(
-    entries.filter(([, spec]) => spec.skill !== undefined).map(([type, spec]) => [spec.skill as string, type]),
-  );
+  const skillToKind = new Map<string, TemplateType>();
+  for (const [type, spec] of entries) {
+    for (const skill of skillsOf(spec)) {
+      // Two kinds claiming the same skill would silently last-writer-win the
+      // routing; fail loudly at load instead (mirrors the shared-folder check).
+      const claimed = skillToKind.get(skill);
+      if (claimed !== undefined && claimed !== type) {
+        throw new Error(`wiki.json: skill '${skill}' is claimed by both '${claimed}' and '${type}' — a skill routes to one kind`);
+      }
+      skillToKind.set(skill, type);
+    }
+  }
   const folders = [...new Set(entries.map(([, spec]) => spec.folder))];
   const sections = buildSections(kinds, bucketsByKind);
   const bucketToSection = new Map<string, { section: SectionSpec; bucket: BucketSpec }>();
@@ -304,15 +321,22 @@ function buildStructure(
  * LEAF kinds, each owning its own folder + id prefix. The old `doc` kind is gone;
  * each promoted kind carries the criteria the bucket used to hold (ADR-0044).
  */
+/** A kind's authoring skills as a flat list (the `skill` field accepts one or many). */
+export function skillsOf(spec: Pick<ArtifactSpec, "skill">): readonly string[] {
+  if (spec.skill === undefined) return [];
+  return typeof spec.skill === "string" ? [spec.skill] : spec.skill;
+}
+
 const DEFAULT_KINDS: Record<TemplateType, ArtifactSpec> = {
   prd: { prefix: "PRD", folder: "prds", dedup: true, skill: "to-prd", child_list: "slices" },
   slice: { prefix: "SLICE", folder: "slices", dedup: true, skill: "to-slices", parent: "prd" },
   decision: { prefix: "ADR", folder: "adrs", dedup: true, skill: "grill-with-docs" },
-  architecture: { prefix: "ARCH", folder: "architecture", dedup: true, skill: "improve-codebase-architecture", criteria: "How the system is built: components, boundaries, data flow, structural decisions." },
+  architecture: { prefix: "ARCH", folder: "architecture", dedup: true, skill: ["improve-codebase-architecture", "improve"], criteria: "How the system is built: components, boundaries, data flow, structural decisions." },
   research: { prefix: "RES", folder: "research", dedup: true, skill: "research", criteria: "External findings, investigations, comparisons, and explorations feeding a decision." },
   runbooks: { prefix: "RUN", folder: "runbooks", dedup: true, criteria: "Operational how-to: step-by-step procedures for running, deploying, or recovering." },
   specs: { prefix: "SPEC", folder: "specs", dedup: true, criteria: "Specifications: precise contracts, formats, schemas, and interface definitions." },
-  notes: { prefix: "NOTE", folder: "notes", dedup: true, skill: "diagnosing-bugs", criteria: "Catch-all for durable notes that fit no other bucket." },
+  notes: { prefix: "NOTE", folder: "notes", dedup: true, criteria: "Catch-all for durable notes that fit no other bucket." },
+  bug: { prefix: "BUG", folder: "bugs", dedup: true, skill: "diagnosing-bugs", criteria: "Bug reports and diagnosis writeups: symptom, mechanism, repro, root cause, fix status." },
   legacy: { prefix: "LEG", folder: "legacy", dedup: true, criteria: "Imported or historical material kept for reference, not actively maintained." },
   handoff: { prefix: "HANDOFF", folder: "handoffs", dedup: false, skill: "handoff" },
 };

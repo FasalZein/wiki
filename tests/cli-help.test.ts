@@ -174,7 +174,7 @@ describe("dynamic kind list in help", () => {
     cap.restore();
     expect(result.code).toBe(0);
     const output = cap.output();
-    expect(output).toContain("<prd|slice|decision|architecture|research|runbooks|specs|notes|legacy|handoff>");
+    expect(output).toContain("<prd|slice|decision|architecture|research|runbooks|specs|notes|bug|legacy|handoff>");
   });
 });
 

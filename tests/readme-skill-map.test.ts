@@ -2,12 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { DEFAULT_STRUCTURE } from "../src/artifacts/registry";
+import { DEFAULT_STRUCTURE, skillsOf } from "../src/artifacts/registry";
 
 const SKILL_TO_KIND: Record<string, string> = Object.fromEntries(
-  Object.entries(DEFAULT_STRUCTURE.kinds)
-    .filter(([, spec]) => spec.skill !== undefined)
-    .map(([type, spec]) => [spec.skill as string, type]),
+  Object.entries(DEFAULT_STRUCTURE.kinds).flatMap(([type, spec]) => skillsOf(spec).map((skill) => [skill, type] as [string, string])),
 );
 
 const repoRoot = import.meta.dir.replace(/\/tests$/, "");

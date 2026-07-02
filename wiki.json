@@ -26,7 +26,10 @@
       "folder": "architecture",
       "dedup": true,
       "criteria": "How the system is built: components, boundaries, data flow, structural decisions.",
-      "skill": "improve-codebase-architecture"
+      "skill": [
+        "improve-codebase-architecture",
+        "improve"
+      ]
     },
     "research": {
       "prefix": "RES",
@@ -51,8 +54,14 @@
       "prefix": "NOTE",
       "folder": "notes",
       "dedup": true,
-      "criteria": "Catch-all for durable notes that fit no other bucket.",
-      "skill": "diagnosing-bugs"
+      "criteria": "Catch-all for durable notes that fit no other bucket."
+    },
+    "bug": {
+      "prefix": "BUG",
+      "folder": "bugs",
+      "dedup": true,
+      "skill": "diagnosing-bugs",
+      "criteria": "Bug reports and diagnosis writeups: symptom, mechanism, repro, root cause, fix status."
     },
     "legacy": {
       "prefix": "LEG",

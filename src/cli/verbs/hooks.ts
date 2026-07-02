@@ -4,7 +4,7 @@ import { basename, dirname, join } from "node:path";
 
 import { readFrontmatter } from "../../artifacts/artifact-file";
 import { captureArtifact, type CaptureOutcome } from "../../artifacts/capture";
-import { DEFAULT_STRUCTURE, loadStructure, type Structure } from "../../artifacts/registry";
+import { DEFAULT_STRUCTURE, loadStructure, skillsOf, type Structure } from "../../artifacts/registry";
 import { resolveVaultRootForDisplay } from "../../config/vault";
 import { readLinkedProject } from "../repo-link";
 import { unknownMessage } from "../usage";
@@ -132,9 +132,7 @@ async function hookStructure(): Promise<Structure> {
 
 /** Authoring skills the structure's kinds register, for prompt scanning. */
 function registeredSkills(structure: Structure): string[] {
-  return Object.values(structure.kinds)
-    .map((spec) => spec.skill)
-    .filter((skill): skill is string => skill !== undefined);
+  return Object.values(structure.kinds).flatMap((spec) => [...skillsOf(spec)]);
 }
 
 function extractSkill(input: HookInput, structure: Structure): string | null {

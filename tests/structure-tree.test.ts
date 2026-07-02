@@ -28,7 +28,7 @@ const section = (name: string) => DEFAULT_STRUCTURE.sections.find((s) => s.name 
 describe("SLICE-0110: bundled default section/bucket tree", () => {
   test("the default exposes one section per kind", () => {
     expect(DEFAULT_STRUCTURE.sections.map((s) => s.name).sort()).toEqual(
-      ["architecture", "decision", "handoff", "legacy", "notes", "prd", "research", "runbooks", "slice", "specs"],
+      ["architecture", "bug", "decision", "handoff", "legacy", "notes", "prd", "research", "runbooks", "slice", "specs"],
     );
   });
 
@@ -81,7 +81,7 @@ describe("SLICE-0110: bundled default section/bucket tree", () => {
     expect(DEFAULT_STRUCTURE.artifactTypeForVaultPath("projects/p/research/x.md")).toBe("research");
     expect(DEFAULT_STRUCTURE.kindForSkill("to-prd")).toBe("prd");
     expect([...DEFAULT_STRUCTURE.folders].sort()).toEqual(
-      ["adrs", "architecture", "handoffs", "legacy", "notes", "prds", "research", "runbooks", "slices", "specs"],
+      ["adrs", "architecture", "bugs", "handoffs", "legacy", "notes", "prds", "research", "runbooks", "slices", "specs"],
     );
   });
 });
