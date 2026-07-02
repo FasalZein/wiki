@@ -63,6 +63,20 @@ export const USAGE_REGISTRY: Record<string, UsageEntry> = {
       },
     },
   },
+  draft: {
+    summary: "Print a ready-to-fill skeleton for a kind (frontmatter stamps + authorable fields and body sections). Save it and the write hook — or 'wiki file' — captures it.",
+    usage: "wiki draft <kind> [--project <name>] [--title <title>]",
+    flags: {
+      "--project": "project stamp (default: linked repo's project, else a <project> placeholder to fill)",
+      "--title": "pre-fill the title field and body heading",
+    },
+    example: 'wiki draft handoff --project myproj --title "Session headline" > draft.md',
+  },
+  file: {
+    summary: "File a stamped draft into the vault (mints its id, files it). For hookless harnesses; the write hook does this automatically.",
+    usage: "wiki file <path>",
+    example: "wiki file draft.md",
+  },
   doc: {
     summary: "Maintain an existing artifact in place (retitle / recategorize), keyed by its id prefix.",
     usage: "wiki doc <retitle|recategorize> <id> --project <name> [--title <t>|--category <c>]",

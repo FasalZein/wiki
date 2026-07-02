@@ -15,12 +15,13 @@ import {
   executeCreate,
 } from "../../artifacts/store";
 import { planCreate, type CreatePlan, type CreatePlanError } from "../../artifacts/create-plan";
-import { loadKind } from "../../artifacts/body";
+import { loadKind, type Kind } from "../../artifacts/body";
 import { projectPath } from "../../artifacts/paths";
 import { DEFAULT_STRUCTURE, loadStructure, type Structure } from "../../artifacts/registry";
 import { assertProjectStructure, loadProjectConfig, ProjectConfigError } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
-import { type TemplateType } from "../../schema/load";
+import { loadCompiledTemplate, type TemplateType } from "../../schema/load";
+import type { ValidationError } from "../../schema/types";
 import type { CliResult } from "../dispatch";
 import { emitJson, emitJsonError, jsonEnabled } from "../output";
 import { parseCommand, stringValue } from "../parse";
@@ -77,7 +78,7 @@ async function tryLoadStructure(): Promise<Structure | undefined> {
 }
 
 /** Snake-case schema/placeholder name -> kebab CLI flag (e.g. parent_prd -> parent-prd). */
-function flagName(field: string): string {
+export function flagName(field: string): string {
   return field.replace(/_/g, "-");
 }
 
@@ -111,10 +112,48 @@ function findUnknownFlag(args: string[], known: ReadonlySet<string>): string | u
  * Fields the CLI sets itself, the dedup override owns, or other verbs manage —
  * never create-time flags. Every other schema field becomes a flag.
  */
-const NON_FLAG_FIELDS: ReadonlySet<string> = new Set([
+export const NON_FLAG_FIELDS: ReadonlySet<string> = new Set([
   "id", "aliases", "project", "created", "updated", "session_date",
   "supersedes", "superseded_by", "related", "slices", "blocked_by", "force_new_reason",
 ]);
+
+/**
+ * An authorable create flag derived from a kind's schema (BUG-0001 / ADR-0046):
+ * every schema field that is neither CLI-managed ({@link NON_FLAG_FIELDS}) nor an
+ * `auto` field. Shared by `create <kind> --help` (renderBucketCreateHelp) and the
+ * `wiki draft` skeleton so both render from the same loaded Kind and can't drift.
+ */
+export type AuthorableFlag = {
+  flag: string;
+  field: string;
+  required: boolean;
+  values?: string[];
+  repeatable: boolean;
+  default?: unknown;
+};
+
+export async function authorableFlags(type: TemplateType): Promise<AuthorableFlag[]> {
+  const kind = await loadKind(type);
+  const { templateDefaults } = await loadCompiledTemplate(type);
+  const out: AuthorableFlag[] = [];
+  for (const field of kind.schema.fields) {
+    if (NON_FLAG_FIELDS.has(field.name) || field.auto === true) continue;
+    out.push({
+      flag: flagName(field.name),
+      field: field.name,
+      required: field.required,
+      ...(field.constraints.values !== undefined ? { values: field.constraints.values } : {}),
+      repeatable: field.type === "list" || field.type === "link_list",
+      ...(templateDefaults[field.name] !== undefined ? { default: templateDefaults[field.name] } : {}),
+    });
+  }
+  return out;
+}
+
+/** Format a template default for display (a list as `[a, b]`, else its string). */
+export function formatDefault(value: unknown): string {
+  return Array.isArray(value) ? `[${value.map(String).join(", ")}]` : String(value);
+}
 
 /**
  * Schema-driven create for any kind in wiki.json (ADR-0035). Flags are derived
@@ -170,7 +209,20 @@ async function createGeneric(kind: TemplateType, args: string[], presetCategory?
   const knownFlags = new Set([...stringFlags, ...booleanFlags]);
   const unknownFlag = findUnknownFlag(normalizedArgs, knownFlags);
   if (unknownFlag !== undefined) {
-    console.error(`${kind} has no field: ${unknownFlag}`);
+    // BUG-0001 item 4: if the flag's snake form IS a schema field but CLI-managed,
+    // say WHY it isn't a flag instead of the bare "no field" (which sent the agent
+    // guessing that fields go in body frontmatter). Truly-absent fields keep the
+    // "no field" line, now pointing at `wiki schema` to discover the real ones.
+    const snake = unknownFlag.replace(/-/g, "_");
+    const field = schema.fields.find((f) => f.name === snake);
+    if (field?.auto === true) {
+      console.error(`--${unknownFlag}: ${snake} is set automatically — omit it`);
+    } else if (field !== undefined) {
+      console.error(`--${unknownFlag}: ${snake} is CLI-managed — edit after create with 'wiki set'`);
+    } else {
+      console.error(`${kind} has no field: ${unknownFlag}`);
+      console.error(`run 'wiki schema ${kind}'`);
+    }
     return { code: 1 };
   }
   const parsed = parseCommand(normalizedArgs, stringFlags, multipleFlags, booleanFlags);
@@ -232,7 +284,7 @@ async function createGeneric(kind: TemplateType, args: string[], presetCategory?
     relatedTo: stringValue(parsed.values, "related-to"),
     supersedes: stringValue(parsed.values, "supersedes"),
   });
-  if (!planned.ok) return handlePlanError(planned.error);
+  if (!planned.ok) return handlePlanError(planned.error, kindDef);
   const plan = planned.plan;
 
   const projPath = projectPath(vaultRoot, project);
@@ -247,7 +299,7 @@ async function createGeneric(kind: TemplateType, args: string[], presetCategory?
     const result = await executeCreate(plan, { vaultRoot, structure });
     return formatCreateOutput(result, plan, vaultRoot);
   } catch (error) {
-    return handleCreateError(error);
+    return handleCreateError(error, kindDef);
   }
 }
 
@@ -274,8 +326,8 @@ function formatCreateOutput(result: CreateResult, plan: CreatePlan, vaultRoot: s
 /** Format a planCreate rejection to the same stderr/exit the old inline checks did:
  *  a validation error rides the shared handleCreateError (JSON field/expected shape);
  *  a bad override / unresolvable --related-to prints its one-liner at exit 1. */
-function handlePlanError(error: CreatePlanError): CliResult {
-  if (error.kind === "validation") return handleCreateError(new ArtifactValidationError(error.errors));
+function handlePlanError(error: CreatePlanError, kind: Kind): CliResult {
+  if (error.kind === "validation") return handleCreateError(new ArtifactValidationError(error.errors), kind);
   console.error(error.message);
   return { code: 1 };
 }
@@ -334,11 +386,15 @@ async function advisoryDedup(type: TemplateType, project: string, projectPath: s
   }
 }
 
-function handleCreateError(error: unknown): CliResult {
+function handleCreateError(error: unknown, kind?: Kind): CliResult {
   if (error instanceof ArtifactValidationError || error instanceof ArtifactNotFoundError) {
     if (jsonEnabled()) {
       const first = error instanceof ArtifactValidationError ? error.errors[0] : undefined;
       emitJsonError({ error: error.message, ...(first === undefined ? {} : { field: first.field, expected: first.expected }) });
+    } else if (error instanceof ArtifactValidationError && kind !== undefined) {
+      // BUG-0001 item 3: in the create context, speak CLI language — a required/enum
+      // error names the flag AND its values, so the agent's next call is the fix.
+      console.error(error.errors.map((e) => formatCreateFieldError(e, kind)).join("\n"));
     } else {
       console.error(error.message);
     }
@@ -350,6 +406,20 @@ function handleCreateError(error: unknown): CliResult {
     return { code: 10 };
   }
   throw error;
+}
+
+/**
+ * Render one create-time validation error in CLI (flag) language (BUG-0001 item 3):
+ * `phase: required — pass --phase <plan|prd|slice|handoff|ad-hoc>`. Required and enum
+ * errors get the `pass --flag <hint>` suffix (the hint is the enum values, else
+ * `<value>`); length/pattern reasons already embed their own fix, so they pass through.
+ */
+function formatCreateFieldError(error: ValidationError, kind: Kind): string {
+  const base = `${error.field}: ${error.reason}`;
+  if (error.reason !== "required" && error.reason !== "invalid enum value") return base;
+  const values = kind.schema.fields.find((f) => f.name === error.field)?.constraints.values;
+  const hint = values !== undefined ? `<${values.join("|")}>` : "<value>";
+  return `${base} — pass --${flagName(error.field)} ${hint}`;
 }
 
 function missingFields(fields: Record<string, unknown>): CliResult | null {
@@ -381,11 +451,37 @@ export async function renderBucketCreateHelp(name: string): Promise<string | nul
   lines.push(`Create a ${section.name} artifact in the '${bucket.name}' bucket (files into ${bucket.folder}/, id prefix ${section.prefix}).`);
   lines.push("");
   lines.push(`usage: wiki create ${bucket.name} --project <name> --title <title> [--body -]`);
+  // BUG-0001 item 5: render the kind's flags (required first, enums inline) from the
+  // loaded Kind so `create <kind> --help` no longer hides them. A vault kind may lack
+  // a bundled template — fall back to the schema-pointer line when loadKind throws.
+  try {
+    const flags = await authorableFlags(bucket.template);
+    lines.push("");
+    lines.push("Flags:");
+    lines.push(...renderCreateFlagLines(flags));
+  } catch {
+    lines.push("");
+    lines.push(`Run 'wiki schema ${bucket.name}' for this bucket's fields.`);
+  }
   if (bucket.criteria !== undefined) {
     lines.push("");
     lines.push(`Criteria: ${bucket.criteria}`);
   }
-  lines.push("");
-  lines.push(`Run 'wiki schema ${bucket.name}' for this bucket's fields.`);
   return lines.join("\n");
+}
+
+/** The `Flags:` body for `create <kind> --help`: required flags first (enum values
+ *  inline), then optional (defaults noted, list fields marked repeatable), then the
+ *  `--body -` line. Shared shape with `wiki draft` via {@link authorableFlags}. */
+function renderCreateFlagLines(flags: AuthorableFlag[]): string[] {
+  const ordered = [...flags.filter((f) => f.required), ...flags.filter((f) => !f.required)];
+  const lines = ordered.map((f) => {
+    const value = f.values !== undefined ? `<${f.values.join("|")}>` : "<value>";
+    const tags = [f.required ? "required" : "optional"];
+    if (f.repeatable) tags.push("repeatable");
+    if (!f.required && f.default !== undefined) tags.push(`default: ${formatDefault(f.default)}`);
+    return `  --${f.flag} ${value}`.padEnd(44) + tags.join(", ");
+  });
+  lines.push(`  --body -`.padEnd(44) + "authored markdown body via stdin");
+  return lines;
 }

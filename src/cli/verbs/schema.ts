@@ -34,6 +34,7 @@ export async function handleSchema(args: string[]): Promise<CliResult> {
     name: field.name,
     type: field.type,
     required: field.required,
+    ...(field.auto === true ? { auto: true } : {}),
     ...(field.constraints.values !== undefined ? { values: field.constraints.values } : {}),
   }));
 
@@ -59,7 +60,10 @@ export async function handleSchema(args: string[]): Promise<CliResult> {
 
   console.log(`${resolved.name} fields:`);
   for (const field of fields) {
-    const flags = [field.type, field.required ? "required" : "optional"].join(", ");
+    // BUG-0001 item 6: an `auto` field is filled by the CLI at write time — mark it
+    // "auto — omit at create" so agents stop passing e.g. --session-date as required.
+    const role = field.auto ? "auto — omit at create" : field.required ? "required" : "optional";
+    const flags = [field.type, role].join(", ");
     const values = field.values !== undefined ? `  [${field.values.join(" | ")}]` : "";
     console.log(`  ${field.name.padEnd(20)} ${flags}${values}`);
   }

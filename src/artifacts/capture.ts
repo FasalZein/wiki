@@ -23,7 +23,7 @@ import { DedupBlockedError, QmdError, runDedupGate } from "./dedup";
  * such fault becomes a `warn`, so the hook seam keeps its stdout contract.
  */
 export type CaptureOutcome =
-  | { outcome: "captured"; context: string; note?: string }
+  | { outcome: "captured"; context: string; note?: string; id: string; path?: string }
   | { outcome: "warn"; warning: string }
   | null;
 
@@ -152,7 +152,7 @@ async function fileArtifact(args: {
   // Closing it fully needs a per-draft-path lock around read->decide->write, out of
   // scope here (concurrent fires on one exact path are not an observed pattern).
   if (declaredId !== undefined && (await buildIdIndex(vaultRoot, project, structure)).has(declaredId)) {
-    return { outcome: "captured", context: captureContext(kind, declaredId, true) };
+    return { outcome: "captured", context: captureContext(kind, declaredId, true), id: declaredId };
   }
 
   const directory = artifactDirectory(kind, vaultRoot, project, structure);
@@ -178,7 +178,7 @@ async function fileArtifact(args: {
 
   // Stamp the source draft with the assigned id so a re-fire is idempotent.
   await writeFile(path, serializeArtifact({ ...data, id: artifact.id, project }, body));
-  const captured: CaptureOutcome = { outcome: "captured", context: captureContext(kind, artifact.id, false) };
+  const captured: CaptureOutcome = { outcome: "captured", context: captureContext(kind, artifact.id, false), id: artifact.id, path: artifact.path };
   return dedupNote !== undefined ? { ...captured, note: dedupNote } : captured;
 }
 

@@ -24,6 +24,9 @@ export type FieldDef = {
   name: string;
   type: FieldType;
   required: boolean;
+  /** The CLI sets this field itself at write time (a template `auto: true`); it is
+   *  never a create-time flag and is annotated "auto — omit at create" by `wiki schema`. */
+  auto?: boolean;
   constraints: Constraints;
 };
 

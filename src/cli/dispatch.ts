@@ -1,4 +1,5 @@
 import { handleCreate, renderBucketCreateHelp } from "./verbs/create";
+import { handleDraft, handleFile } from "./verbs/draft";
 import { handleDoc } from "./verbs/doc";
 import { handleFmt } from "./verbs/fmt";
 import { handleHooks } from "./verbs/hooks";
@@ -125,6 +126,8 @@ export async function dispatch(args: string[]): Promise<CliResult> {
   if (!jsonFlag) await printContextBanner();
 
   if (verb === "create") return handleCreate(rest);
+  if (verb === "draft") return handleDraft(rest);
+  if (verb === "file") return handleFile(rest);
   if (verb === "set") return handleSet(rest);
   if (verb === "block") return handleBlock(rest);
   if (verb === "supersede") return handleSupersede(rest);

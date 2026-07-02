@@ -105,6 +105,7 @@ function parseField(template: string, name: string, raw: unknown): FieldDef {
     name,
     type: fieldType,
     required: raw.required === true,
+    ...(raw.auto === true ? { auto: true } : {}),
     constraints: parseConstraints(raw),
   };
 }

@@ -36,9 +36,17 @@ repo→project binding; once linked, `--project` resolves automatically.
 
 ## Creating
 
-Creation is one-shot: author the full body, pipe it via `--body -` (stdin), done in
-a single schema-validated command. Validation runs before the dedup gate, so a
-schema error is always the first and only output.
+Two paths — pick by size:
+
+- **Draft → fill → save** (primary for anything substantial): `wiki draft <kind>`
+  prints a fill-me skeleton — frontmatter stamps plus every authorable field (enums
+  and requiredness inline) and the authorable H2 sections. Fill it in and save with
+  the Write tool; the write hook captures it into the vault (or `wiki file <path>`
+  files it explicitly on a hookless harness). No flag grammar to reconstruct.
+- **One-shot `create`** (short artifacts): author the full body, pipe it via
+  `--body -` (stdin), done in a single schema-validated command. Validation runs
+  before the dedup gate, so a schema error is always the first and only output —
+  and each error now carries its fix (the flag to pass and its enum values).
 
 - Kinds come from the vault's `wiki.json` (`decision` = ADR); `wiki create --help`
   lists the active vault's kinds, `wiki schema <kind>` its exact contract.

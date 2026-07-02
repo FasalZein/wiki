@@ -68,9 +68,20 @@ export class ArtifactValidationError extends Error {
   readonly errors: ValidationError[];
 
   constructor(errors: ValidationError[]) {
-    super(errors.map((error) => `${error.field}: ${error.reason}`).join("; "));
+    super(errors.map(formatValidationError).join("; "));
     this.errors = errors;
   }
+}
+
+/** Render one validation error, appending its `expected` fix (BUG-0001 item 2) —
+ *  `phase: required — expected one of: plan, prd, ...`. Length/range reasons already
+ *  embed their numbers (`3 chars, min 5 — add 2`), so the expected suffix is skipped
+ *  for them to avoid a double-print; the bare reasons (required, type mismatch,
+ *  invalid enum value, pattern mismatch) get it. */
+function formatValidationError(error: ValidationError): string {
+  const base = `${error.field}: ${error.reason}`;
+  if (error.expected === undefined || /,\s(?:min|max)\s/.test(error.reason)) return base;
+  return `${base} — expected ${error.expected}`;
 }
 
 export class ArtifactNotFoundError extends Error {

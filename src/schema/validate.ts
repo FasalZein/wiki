@@ -9,7 +9,12 @@ export function validate(
   for (const field of schema.fields) {
     const value = input[field.name] ?? undefined; // ponytail: gray-matter yields null for a blank key; treat blank as absent
     if (field.required && value === undefined) {
-      errors.push({ field: field.name, reason: "required", expected: field.type });
+      // `expected` carries the fix: an enum's allowed values (so the error names
+      // what to pass), else the field's type. BUG-0001 item 1.
+      const expected = field.constraints.values !== undefined
+        ? `one of: ${field.constraints.values.join(", ")}`
+        : field.type;
+      errors.push({ field: field.name, reason: "required", expected });
       continue;
     }
     if (value !== undefined && !matchesType(field, value)) {
