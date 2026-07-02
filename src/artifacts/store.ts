@@ -1,5 +1,5 @@
-import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
-import { dirname, join, sep } from "node:path";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 
 import { loadTemplate, type TemplateType } from "../schema/load";
 import { BodyParseError, loadKind } from "./body";
@@ -10,7 +10,7 @@ import type { CreatePlan } from "./create-plan";
 import { fieldsForDedupOverride } from "./dedup";
 import { nextId } from "./id";
 import { withProjectLock } from "./lock";
-import { buildIdIndex } from "./id-index";
+import { IdIndex } from "./id-index";
 import { bareIdOf } from "./references";
 import { artifactDirectory, assertSafeSegment, projectPath } from "./paths";
 import { projectIndex, resolveQmdCommandLazy } from "../integrations/project-index";
@@ -82,8 +82,8 @@ export class ArtifactNotFoundError extends Error {
 /** Resolve an artifact's path and open it, mapping a missing file to the domain
  *  {@link ArtifactNotFoundError}. The one read seam readArtifact and the narrowed
  *  writers (supersede/relocate) share. */
-async function resolveAndOpen(input: ReadArtifactInput, structure: Structure): Promise<ArtifactFile> {
-  const path = await resolveArtifactPath(input.type, input.vaultRoot, input.project, input.id, structure);
+async function resolveAndOpen(input: ReadArtifactInput, structure: Structure, index?: IdIndex): Promise<ArtifactFile> {
+  const path = await resolveArtifactPath(input.type, input.vaultRoot, input.project, input.id, structure, index);
   try {
     return await openArtifact(path);
   } catch (error) {
@@ -94,8 +94,8 @@ async function resolveAndOpen(input: ReadArtifactInput, structure: Structure): P
   }
 }
 
-export async function readArtifact(input: ReadArtifactInput, structure: Structure): Promise<Artifact> {
-  const file = await resolveAndOpen(input, structure);
+export async function readArtifact(input: ReadArtifactInput, structure: Structure, index?: IdIndex): Promise<Artifact> {
+  const file = await resolveAndOpen(input, structure, index);
   return {
     id: input.id,
     path: file.path,
@@ -104,18 +104,18 @@ export async function readArtifact(input: ReadArtifactInput, structure: Structur
   };
 }
 
-export async function setField(input: SetFieldInput, structure: Structure): Promise<Artifact> {
+export async function setField(input: SetFieldInput, structure: Structure, index?: IdIndex): Promise<Artifact> {
   return setFields({
     type: input.type,
     vaultRoot: input.vaultRoot,
     project: input.project,
     id: input.id,
     fields: { [input.field]: input.value },
-  }, structure);
+  }, structure, index);
 }
 
-export async function setFields(input: SetFieldsInput, structure: Structure): Promise<Artifact> {
-  const file = await resolveAndOpen(input, structure);
+export async function setFields(input: SetFieldsInput, structure: Structure, index?: IdIndex): Promise<Artifact> {
+  const file = await resolveAndOpen(input, structure, index);
   const kind = await loadKind(input.type);
   const placeholders = templatePlaceholders(kind.templateBody);
   const existingFields = file.data as NormalizedRecord;
@@ -145,8 +145,8 @@ export async function setFields(input: SetFieldsInput, structure: Structure): Pr
  * (superseding) artifact stays fully validated by createArtifact — the
  * relaxation is target-only.
  */
-export async function supersedeArtifact(input: ReadArtifactInput & { by: string }, structure: Structure): Promise<Artifact> {
-  const file = await resolveAndOpen(input, structure);
+export async function supersedeArtifact(input: ReadArtifactInput & { by: string }, structure: Structure, index?: IdIndex): Promise<Artifact> {
+  const file = await resolveAndOpen(input, structure, index);
   const schema = await loadTemplate(input.type);
   const statusField = schema.fields.find((field) => field.name === "status");
   const hasSupersededStatus = statusField?.constraints.values?.includes("superseded") ?? false;
@@ -256,21 +256,28 @@ export async function executeCreate(
   const { vaultRoot, structure } = ctx;
   const { type, project, override } = plan;
 
+  // One id-index walk serves every resolution this transaction makes (supersede
+  // target, parent/related preflight, parent backlink) instead of each re-walking.
+  // Read cache only — the mint under the lock in createArtifact re-reads on its own.
+  // Skip it for a plain create with nothing to resolve (only nextId walks then).
+  const needsIndex = override.kind === "supersedes" || plan.parentRef !== undefined || plan.relatedRef !== undefined;
+  const index = needsIndex ? await IdIndex.build(vaultRoot, project, structure) : undefined;
+
   // Snapshot the to-be-superseded artifact (single read) so a post-write failure
   // can byte-restore it. supersedeArtifact merges onto the CURRENT frontmatter, so
   // a field-level revert can't undo it — only the byte snapshot can.
   const supersededBefore = override.kind === "supersedes"
-    ? await readArtifact({ type, vaultRoot, project, id: override.id }, structure)
+    ? await readArtifact({ type, vaultRoot, project, id: override.id }, structure, index)
     : null;
   const supersededSnapshot = supersededBefore ? await Bun.file(supersededBefore.path).text() : null;
 
   // Pre-flight the resolution targets before any write, mirroring backlinkParent's
   // guard: a missing/garbage parent or --related-to id fails before the write runs.
   if (plan.parentRef !== undefined) {
-    await readArtifact({ type: plan.parentRef.type, vaultRoot, project, id: plan.parentRef.id }, structure);
+    await readArtifact({ type: plan.parentRef.type, vaultRoot, project, id: plan.parentRef.id }, structure, index);
   }
   if (plan.relatedRef !== undefined) {
-    await readArtifact({ type: plan.relatedRef.type, vaultRoot, project, id: plan.relatedRef.id }, structure);
+    await readArtifact({ type: plan.relatedRef.type, vaultRoot, project, id: plan.relatedRef.id }, structure, index);
   }
 
   const artifact = await createArtifact({
@@ -282,12 +289,13 @@ export async function executeCreate(
     fields: { ...plan.fields, ...fieldsForDedupOverride(override) },
     structure,
   });
+  index?.note(artifact.id, artifact.path); // keep the read-cache honest past the write
 
   try {
     if (override.kind === "supersedes") {
-      await supersedeArtifact({ type, vaultRoot, project, id: override.id, by: artifact.id }, structure);
+      await supersedeArtifact({ type, vaultRoot, project, id: override.id, by: artifact.id }, structure, index);
     }
-    await backlinkParent(plan, vaultRoot, artifact.id, structure);
+    await backlinkParent(plan, vaultRoot, artifact.id, structure, index);
   } catch (postWriteError) {
     await removeArtifactFile(artifact.path);
     if (supersededBefore && supersededSnapshot !== null) {
@@ -307,14 +315,14 @@ export async function executeCreate(
  * (no double-add), create-if-absent. Runs in executeCreate's rollback try block, so a
  * missing/invalid parent rolls the child back rather than orphaning it.
  */
-async function backlinkParent(plan: CreatePlan, vaultRoot: string, childId: string, structure: Structure): Promise<void> {
+async function backlinkParent(plan: CreatePlan, vaultRoot: string, childId: string, structure: Structure, index?: IdIndex): Promise<void> {
   if (plan.parentRef === undefined) return;
   const backlink = parentBacklink(structure, plan.type);
   if (backlink === undefined) return;
-  const parent = await readArtifact({ type: plan.parentRef.type, vaultRoot, project: plan.project, id: plan.parentRef.id }, structure);
+  const parent = await readArtifact({ type: plan.parentRef.type, vaultRoot, project: plan.project, id: plan.parentRef.id }, structure, index);
   const current = Array.isArray(parent.fields[backlink.childListField]) ? (parent.fields[backlink.childListField] as unknown[]).map(String) : [];
   if (current.includes(childId)) return;
-  await setField({ type: backlink.parentType, vaultRoot, project: plan.project, id: plan.parentRef.id, field: backlink.childListField, value: [...current, childId] }, structure);
+  await setField({ type: backlink.parentType, vaultRoot, project: plan.project, id: plan.parentRef.id, field: backlink.childListField, value: [...current, childId] }, structure, index);
 }
 
 export async function createArtifact(input: CreateArtifactInput): Promise<Artifact> {
@@ -550,61 +558,16 @@ function artifactPath(type: TemplateType, vaultRoot: string, project: string, id
   return join(directory, fileName);
 }
 
-async function resolveArtifactPath(type: TemplateType, vaultRoot: string, project: string, id: string, structure: Structure): Promise<string> {
+async function resolveArtifactPath(type: TemplateType, vaultRoot: string, project: string, id: string, structure: Structure, index?: IdIndex): Promise<string> {
   assertSafeSegment(id, "artifact id");
   const directory = artifactDirectory(type, vaultRoot, project, structure);
-
-  // Frontmatter id is the spine: resolve through the id index first so date-named
-  // and id-only files still reach repair verbs. Only accept a hit inside this
-  // type's directory so a shared id can't pull in another kind's file.
-  const indexed = (await buildIdIndex(vaultRoot, project, structure)).get(id);
-  const inDir = indexed?.find((path) => path.startsWith(directory + sep) || dirname(path) === directory);
-  if (inDir !== undefined) return inDir;
-
-  const exact = join(directory, `${id}.md`);
-  try {
-    await readFile(exact, "utf8");
-    return exact;
-  } catch (error) {
-    if (!isFileNotFound(error)) {
-      throw error;
-    }
-  }
-
-  // A branch section files artifacts into bucket subfolders, so its files need a
-  // recursive lookup; a leaf section holds files directly. Key on the section
-  // shape (config-driven) rather than the literal "doc" kind, so this is correct
-  // for any vault — the bundled default (doc is the one branch kind) and a vault
-  // that promotes the buckets to flat top-level kinds alike.
-  const isBranchKind = structure.sections.find((s) => s.name === type)?.tree === "branch";
-  const match = isBranchKind
-    ? await findArtifactFileRecursive(directory, id)
-    : matchInNames(await readdir(directory).catch(() => [] as string[]), id, directory);
-  return match ?? exact;
-}
-
-function matchInNames(entries: string[], id: string, directory: string): string | undefined {
-  const match = entries.find((entry) => entry === `${id}.md` || (entry.startsWith(`${id}-`) && entry.endsWith(".md")));
-  return match !== undefined ? join(directory, match) : undefined;
-}
-
-async function findArtifactFileRecursive(directory: string, id: string): Promise<string | undefined> {
-  let entries;
-  try {
-    entries = await readdir(directory, { withFileTypes: true });
-  } catch {
-    return undefined;
-  }
-  for (const entry of entries) {
-    const full = join(directory, entry.name);
-    if (entry.isDirectory()) {
-      const nested = await findArtifactFileRecursive(full, id);
-      if (nested !== undefined) return nested;
-    } else if (entry.isFile() && (entry.name === `${id}.md` || (entry.name.startsWith(`${id}-`) && entry.name.endsWith(".md")))) {
-      return full;
-    }
-  }
-  return undefined;
+  // A branch section files artifacts into bucket subfolders (recursive lookup); a
+  // leaf holds files directly. Key on the section shape (config-driven), not the
+  // literal "doc" kind, so this is correct for any vault. Resolution precedence
+  // (id-index -> exact ID.md -> filename glob) lives in IdIndex.resolve (SLICE-0077).
+  const isBranch = structure.sections.find((s) => s.name === type)?.tree === "branch";
+  const idx = index ?? await IdIndex.build(vaultRoot, project, structure);
+  return idx.resolve(id, directory, isBranch);
 }
 
 export function slugifyTitle(title: string): string {
