@@ -4,7 +4,7 @@ import { basename, dirname, join } from "node:path";
 
 import { readFrontmatter } from "../../artifacts/artifact-file";
 import { captureArtifact, type CaptureOutcome } from "../../artifacts/capture";
-import { DEFAULT_STRUCTURE, loadStructure, skillsOf, type Structure } from "../../artifacts/registry";
+import { DEFAULT_STRUCTURE, loadStructure, persistPolicyOf, skillsOf, type Structure } from "../../artifacts/registry";
 import { resolveVaultRootForDisplay } from "../../config/vault";
 import { readLinkedProject } from "../repo-link";
 import { unknownMessage } from "../usage";
@@ -216,7 +216,12 @@ async function hooksRun(): Promise<CliResult> {
         if (skill !== null) {
           const text = await hookGuidance(skill, input.cwd ?? process.cwd(), structure);
           if (text !== null) {
-            await recordPersistDebt(input, skill, structure.kindForSkill(skill) ?? "<kind>");
+            const kind = structure.kindForSkill(skill) ?? "<kind>";
+            // ADR-0048: only a kind that opts into `remind` is chased on the next
+            // prompt. Recording debt for every binding turned one exploratory run
+            // into two prompts to file it.
+            const policy = persistPolicyOf(structure.kinds[kind] ?? {});
+            if (policy === "remind") await recordPersistDebt(input, skill, kind);
             parts.push(text);
           }
         }
@@ -261,11 +266,15 @@ async function debtReminder(input: HookInput): Promise<string | null> {
 /**
  * Guidance to inject when a registered authoring skill is invoked: remind the
  * agent to persist the skill's output to the vault via `wiki create`. Returns
- * null when the skill authors no kind (per wiki.json) — the caller injects nothing.
+ * null when the skill authors no kind (per wiki.json), or when that kind's
+ * persist policy is `never` (ADR-0048) — the caller injects nothing.
  */
 export async function hookGuidance(skill: string, cwd: string, structure: Structure = DEFAULT_STRUCTURE): Promise<string | null> {
   const kind = structure.kindForSkill(skill);
   if (kind === undefined) return null;
+  // ADR-0048: a `never` kind gets no injection at all — the skill owns its own
+  // filing, so the hook has nothing useful to add.
+  if (persistPolicyOf(structure.kinds[kind] ?? {}) === "never") return null;
   const project = await readLinkedProject(cwd);
   const projectFlag = project === null ? "--project <name>" : `--project ${project}`;
   const projectStamp = project === null ? "<name>" : project;

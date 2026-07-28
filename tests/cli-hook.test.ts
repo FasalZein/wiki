@@ -105,14 +105,25 @@ describe("wiki hooks run (callback)", () => {
     }
   });
 
-  test("the next UserPromptSubmit after an authoring skill ran (same session) reminds with that skill's kind", async () => {
+  test("a kind opting into persist: remind IS chased on the next prompt, naming its skill and kind", async () => {
+    // ADR-0048: chasing is opt-in per kind. This vault asks for it.
+    const vaultRoot = await mkdtemp(join(tmpdir(), "wiki-remind-"));
+    tempPaths.push(vaultRoot);
+    await writeFile(
+      join(vaultRoot, "wiki.json"),
+      JSON.stringify({
+        kinds: { slice: { prefix: "SLICE", folder: "slices", dedup: true, skill: "to-slices", persist: "remind" } },
+      }),
+    );
     const cwd = await repoDir("wiki-v2");
     const session = crypto.randomUUID();
     await runWiki(["hooks", "run"], {
       cwd,
+      vaultRoot,
       stdin: JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Skill", tool_input: { skill: "to-slices" }, session_id: session, cwd }),
     });
     const { stdout } = await runWiki(["hooks", "run"], {
+      vaultRoot,
       stdin: JSON.stringify({ hook_event_name: "UserPromptSubmit", prompt: "looks good, continue", session_id: session }),
     });
     const out = JSON.parse(stdout);
@@ -121,6 +132,42 @@ describe("wiki hooks run (callback)", () => {
     expect(out.hookSpecificOutput.additionalContext).toContain("wiki create slice");
     // the reminder names the stamp-template step too (SLICE-0125), not only `wiki create`
     expect(out.hookSpecificOutput.additionalContext).toContain("template: slice");
+  });
+
+  test("the DEFAULT (persist: suggest) says it once and never chases (ADR-0048)", async () => {
+    const cwd = await repoDir("wiki-v2");
+    const session = crypto.randomUUID();
+
+    // The skill's own invocation still gets one line of guidance ...
+    const started = await runWiki(["hooks", "run"], {
+      cwd,
+      stdin: JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Skill", tool_input: { skill: "to-slices" }, session_id: session, cwd }),
+    });
+    expect(JSON.parse(started.stdout).hookSpecificOutput.additionalContext).toContain("wiki create slice");
+
+    // ... and the next user prompt is silent: no debt was recorded to chase.
+    const next = await runWiki(["hooks", "run"], {
+      stdin: JSON.stringify({ hook_event_name: "UserPromptSubmit", prompt: "looks good, continue", session_id: session }),
+    });
+    expect(next.stdout).toBe("{}");
+  });
+
+  test("a persist: never kind injects nothing at all — not even the first line (ADR-0048)", async () => {
+    // The bundled `research` binding: the skill files its own output, so the
+    // hook has nothing to add and must not interrupt.
+    const cwd = await repoDir("wiki-v2");
+    const session = crypto.randomUUID();
+
+    const started = await runWiki(["hooks", "run"], {
+      cwd,
+      stdin: JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Skill", tool_input: { skill: "research" }, session_id: session, cwd }),
+    });
+    expect(started.stdout).toBe("{}");
+
+    const next = await runWiki(["hooks", "run"], {
+      stdin: JSON.stringify({ hook_event_name: "UserPromptSubmit", prompt: "carry on", session_id: session }),
+    });
+    expect(next.stdout).toBe("{}");
   });
 
   test("skill→kind routing is vault-config-driven: a custom kind + skill in the vault's wiki.json routes with no code change", async () => {
@@ -149,14 +196,24 @@ describe("wiki hooks run (callback)", () => {
   });
 
   test("the persist reminder clears its debt when it fires (once per debt, never a nag loop)", async () => {
+    // ADR-0048: only a `remind` kind accrues debt, so this vault opts in.
+    const vaultRoot = await mkdtemp(join(tmpdir(), "wiki-remind-once-"));
+    tempPaths.push(vaultRoot);
+    await writeFile(
+      join(vaultRoot, "wiki.json"),
+      JSON.stringify({
+        kinds: { handoff: { prefix: "HANDOFF", folder: "handoffs", dedup: false, skill: "handoff", persist: "remind" } },
+      }),
+    );
     const cwd = await repoDir("wiki-v2");
     const session = crypto.randomUUID();
     await runWiki(["hooks", "run"], {
       cwd,
+      vaultRoot,
       stdin: JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Skill", tool_input: { skill: "handoff" }, session_id: session, cwd }),
     });
     const payload = JSON.stringify({ hook_event_name: "UserPromptSubmit", prompt: "carry on", session_id: session });
-    const first = await runWiki(["hooks", "run"], { stdin: payload });
+    const first = await runWiki(["hooks", "run"], { vaultRoot, stdin: payload });
     expect(JSON.parse(first.stdout).hookSpecificOutput.additionalContext).toContain("wiki create handoff");
     const second = await runWiki(["hooks", "run"], { stdin: payload });
     expect(second.stdout).toBe("{}");

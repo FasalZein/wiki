@@ -31,6 +31,8 @@ describe("config-driven kind registry (wiki.json)", () => {
       dedup: true,
       skill: "research",
       criteria: "External findings, investigations, comparisons, and explorations feeding a decision.",
+      // ADR-0048: the research skill files its own output; the hook does not chase it.
+      persist: "never",
     });
     expect(specFor("handoff").skill).toBe("handoff");
     expect(specFor("decision").skill).toBe("grill-with-docs");

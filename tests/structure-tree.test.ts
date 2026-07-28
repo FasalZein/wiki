@@ -75,6 +75,8 @@ describe("SLICE-0110: bundled default section/bucket tree", () => {
       dedup: true,
       skill: "research",
       criteria: "External findings, investigations, comparisons, and explorations feeding a decision.",
+      // ADR-0048: the research skill files its own output; the hook does not chase it.
+      persist: "never",
     });
     expect(DEFAULT_STRUCTURE.specFor("handoff").dedup).toBe(false);
     expect(DEFAULT_STRUCTURE.typeForId("SLICE-0032")).toBe("slice");

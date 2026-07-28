@@ -4,6 +4,16 @@ import { join } from "node:path";
 import type { TemplateType } from "../schema/load";
 import { isFileNotFound } from "../util";
 
+export type PersistPolicy = "never" | "suggest" | "remind";
+
+const PERSIST_POLICIES: readonly PersistPolicy[] = ["never", "suggest", "remind"];
+
+/** A kind's persist policy, defaulting to `suggest` (ADR-0048): say it once, do
+ *  not chase. A vault opts into chasing per kind. */
+export function persistPolicyOf(spec: Pick<ArtifactSpec, "persist">): PersistPolicy {
+  return spec.persist ?? "suggest";
+}
+
 export interface ArtifactRoles {
   /** Frontmatter link written on the artifact being superseded. */
   supersede_link?: string;
@@ -41,6 +51,20 @@ export interface ArtifactSpec {
   roles?: ArtifactRoles;
   /** Count legacy `NNNN-*.md` filenames in this kind's id space (ADR-0047). */
   legacy_bare_ids?: boolean;
+  /**
+   * How hard the persist hook chases this kind's authoring skill (ADR-0048):
+   *
+   * - `never`   — inject nothing. The skill files its own output, or its output
+   *               is usually not durable.
+   * - `suggest` — (default) one line when the skill starts, and nothing more.
+   * - `remind`  — that line, plus a follow-up on the next user prompt if no
+   *               artifact was captured.
+   *
+   * Every bound skill used to behave as `remind`, so a single exploratory run
+   * produced two prompts to file it — a judgment about durability that a hook
+   * cannot make before seeing the output.
+   */
+  persist?: PersistPolicy;
   /** Search intent this kind is the preferred answer for (ADR-0047). `wiki search`
    *  used to hardcode "Prefer ADRs and architecture docs" for rationale questions,
    *  which is noise in a vault holding no such kinds. Now each kind declares what
@@ -183,6 +207,11 @@ function parseKinds(raw: unknown): Record<TemplateType, ArtifactSpec> {
     if (s.search_intent !== undefined && typeof s.search_intent !== "string") {
       throw new Error(`wiki.json: kind '${name}' field 'search_intent' must be a string`);
     }
+    if (s.persist !== undefined && !PERSIST_POLICIES.includes(s.persist as PersistPolicy)) {
+      throw new Error(
+        `wiki.json: kind '${name}' field 'persist' must be one of ${PERSIST_POLICIES.join(" | ")}`,
+      );
+    }
     let roles: ArtifactRoles | undefined;
     if (s.roles !== undefined) {
       if (s.roles === null || typeof s.roles !== "object") {
@@ -215,6 +244,7 @@ function parseKinds(raw: unknown): Record<TemplateType, ArtifactSpec> {
       ...(roles !== undefined ? { roles } : {}),
       ...(typeof s.legacy_bare_ids === "boolean" ? { legacy_bare_ids: s.legacy_bare_ids } : {}),
       ...(typeof s.search_intent === "string" ? { search_intent: s.search_intent } : {}),
+      ...(PERSIST_POLICIES.includes(s.persist as PersistPolicy) ? { persist: s.persist as PersistPolicy } : {}),
     };
   }
   return kinds;
@@ -417,7 +447,9 @@ const DEFAULT_KINDS: Record<TemplateType, ArtifactSpec> = {
   slice: { prefix: "SLICE", folder: "slices", dedup: true, skill: "to-slices", parent: "prd", roles: { supersede_link: "superseded_by", status: "status", superseded_status: "superseded", depends_on: "blocked_by", terminal_status: "closed" } },
   decision: { prefix: "ADR", folder: "adrs", dedup: true, skill: "grill-with-docs", roles: { supersede_link: "superseded_by", status: "status", superseded_status: "superseded" }, legacy_bare_ids: true, search_intent: "rationale" },
   architecture: { prefix: "ARCH", folder: "architecture", dedup: true, skill: ["improve-codebase-architecture", "improve"], criteria: "How the system is built: components, boundaries, data flow, structural decisions.", search_intent: "rationale" },
-  research: { prefix: "RES", folder: "research", dedup: true, skill: "research", criteria: "External findings, investigations, comparisons, and explorations feeding a decision." },
+  // ADR-0048: the research skill files its own output when it matters, and most
+  // research runs are exploratory — chasing every one of them was pure noise.
+  research: { prefix: "RES", folder: "research", dedup: true, skill: "research", criteria: "External findings, investigations, comparisons, and explorations feeding a decision.", persist: "never" },
   runbooks: { prefix: "RUN", folder: "runbooks", dedup: true, criteria: "Operational how-to: step-by-step procedures for running, deploying, or recovering." },
   specs: { prefix: "SPEC", folder: "specs", dedup: true, criteria: "Specifications: precise contracts, formats, schemas, and interface definitions." },
   notes: { prefix: "NOTE", folder: "notes", dedup: true, criteria: "Catch-all for durable notes that fit no other bucket." },
