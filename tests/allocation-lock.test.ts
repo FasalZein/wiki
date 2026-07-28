@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { createArtifact as _createArtifact } from "../src/artifacts/store";
 import { withProjectLock } from "../src/artifacts/lock";
+import { waitForLog } from "./helpers/detached";
 import { DEFAULT_STRUCTURE } from "../src/artifacts/registry";
 
 // SLICE-0121: the per-project allocation lock lives INSIDE mintAndWrite, so it is
@@ -143,7 +144,10 @@ esac
       delete process.env.LOCKFILE;
       delete process.env.PROBE;
     }
-    const probes = (await readFile(probeFile, "utf8").catch(() => "")).split("\n").filter((l) => l.length > 0);
+    // ADR-0047: the update is now DETACHED, so it lands in the probe after the
+    // create returns. Wait for it — a genuinely missing update still fails here,
+    // and any probe line that says "locked" still fails the invariant below.
+    const probes = await waitForLog(probeFile, (lines) => lines.length > 0);
     expect(probes.length).toBeGreaterThan(0); // the update actually fired
     expect(probes.every((p) => p === "unlocked")).toBe(true); // never under the lock
   });

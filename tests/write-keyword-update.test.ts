@@ -3,14 +3,16 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { waitForUpdates } from "./helpers/detached";
+
 // SLICE-0126: every write fires a cheap incremental qmd keyword `update` for the
 // project's collection (inside the per-project lock, in mintAndWrite) so a freshly
 // created artifact is in the keyword index with no manual `wiki sync`. Vector
 // `embed` stays owned by `wiki sync`; `wiki search` stays a pure read (PRD-0018).
 //
 // A logging fake qmd records every invocation; the assertions read that log.
-// `decision` has dedup OFF, so its ONLY qmd touch is the write-path update —
-// no dedup gate noise to disentangle.
+// `decision` runs the dedup gate, so a create makes two keyword updates: the
+// awaited dedup refresh before the query, then the detached post-write one.
 
 const tempPaths: string[] = [];
 
@@ -92,6 +94,9 @@ esac
     stateFile,
     env: {
       QMD_COMMAND: qmdCommand,
+      // Keep the freshness marker (ADR-0047) inside the fixture so runs never
+      // share a high-water mark through the real user cache dir.
+      XDG_CACHE_HOME: join(root, "cache"),
       STATE_FILE: stateFile,
       REGISTERED_FILE: registeredFile,
       RESULTS_FILE: resultsFile,
@@ -118,7 +123,8 @@ describe("SLICE-0126: incremental keyword index update on every write", () => {
     const result = await runWiki(decisionArgs("wiki-v2"), fixture);
     expect(result.exitCode).toBe(0);
 
-    const lines = (await readFile(fixture.stateFile, "utf8")).split("\n").filter((l) => l.length > 0);
+    // ADR-0047: the update is detached, so it can land after the CLI exits.
+    const lines = await waitForUpdates(fixture.stateFile, "wiki-v2", 1);
     // The write path registered the collection and ran a keyword update for it.
     expect(lines.some((l) => l.startsWith("collection add") || l.includes("--name wiki-v2"))).toBe(true);
     expect(lines.some((l) => l.startsWith("update") && l.includes("-c wiki-v2"))).toBe(true);
@@ -134,9 +140,9 @@ describe("SLICE-0126: incremental keyword index update on every write", () => {
     expect((await runWiki(decisionArgs("wiki-v2"), fixture)).exitCode).toBe(0);
     expect((await runWiki(decisionArgs("wiki-v2"), fixture)).exitCode).toBe(0);
 
-    const updates = (await readFile(fixture.stateFile, "utf8"))
-      .split("\n")
-      .filter((l) => l.startsWith("update") && l.includes("-c wiki-v2"));
+    const updates = (await waitForUpdates(fixture.stateFile, "wiki-v2", 2)).filter(
+      (l) => l.startsWith("update") && l.includes("-c wiki-v2"),
+    );
     expect(updates.length).toBeGreaterThanOrEqual(2);
   });
 
@@ -145,6 +151,10 @@ describe("SLICE-0126: incremental keyword index update on every write", () => {
 
     // Seed one artifact (this create legitimately updates the index)...
     expect((await runWiki(decisionArgs("wiki-v2"), fixture)).exitCode).toBe(0);
+    // ...wait for BOTH of the seed's updates — the awaited dedup refresh and the
+    // DETACHED post-write one (ADR-0047) — so the seed's own qmd traffic cannot
+    // leak past the clear and masquerade as search traffic...
+    await waitForUpdates(fixture.stateFile, "wiki-v2", 2);
     // ...then clear the log so we observe ONLY the search invocation.
     await writeFile(fixture.stateFile, "");
 

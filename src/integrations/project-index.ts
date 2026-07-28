@@ -8,7 +8,15 @@
  * (2) the order collections are registered, refreshed, and queried in.
  */
 
-import { ensureCollection, refreshCollections, runQuery, type QmdResult } from "./qmd";
+import {
+  ensureCollection,
+  refreshCollections,
+  runQuery,
+  runSearch,
+  updateCollectionDetached,
+  type QmdResult,
+} from "./qmd";
+import { indexStaleness, writeMarker } from "./qmd-freshness";
 import type { ProjectConfig } from "../config/project";
 
 /**
@@ -60,8 +68,25 @@ export type ProjectIndex = {
   ensure(): Promise<void>;
   /** Incremental keyword refresh so a just-written artifact is queryable (no embed). */
   refresh(): Promise<void>;
+  /**
+   * {@link ProjectIndex.refresh}, skipped when no markdown in the project is
+   * newer than the last refresh this machine recorded. The read path's freshness
+   * requirement is "qmd has seen every file on disk" — a question the filesystem
+   * answers in ~5ms and `qmd update` answers in ~1.6s.
+   */
+  refreshIfStale(): Promise<void>;
+  /**
+   * Fire the keyword refresh without awaiting it (write path). Returns
+   * immediately; the detached child finishes after this process exits.
+   */
+  refreshDetached(): Promise<void>;
   /** Query this project's collection through the shared qmd query path. */
   query(document: string, options?: { explain?: boolean; limit?: number }): Promise<QmdResult[]>;
+  /**
+   * BM25-only retrieval over this project's collection (ADR-0047) — the dedup
+   * gate's read. No vectors, no reranking, no expansion LLM.
+   */
+  search(terms: string, options?: { limit?: number }): Promise<QmdResult[]>;
 };
 
 /**
@@ -79,6 +104,23 @@ export function projectIndex(input: {
     command,
     ensure: () => ensureCollection(command, input.project, input.projectPath),
     refresh: () => refreshCollections(command, [input.project]),
+    refreshIfStale: async () => {
+      const { stale, newest } = await indexStaleness(input.projectPath);
+      if (!stale) return;
+      await refreshCollections(command, [input.project]);
+      await writeMarker(input.projectPath, newest);
+    },
+    refreshDetached: async () => {
+      // Record the high-water mark BEFORE spawning: the mark covers what is on
+      // disk now, which is what the child is about to index. If the child fails,
+      // the next dedup gate skips an update it would have run — and the local
+      // same-kind scan (dedup.ts) still sees the unindexed file, which is the
+      // backstop that exists for exactly this case.
+      const { newest } = await indexStaleness(input.projectPath);
+      await writeMarker(input.projectPath, newest);
+      updateCollectionDetached(command, input.project);
+    },
     query: (document, options) => runQuery(command, document, [input.project], options),
+    search: (terms, options) => runSearch(command, terms, [input.project], options),
   };
 }

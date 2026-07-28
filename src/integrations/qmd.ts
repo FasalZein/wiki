@@ -67,11 +67,39 @@ export async function addCollection(qmdCommand: string, name: string, path: stri
   await runQmd(qmdCommand, ["collection", "add", path, "--name", name, "--mask", glob]);
 }
 
+/**
+ * Per-process memo of already-ensured collections. One `wiki create` ensures
+ * twice — once for the dedup gate, once for the post-write refresh — and each
+ * ensure spawned its own `qmd collection list` (~0.2s). Registration is
+ * idempotent and nothing in one CLI invocation un-registers a collection, so the
+ * second ensure is pure overhead. Keyed by command+name+path so a different
+ * binary or a re-pointed collection still re-checks. A rejected ensure is
+ * evicted, so a transient qmd fault does not poison the rest of the process.
+ */
+const ensuredCollections = new Map<string, Promise<void>>();
+
 export async function ensureCollection(qmdCommand: string, name: string, path: string): Promise<void> {
-  const collections = await listCollections(qmdCommand);
-  if (!collections.includes(name)) {
-    await addCollection(qmdCommand, name, path, "**/*.md");
+  const key = `${qmdCommand}\u0000${name}\u0000${path}`;
+  const pending = ensuredCollections.get(key);
+  if (pending !== undefined) return pending;
+  const task = (async () => {
+    const collections = await listCollections(qmdCommand);
+    if (!collections.includes(name)) {
+      await addCollection(qmdCommand, name, path, "**/*.md");
+    }
+  })();
+  ensuredCollections.set(key, task);
+  try {
+    await task;
+  } catch (error) {
+    ensuredCollections.delete(key);
+    throw error;
   }
+}
+
+/** Test seam: drop the ensure memo so a suite can assert the underlying calls. */
+export function resetEnsuredCollections(): void {
+  ensuredCollections.clear();
 }
 
 export async function updateCollection(qmdCommand: string, name: string, pull: boolean): Promise<void> {
@@ -87,6 +115,30 @@ export async function updateCollection(qmdCommand: string, name: string, pull: b
 export async function refreshCollections(qmdCommand: string, names: string[]): Promise<void> {
   for (const name of names) {
     await updateCollection(qmdCommand, name, false);
+  }
+}
+
+/**
+ * Fire an incremental keyword `update` WITHOUT awaiting it: the child is
+ * detached and unref'd so it finishes its reindex after this process exits.
+ *
+ * The write path needs the index refreshed *because of* a write (ADR-0041), not
+ * *before the command returns* — awaiting cost every create ~1.9s of dead time
+ * while the user waited on a result already durably on disk. Output is discarded
+ * for the same reason the awaited version swallowed faults: `wiki sync` is the
+ * durable reindex, so a freshness best-effort must never fail or delay a write.
+ */
+export function updateCollectionDetached(qmdCommand: string, name: string): void {
+  try {
+    const proc = Bun.spawn([qmdCommand, "update", "-c", name], {
+      stdin: "ignore",
+      stdout: "ignore",
+      stderr: "ignore",
+      env: { ...process.env },
+    });
+    proc.unref();
+  } catch {
+    // Binary missing / spawn refused — same best-effort contract as the awaited path.
   }
 }
 
@@ -108,15 +160,49 @@ export async function runQuery(
     ...(options?.explain === true ? ["--explain"] : []),
     ...collections.flatMap((collection) => ["--collection", collection]),
   ];
-  // query tolerates a nonzero exit that still printed results — partial results beat
-  // none for a read (F6). Every other invocation (embed/update/list) is strict.
+  return runRetrieval(qmdCommand, args);
+}
+
+/**
+ * BM25-only retrieval (`qmd search`) — no vectors, no reranking, and crucially no
+ * query-expansion LLM call.
+ *
+ * ADR-0047: this is the dedup gate's retrieval. Dedup asks a lexical question
+ * ("does an artifact with substantially this title and summary already exist?"),
+ * which `qmd query`'s hybrid path answered in 0.76-3.7s — including a ~1.8s HyDE
+ * expansion — while BM25 answers it in ~0.19s, scores the true duplicate HIGHER
+ * (0.99 vs 0.93 on the reference vault), and returns no low-relevance tail for
+ * the threshold logic to sift. The tradeoff is that a near-duplicate phrased in
+ * entirely different vocabulary no longer surfaces here; the same-kind local
+ * scan in dedup.ts is unaffected, and `wiki search` keeps the hybrid path.
+ */
+export async function runSearch(
+  qmdCommand: string,
+  terms: string,
+  collections: string[],
+  options?: { limit?: number },
+): Promise<QmdResult[]> {
+  const args = [
+    "search",
+    terms,
+    "--json",
+    ...(options?.limit !== undefined ? ["-n", String(options.limit)] : []),
+    ...collections.flatMap((collection) => ["--collection", collection]),
+  ];
+  return runRetrieval(qmdCommand, args);
+}
+
+/** Shared read path: tolerate partial output, then drop the generated rosters. */
+async function runRetrieval(qmdCommand: string, args: string[]): Promise<QmdResult[]> {
+  // A read tolerates a nonzero exit that still printed results — partial results
+  // beat none (F6). Every write-ish invocation (embed/update/collection) is strict.
   const stdout = await runQmd(qmdCommand, args, { toleratePartial: true });
   if (stdout.trim().length === 0) {
     return [];
   }
   // ADR-0044: the sync-generated index.md rosters (per-project + vault root) are
   // in the collection but are not artifacts — drop them so they never surface as a
-  // search hit or a dedup candidate. Excluded here (the shared query path) so both
+  // search hit or a dedup candidate. Excluded here (the shared read path) so both
   // `search` and the dedup gate stay clean without re-embedding the corpus.
   return parseQmdResults(stdout).filter((result) => basename(result.rel ?? result.path) !== "index.md");
 }

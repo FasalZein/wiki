@@ -396,6 +396,11 @@ type RenderedArtifact = { path: string; content: string; fields: NormalizedRecor
  * Best-effort — a qmd fault (binary missing, not yet synced) must not fail the
  * write, since `wiki sync` is the durable reindex.
  *
+ * ADR-0047: that update is fired DETACHED. ADR-0041 requires the index to be
+ * refreshed because of a write, not before the command returns; awaiting the
+ * subprocess added ~1.9s to every create while the artifact was already durable
+ * on disk. The child outlives this process and finishes the reindex.
+ *
  * Review follow-up (P1): the lock wraps ONLY allocate->write. qmd is a subprocess
  * that can take seconds (cold cache, large collection); a slow call held under the
  * lock could outlast the stale-reclaim window and let a waiter reclaim a LIVE lock
@@ -434,6 +439,8 @@ export async function mintAndWrite(
  * Best-effort by design — qmd resolution rides QMD_COMMAND -> _project.md
  * qmd_command -> `qmd`, and ANY fault (binary missing, project never synced) is
  * swallowed so the write still succeeds. `wiki sync` remains the durable reindex.
+ * The update itself is detached (ADR-0047), so this returns once the collection
+ * is registered and the child is spawned — not once qmd has finished indexing.
  */
 async function refreshKeywordIndex(vaultRoot: string, project: string): Promise<void> {
   try {
@@ -443,7 +450,7 @@ async function refreshKeywordIndex(vaultRoot: string, project: string): Promise<
     const command = await resolveQmdCommandLazy(() => loadProjectConfig(projPath));
     const index = projectIndex({ project, projectPath: projPath, config: { qmd_command: command } });
     await index.ensure(); // register on first write
-    await index.refresh(); // keyword reindex only; no embed
+    await index.refreshDetached(); // keyword reindex only; no embed, and not awaited
   } catch {
     // qmd missing / project unconfigured / never synced — `wiki sync` is the
     // durable reindex, so a write must never fail on the freshness best-effort.

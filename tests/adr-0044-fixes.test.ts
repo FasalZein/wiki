@@ -74,6 +74,7 @@ case "\${1:-}" in
     esac ;;
   update) : ;;
   query) cat "$RESULTS_FILE" ;;
+  search) cat "$RESULTS_FILE" ;;
 esac
 `,
   );

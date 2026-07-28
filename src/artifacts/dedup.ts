@@ -5,8 +5,6 @@ import { QmdError, type QmdResult } from "../integrations/qmd";
 import { projectIndex } from "../integrations/project-index";
 import type { ProjectConfig } from "../config/project";
 import type { TemplateType } from "../schema/load";
-import { classifyIntent } from "../search/intent";
-import { buildStructuredQuery } from "../search/query-builder";
 import { openArtifact } from "./artifact-file";
 import { artifactFolder } from "./paths";
 import type { Structure } from "./registry";
@@ -71,14 +69,13 @@ export async function runDedupGate(input: DedupGateInput): Promise<void> {
 
   const index = projectIndex({ project: input.project, projectPath: input.projectPath, config: input.config });
   await index.ensure();
-  await index.refresh();
-  // Route through the same structured-query path search uses so dedup and
-  // search score against the identical intent/lex/vec document.
-  const queryDocument = buildStructuredQuery(input.query, {
-    intent: classifyIntent(input.query),
-    project: input.project,
-  });
-  const qmdResults = thresholdResults(await index.query(queryDocument), thresholds);
+  await index.refreshIfStale();
+  // ADR-0047: dedup reads BM25-only. The question here is lexical — "does an
+  // artifact with substantially this title and summary already exist?" — and the
+  // hybrid path answered it with a ~1.8s query-expansion LLM call on the write
+  // path, scoring the true duplicate LOWER than BM25 does while adding a tail of
+  // weak matches. `wiki search` keeps the hybrid path; the gate does not need it.
+  const qmdResults = thresholdResults(await index.search(input.query), thresholds);
   const qmdMatches = await Promise.all(
     qmdResults.map((result) => enrichMatch(result, input.projectPath, input.project, input.type, input.structure)),
   );

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { captureArtifact } from "../src/artifacts/capture";
+import { waitForUpdates } from "./helpers/detached";
 
 // SLICE-0127: the capture path runs the SAME advisory dedup gate `wiki create`
 // uses (runDedupGate). Capture is a non-interactive hook, so on a STRONG match it
@@ -71,6 +72,7 @@ case "\${1:-}" in
     ;;
   update) : ;;
   query) cat "$RESULTS_FILE" ;;
+  search) cat "$RESULTS_FILE" ;;
 esac
 `,
   );
@@ -117,7 +119,7 @@ describe("SLICE-0127: capture runs the dedup gate and warns-and-files on a stron
     expect(outcome && outcome.outcome === "captured" ? outcome.note : undefined).toBe("possible duplicate of [[BUG-0007]] — review");
   });
 
-  test("the qmd order is dedup refresh+query -> write -> keyword update (dedup/update unlocked)", async () => {
+  test("the qmd order is dedup refresh+read -> write -> keyword update (dedup/update unlocked)", async () => {
     const vault = await makeVault("proj");
     await writeFile(vault.resultsFile, "[]"); // no match this time
     const dir = await tmpDir();
@@ -127,16 +129,19 @@ describe("SLICE-0127: capture runs the dedup gate and warns-and-files on a stron
     const outcome = await captureArtifact({ path: file, cwd: dir });
     expect(outcome?.outcome).toBe("captured");
 
-    const lines = (await readFile(vault.stateFile, "utf8")).split("\n").filter((l) => l.length > 0);
+    // ADR-0047: the dedup refresh is awaited but the write-path update is
+    // detached, so wait for BOTH updates before reading the order off the log.
+    const lines = await waitForUpdates(vault.stateFile, "proj", 2);
     const dedupUpdate = lines.findIndex((l) => l.startsWith("update ") && l.includes("-c proj"));
-    const query = lines.findIndex((l) => l.startsWith("query "));
+    // ADR-0047: the gate's read is `qmd search` (BM25), not `qmd query`.
+    const read = lines.findIndex((l) => l.startsWith("search "));
     const lastUpdate = lines.map((l) => l.startsWith("update ")).lastIndexOf(true);
-    // dedup refresh (update) precedes the dedup query ...
+    // dedup refresh (update) precedes the dedup read ...
     expect(dedupUpdate).toBeGreaterThanOrEqual(0);
-    expect(query).toBeGreaterThanOrEqual(0);
-    expect(dedupUpdate).toBeLessThan(query);
+    expect(read).toBeGreaterThanOrEqual(0);
+    expect(dedupUpdate).toBeLessThan(read);
     // ... and the write-path keyword update (SLICE-0126) is the LAST qmd touch.
-    expect(lastUpdate).toBeGreaterThan(query);
+    expect(lastUpdate).toBeGreaterThan(read);
     // qmd was never asked to embed on the capture path.
     expect(lines.some((l) => l.startsWith("embed "))).toBe(false);
   });
