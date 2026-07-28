@@ -8,16 +8,16 @@ import { normalizeForSemantic } from "./normalize";
  */
 export function buildStructuredQuery(
   query: string,
-  options: { intent: SearchIntent; project?: string },
+  options: { intent: SearchIntent; project?: string; vocabulary?: readonly string[]; rationaleKinds?: readonly string[] },
 ): string {
   const lines: string[] = [];
 
   // Intent line with optional project context
-  const intentDescription = describeIntent(options.intent, options.project);
+  const intentDescription = describeIntent(options.intent, options.project, options.rationaleKinds ?? []);
   lines.push(`intent: ${intentDescription}`);
 
   // Lex line: tightened for location intents, raw for others
-  lines.push(`lex: ${options.intent === "location" ? buildLocationLex(query) : query}`);
+  lines.push(`lex: ${options.intent === "location" ? buildLocationLex(query, options.vocabulary ?? []) : query}`);
 
   // Vec line: normalized query for vector similarity
   lines.push(`vec: ${normalizeForSemantic(query)}`);
@@ -44,7 +44,7 @@ const STOP_WORDS = new Set([
  * keep tokens >= 3 chars, add domain hints for known wiki terms.
  * Ported from v1 buildLexicalSearchQuery.
  */
-function buildLocationLex(query: string): string {
+function buildLocationLex(query: string, vocabulary: readonly string[]): string {
   const normalizedQuestion = query.toLowerCase();
   const baseTerms = query
     .split(/[^a-z0-9-]+/iu)
@@ -53,25 +53,35 @@ function buildLocationLex(query: string): string {
     .filter((token) => token.length >= 3)
     .filter((token) => !STOP_WORDS.has(token.toLowerCase()));
 
-  // ponytail: only the prd hint survives — it is the single test-pinned branch
-  // (search-upgrade: "where do PRDs live" => "PRDs prd spec specs"). The full
-  // keep/cut of the domain-hint vocabulary is deferred; the tokenizer above stays.
-  const hints: string[] = [];
-  if (/\bprds?\b/u.test(normalizedQuestion)) hints.push("prd", "spec", "specs");
+  // ADR-0047: the hint was a literal `prd -> prd spec specs` branch, which fired
+  // for vaults with no prd kind and never fired for a vault's own kinds. Now the
+  // active vocabulary (kind names + folders) supplies it: a query naming one of
+  // this vault's kinds gets that term added, and a vault whose kinds go unmentioned
+  // gets no hint at all.
+  const hints = vocabulary.filter((term) => new RegExp(`\\b${escapeRegex(term)}\\b`, "u").test(normalizedQuestion));
 
   const terms = [...baseTerms, ...hints];
   const deduped = terms.filter((term, index) => terms.indexOf(term) === index);
   return deduped.join(" ").trim() || query;
 }
 
-function describeIntent(intent: SearchIntent, project: string | undefined): string {
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function describeIntent(intent: SearchIntent, project: string | undefined, rationaleKinds: readonly string[]): string {
   const projectClause = project !== undefined ? ` about project ${project}` : "";
 
   switch (intent) {
     case "location":
       return `Answer a question${projectClause}. Prefer spec indexes and folder layouts.`;
     case "rationale":
-      return `Answer a question${projectClause}. Prefer ADRs and architecture docs.`;
+      // ADR-0047: name the kinds THIS vault declares as rationale answers
+      // (`search_intent` in wiki.json). A vault declaring none gets no ranking
+      // instruction rather than a preference for kinds it does not have.
+      return rationaleKinds.length === 0
+        ? `Answer a question${projectClause}.`
+        : `Answer a question${projectClause}. Prefer ${rationaleKinds.join(" and ")} artifacts.`;
     case "implementation":
       return `Answer a question${projectClause}. Prefer source code and implementation docs.`;
     case "temporal":

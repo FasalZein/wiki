@@ -87,4 +87,14 @@ describe("nextId honors the per-vault Structure (tracer through id-allocation pa
     expect(await nextId("prd", vault, "p", structure)).toBe("PRD-0001");
     expect(await nextId("decision", vault, "p", structure)).toBe("ADR-0001");
   });
+
+  test("legacy bare numeric filenames are enabled by kind data, not the kind name", async () => {
+    const vault = await makeVault(JSON.stringify({
+      kinds: { choice: { prefix: "CHOICE", folder: "choices", dedup: false, legacy_bare_ids: true } },
+    }));
+    await makeProject(vault, "p", ["choices"]);
+    await writeFile(join(vault, "projects", "p", "choices", "0017-old-choice.md"), "legacy");
+    const structure = await loadStructure(vault);
+    expect(await nextId("choice", vault, "p", structure)).toBe("CHOICE-0018");
+  });
 });

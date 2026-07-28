@@ -18,7 +18,7 @@ import {
 } from "../../artifacts/store";
 import { rm } from "node:fs/promises";
 import { inboundReferences } from "../../artifacts/references";
-import { loadStructure, type Structure } from "../../artifacts/registry";
+import { loadStructure, rolesOf, type Structure } from "../../artifacts/registry";
 import { getVaultRoot } from "../../config/vault";
 import { loadTemplate, type TemplateType } from "../../schema/load";
 import type { CliResult } from "../dispatch";
@@ -116,11 +116,19 @@ export async function handleBlock(args: string[]): Promise<CliResult> {
   const target = await resolveTarget(id, parsed);
   if (typeof target === "string") return fail(target);
 
+  // ADR-0047: `wiki block` is a convenience over the kind-declared dependency
+  // field. Check support here so kinds without that contract get an actionable
+  // error instead of a deep "unknown field" schema failure.
+  const field = rolesOf(target.structure.specFor(target.type)).depends_on;
+  const schema = await loadTemplate(target.type, target.vaultRoot);
+  if (!schema.fields.some((candidate) => candidate.name === field)) {
+    return fail(`wiki block is unsupported for kind ${target.type}; use wiki set for a schema field instead`);
+  }
   const wrapped = on.map((value) => (/^\[\[.*\]\]$/.test(value) ? value : `[[${value}]]`));
-  return run(target, () => setField({ ...target, field: "blocked_by", value: wrapped }, target.structure), () => ({
+  return run(target, () => setField({ ...target, field, value: wrapped }, target.structure), () => ({
     id: target.id,
-    blocked_by: wrapped,
-  }), `${target.id} blocked_by ${wrapped.join(", ")}`);
+    [field]: wrapped,
+  }), `${target.id} ${field} ${wrapped.join(", ")}`);
 }
 
 /** wiki supersede <oldId> --by <newId> — standalone supersede for existing artifacts. */
@@ -140,10 +148,11 @@ export async function handleSupersede(args: string[]): Promise<CliResult> {
     if (error instanceof ArtifactNotFoundError) return fail(`superseding artifact not found: ${by}`);
     throw error;
   }
+  const roles = rolesOf(target.structure.specFor(target.type));
   return run(target, () => supersedeArtifact({ ...target, by }, target.structure), (artifact) => ({
     id: target.id,
-    status: artifact.fields.status ?? null,
-    superseded_by: by,
+    [roles.status]: artifact.fields[roles.status] ?? null,
+    [roles.supersede_link]: by,
   }), `${target.id} superseded by ${by}`);
 }
 

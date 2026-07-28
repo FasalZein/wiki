@@ -4,7 +4,7 @@ import { join, relative } from "node:path";
 import { readFrontmatter, serializeArtifact } from "../../artifacts/artifact-file";
 import { orderBySchema } from "../../artifacts/render";
 import { loadKind } from "../../artifacts/body";
-import { loadStructure, type Structure } from "../../artifacts/registry";
+import { loadStructure, rolesOf, type Structure } from "../../artifacts/registry";
 import { slugifyTitle } from "../../artifacts/store";
 import { projectPath } from "../../artifacts/paths";
 import { assertProjectStructure, loadProjectConfig, ProjectConfigError, projectErrorMessage } from "../../config/project";
@@ -465,8 +465,10 @@ function fixAcceptanceEach(content: string, file: string): CategoryResult {
 }
 
 /**
- * A closed artifact predating the checkbox gate keeps unchecked scaffold todos.
- * Driven from the template (F3): the folder is any artifact kind, and the sections
+ * A terminal artifact predating the checkbox gate keeps unchecked scaffold todos.
+ * ADR-0047 resolves the lifecycle field/value from kind roles (legacy defaults
+ * remain `status: closed`). Driven from the template (F3): the folder is any
+ * artifact kind, and the sections
  * to tick are those whose TEMPLATE body ships STATIC unchecked-checkbox scaffolding
  * (a `- [ ]` line with no `{{...}}` — e.g. slice's ## Todo). A dynamic checkbox
  * section (`- [ ] {{this}}`, e.g. ## Acceptance criteria) is NOT a scaffold, so its
@@ -475,7 +477,8 @@ function fixAcceptanceEach(content: string, file: string): CategoryResult {
 async function fixClosedScaffoldTodos(content: string, file: string, structure: Structure, vaultRoot: string): Promise<CategoryResult> {
   const type = artifactTypeOf(file, structure);
   if (type === undefined) return { labels: [], fixed: content };
-  if (frontmatterOf(content)?.status !== "closed") return { labels: [], fixed: content };
+  const roles = rolesOf(structure.specFor(type));
+  if (frontmatterOf(content)?.[roles.status] !== roles.terminal_status) return { labels: [], fixed: content };
   const scaffold = scaffoldTodoHeadings((await loadKind(type, vaultRoot)).templateBody);
   if (scaffold.size === 0) return { labels: [], fixed: content };
   const lines = content.split("\n");
@@ -495,7 +498,7 @@ async function fixClosedScaffoldTodos(content: string, file: string, structure: 
   }
   if (ticked === 0) return { labels: [], fixed: content };
   return {
-    labels: [`${file}: ${ticked} unchecked todo(s) in closed ${type}`],
+    labels: [`${file}: ${ticked} unchecked todo(s) in ${roles.terminal_status} ${type}`],
     fixed: lines.join("\n"),
   };
 }

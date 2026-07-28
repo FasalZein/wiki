@@ -5,7 +5,7 @@ import { loadTemplate, type TemplateType } from "../schema/load";
 import { BodyParseError, loadKind } from "./body";
 import { type ArtifactFile, openArtifact, serializeArtifact } from "./artifact-file";
 import type { NormalizedRecord, Schema, ValidationError } from "../schema/types";
-import { parentBacklink, type Structure } from "./registry";
+import { parentBacklink, rolesOf, type Structure } from "./registry";
 import type { CreatePlan } from "./create-plan";
 import { fieldsForDedupOverride } from "./dedup";
 import { nextId } from "./id";
@@ -141,11 +141,11 @@ export async function setFields(input: SetFieldsInput, structure: Structure, ind
 }
 
 /**
- * Mark an existing artifact as superseded by another (P0.1, PRD-0020). Always
- * records `superseded_by`; only flips `status` to "superseded" when the type's
- * schema actually has that enum value (slices gained it in P0.1; docs have
- * neither and fall through unmarked). Shared by `create --supersedes` and the
- * `wiki supersede` verb so the conditional lives in exactly one place.
+ * Mark an existing artifact as superseded by another (P0.1, PRD-0020). ADR-0047
+ * names the link field, lifecycle field, and superseded value through kind roles;
+ * absent roles retain the legacy literals. The lifecycle field only changes when
+ * its schema enum permits the configured value. Shared by `create --supersedes`
+ * and `wiki supersede` so the conditional lives in exactly one place.
  *
  * PRD-0020: the TARGET write is NARROWED — it merges only the two tombstone
  * fields onto the target's EXISTING frontmatter, re-stamps `updated`, and writes
@@ -159,20 +159,19 @@ export async function setFields(input: SetFieldsInput, structure: Structure, ind
 export async function supersedeArtifact(input: ReadArtifactInput & { by: string }, structure: Structure, index?: IdIndex): Promise<Artifact> {
   const file = await resolveAndOpen(input, structure, index);
   const schema = await loadTemplate(input.type, input.vaultRoot);
-  const statusField = schema.fields.find((field) => field.name === "status");
-  const hasSupersededStatus = statusField?.constraints.values?.includes("superseded") ?? false;
-  // Guard the ONE thing the narrowed write still owns: `superseded_by` must be a
-  // real field on the target's schema. Types without it (e.g. docs) can't be
-  // superseded — fail cleanly, named to the target, instead of writing a stray
-  // frontmatter key. We deliberately do NOT run the full validate(schema, ...)
-  // here: that is what rejected a schema-stale target with a misleading error.
-  if (!schema.fields.some((field) => field.name === "superseded_by")) {
+  const roles = rolesOf(structure.specFor(input.type));
+  const statusField = schema.fields.find((field) => field.name === roles.status);
+  const hasSupersededStatus = statusField?.constraints.values?.includes(roles.superseded_status) ?? false;
+  // Guard the ONE thing the narrowed write still owns: the configured supersede
+  // link must be a real schema field. We deliberately do NOT run the full
+  // validate(schema, ...) here: that rejected schema-stale targets (PRD-0020).
+  if (!schema.fields.some((field) => field.name === roles.supersede_link)) {
     throw new ArtifactValidationError([
-      { field: "superseded_by", reason: `${input.type} ${input.id} cannot be superseded (no superseded_by field)` },
+      { field: roles.supersede_link, reason: `${input.type} ${input.id} cannot be superseded (no ${roles.supersede_link} field)` },
     ]);
   }
-  const patch: Record<string, unknown> = { superseded_by: input.by };
-  if (hasSupersededStatus) patch.status = "superseded";
+  const patch: Record<string, unknown> = { [roles.supersede_link]: input.by };
+  if (hasSupersededStatus) patch[roles.status] = roles.superseded_status;
   const fields = await file.rewriteFrontmatter(patch);
   return { id: input.id, path: file.path, fields, body: file.body.trimStart() };
 }

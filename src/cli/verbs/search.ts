@@ -15,7 +15,7 @@ import { resolveSharedQmdCommand } from "../../integrations/project-index";
 import { openArtifact } from "../../artifacts/artifact-file";
 import { countArtifactsNewerThanEmbed } from "../../artifacts/embed-marker";
 import { artifactFolder, projectPath } from "../../artifacts/paths";
-import { loadStructure, type Structure } from "../../artifacts/registry";
+import { kindsForIntent, kindVocabulary, loadStructure, type Structure } from "../../artifacts/registry";
 import { recentArtifacts, RECENT_LIMIT, type RecentArtifact } from "../../artifacts/recent";
 import { assertProjectStructure, listProjects, loadProjectConfig, type ProjectConfig, ProjectConfigError, projectErrorMessage } from "../../config/project";
 import { getVaultRoot } from "../../config/vault";
@@ -75,7 +75,11 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
     }
     since = parsedDate;
   }
-  const recency = booleanValue(parsed.values, "recent") || since !== undefined || classifyIntent(query) === "temporal";
+  // ADR-0047: intent reads the ACTIVE vault's kind/folder names, never a literal
+  // prd/slice vocabulary this vault may not use.
+  const vocabulary = kindVocabulary(structure.kinds);
+  const recency =
+    booleanValue(parsed.values, "recent") || since !== undefined || classifyIntent(query, vocabulary) === "temporal";
 
   // Resolve the target projects: one when --project is given, else the whole vault.
   let targetProjects: string[];
@@ -164,8 +168,13 @@ export async function handleSearch(args: string[]): Promise<CliResult> {
     }
 
     // Build structured query document instead of passing raw text
-    const intent = classifyIntent(query);
-    const queryDocument = buildStructuredQuery(query, { intent, project });
+    const intent = classifyIntent(query, vocabulary);
+    const queryDocument = buildStructuredQuery(query, {
+      intent,
+      project,
+      vocabulary,
+      rationaleKinds: kindsForIntent(structure.kinds, "rationale"),
+    });
     const results = filterByType(
       await runQuery(qmdCommand, queryDocument, collections, {
         explain,

@@ -9,7 +9,21 @@ describe("config-driven kind registry (wiki.json)", () => {
   test("kinds are loaded from wiki.json with prefix/folder/dedup", () => {
     // The kinds shipped in wiki.json; the point is they come from config,
     // not a hardcoded union, so this just pins the loaded shape.
-    expect(kinds.prd).toEqual({ prefix: "PRD", folder: "prds", dedup: true, skill: "to-prd", child_list: "slices" });
+    // ADR-0047: bundled kinds carry explicit `roles` — the field/value names the
+    // engine used to hardcode. The literals match the pre-ADR behavior exactly.
+    expect(kinds.prd).toEqual({
+      prefix: "PRD",
+      folder: "prds",
+      dedup: true,
+      skill: "to-prd",
+      child_list: "slices",
+      roles: {
+        supersede_link: "superseded_by",
+        status: "status",
+        superseded_status: "superseded",
+        terminal_status: "closed",
+      },
+    });
     // A promoted knowledge kind (PRD-0023): its own folder + prefix + criteria + authoring skill.
     expect(kinds.research).toEqual({
       prefix: "RES",

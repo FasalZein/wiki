@@ -21,9 +21,11 @@ import { type Structure } from "./registry";
  * other's file and mint distinct ids.
  */
 export async function nextId(type: TemplateType, vaultRoot: string, project: string, structure: Structure): Promise<string> {
-  const prefix = structure.specFor(type).prefix;
+  const { prefix, legacy_bare_ids = false } = structure.specFor(type);
   const directory = artifactDirectory(type, vaultRoot, project, structure);
   const index = await IdIndex.build(vaultRoot, project, structure);
-  const highest = index.maxId(prefix, directory, type === "decision");
+  // ADR-0047: legacy bare-numeric filename counting belongs to kind data; no
+  // artifact name receives privileged allocator behavior in the engine.
+  const highest = index.maxId(prefix, directory, legacy_bare_ids);
   return `${prefix}-${String(highest + 1).padStart(4, "0")}`;
 }

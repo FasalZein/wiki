@@ -4,6 +4,19 @@ import { join } from "node:path";
 import type { TemplateType } from "../schema/load";
 import { isFileNotFound } from "../util";
 
+export interface ArtifactRoles {
+  /** Frontmatter link written on the artifact being superseded. */
+  supersede_link?: string;
+  /** Lifecycle field inspected and updated by supersede/fmt. */
+  status?: string;
+  /** Lifecycle value written by supersede when the schema permits it. */
+  superseded_status?: string;
+  /** Link-list field written by `wiki block`. */
+  depends_on?: string;
+  /** Lifecycle value whose Todo scaffold is complete. */
+  terminal_status?: string;
+}
+
 export interface ArtifactSpec {
   /** ID prefix, e.g. "DOC" yields DOC-0001. */
   prefix: string;
@@ -24,6 +37,55 @@ export interface ArtifactSpec {
   /** List field on THIS kind that receives child ids when a child declares it as
    *  `parent` (e.g. prd's "slices"). Generic backlink target (SLICE-0114). */
   child_list?: string;
+  /** Kind-level field/value roles consumed by generic engine verbs (ADR-0047). */
+  roles?: ArtifactRoles;
+  /** Count legacy `NNNN-*.md` filenames in this kind's id space (ADR-0047). */
+  legacy_bare_ids?: boolean;
+  /** Search intent this kind is the preferred answer for (ADR-0047). `wiki search`
+   *  used to hardcode "Prefer ADRs and architecture docs" for rationale questions,
+   *  which is noise in a vault holding no such kinds. Now each kind declares what
+   *  it answers, and the ranking instruction names only kinds that exist. */
+  search_intent?: string;
+}
+
+/** Kind names declaring themselves the preferred answer for `intent` (ADR-0047). */
+export function kindsForIntent(kinds: Record<string, ArtifactSpec>, intent: string): string[] {
+  return Object.entries(kinds)
+    .filter(([, spec]) => spec.search_intent === intent)
+    .map(([name]) => name);
+}
+
+/**
+ * The vault's own search vocabulary: every kind name and folder segment, plus a
+ * naive singular for each. ADR-0047 — `intent.ts` and `query-builder.ts` used to
+ * carry a literal `prd|prds|slice|slices` token list, so a vault with different
+ * kinds got another vault's vocabulary.
+ */
+export function kindVocabulary(kinds: Record<string, ArtifactSpec>): string[] {
+  const terms = new Set<string>();
+  for (const [name, spec] of Object.entries(kinds)) {
+    for (const value of [name, ...spec.folder.split("/")]) {
+      const normalized = value.toLowerCase();
+      if (normalized.length === 0) continue;
+      terms.add(normalized);
+      if (normalized.endsWith("s") && normalized.length > 1) terms.add(normalized.slice(0, -1));
+    }
+  }
+  return [...terms];
+}
+
+const LEGACY_ROLES: Required<ArtifactRoles> = {
+  supersede_link: "superseded_by",
+  status: "status",
+  superseded_status: "superseded",
+  depends_on: "blocked_by",
+  terminal_status: "closed",
+};
+
+/** Resolve ADR-0047 roles with the legacy literals as compatibility defaults, so
+ *  a live vault config written before `roles` existed keeps its current behavior. */
+export function rolesOf(spec: Pick<ArtifactSpec, "roles">): Required<ArtifactRoles> {
+  return { ...LEGACY_ROLES, ...spec.roles };
 }
 
 /**
@@ -115,6 +177,26 @@ function parseKinds(raw: unknown): Record<TemplateType, ArtifactSpec> {
     if (s.criteria !== undefined && typeof s.criteria !== "string") {
       throw new Error(`wiki.json: kind '${name}' field 'criteria' must be a string`);
     }
+    if (s.legacy_bare_ids !== undefined && typeof s.legacy_bare_ids !== "boolean") {
+      throw new Error(`wiki.json: kind '${name}' field 'legacy_bare_ids' must be a boolean`);
+    }
+    if (s.search_intent !== undefined && typeof s.search_intent !== "string") {
+      throw new Error(`wiki.json: kind '${name}' field 'search_intent' must be a string`);
+    }
+    let roles: ArtifactRoles | undefined;
+    if (s.roles !== undefined) {
+      if (s.roles === null || typeof s.roles !== "object") {
+        throw new Error(`wiki.json: kind '${name}' field 'roles' must be an object`);
+      }
+      roles = {};
+      for (const role of Object.keys(LEGACY_ROLES) as (keyof ArtifactRoles)[]) {
+        const value = (s.roles as Record<string, unknown>)[role];
+        if (value !== undefined && typeof value !== "string") {
+          throw new Error(`wiki.json: kind '${name}' role '${role}' must be a string`);
+        }
+        if (typeof value === "string") roles[role] = value;
+      }
+    }
     const skillOk =
       s.skill === undefined ||
       typeof s.skill === "string" ||
@@ -130,6 +212,9 @@ function parseKinds(raw: unknown): Record<TemplateType, ArtifactSpec> {
       ...(typeof s.parent === "string" ? { parent: s.parent } : {}),
       ...(typeof s.child_list === "string" ? { child_list: s.child_list } : {}),
       ...(typeof s.criteria === "string" ? { criteria: s.criteria } : {}),
+      ...(roles !== undefined ? { roles } : {}),
+      ...(typeof s.legacy_bare_ids === "boolean" ? { legacy_bare_ids: s.legacy_bare_ids } : {}),
+      ...(typeof s.search_intent === "string" ? { search_intent: s.search_intent } : {}),
     };
   }
   return kinds;
@@ -328,10 +413,10 @@ export function skillsOf(spec: Pick<ArtifactSpec, "skill">): readonly string[] {
 }
 
 const DEFAULT_KINDS: Record<TemplateType, ArtifactSpec> = {
-  prd: { prefix: "PRD", folder: "prds", dedup: true, skill: "to-prd", child_list: "slices" },
-  slice: { prefix: "SLICE", folder: "slices", dedup: true, skill: "to-slices", parent: "prd" },
-  decision: { prefix: "ADR", folder: "adrs", dedup: true, skill: "grill-with-docs" },
-  architecture: { prefix: "ARCH", folder: "architecture", dedup: true, skill: ["improve-codebase-architecture", "improve"], criteria: "How the system is built: components, boundaries, data flow, structural decisions." },
+  prd: { prefix: "PRD", folder: "prds", dedup: true, skill: "to-prd", child_list: "slices", roles: { supersede_link: "superseded_by", status: "status", superseded_status: "superseded", terminal_status: "closed" } },
+  slice: { prefix: "SLICE", folder: "slices", dedup: true, skill: "to-slices", parent: "prd", roles: { supersede_link: "superseded_by", status: "status", superseded_status: "superseded", depends_on: "blocked_by", terminal_status: "closed" } },
+  decision: { prefix: "ADR", folder: "adrs", dedup: true, skill: "grill-with-docs", roles: { supersede_link: "superseded_by", status: "status", superseded_status: "superseded" }, legacy_bare_ids: true, search_intent: "rationale" },
+  architecture: { prefix: "ARCH", folder: "architecture", dedup: true, skill: ["improve-codebase-architecture", "improve"], criteria: "How the system is built: components, boundaries, data flow, structural decisions.", search_intent: "rationale" },
   research: { prefix: "RES", folder: "research", dedup: true, skill: "research", criteria: "External findings, investigations, comparisons, and explorations feeding a decision." },
   runbooks: { prefix: "RUN", folder: "runbooks", dedup: true, criteria: "Operational how-to: step-by-step procedures for running, deploying, or recovering." },
   specs: { prefix: "SPEC", folder: "specs", dedup: true, criteria: "Specifications: precise contracts, formats, schemas, and interface definitions." },

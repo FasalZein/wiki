@@ -93,11 +93,49 @@ describe("structured query building", () => {
     expect(result).not.toContain("hyde:");
   });
 
-  test("location queries tighten lex terms (remove stop words, add domain hints)", () => {
-    const result = buildStructuredQuery("where do PRDs live", { intent: "location" });
-    expect(result).toContain("lex: PRDs prd spec specs");
+  test("location queries tighten lex terms and hint with the VAULT's vocabulary", () => {
+    // ADR-0047: the hint used to be a literal `prd -> prd spec specs` branch. It
+    // now comes from the active vault's kind/folder names, so a query naming this
+    // vault's kinds is reinforced and another vault's taxonomy never leaks in.
+    const result = buildStructuredQuery("where do PRDs live", {
+      intent: "location",
+      vocabulary: ["prd", "prds", "slice", "slices"],
+    });
+    expect(result).toContain("lex: PRDs prds");
+    expect(result).not.toContain("spec specs");
     // Vec still uses the full normalized query
     expect(result).toContain("vec: where do PRDs live");
+  });
+
+  test("a vault whose kinds go unmentioned gets no domain hint (ADR-0047)", () => {
+    const result = buildStructuredQuery("where do PRDs live", {
+      intent: "location",
+      vocabulary: ["memo", "memos", "guide", "guides"],
+    });
+
+    expect(result).toContain("lex: PRDs");
+    expect(result).not.toContain("memo");
+    expect(result).not.toContain("guide");
+  });
+
+  test("rationale ranking names only kinds the vault declares (ADR-0047)", () => {
+    const withKinds = buildStructuredQuery("why did we choose SQLite", {
+      intent: "rationale",
+      rationaleKinds: ["decision", "architecture"],
+    });
+    expect(withKinds).toContain("Prefer decision and architecture artifacts.");
+
+    // A vault declaring no rationale kind gets no preference instruction at all,
+    // rather than the old hardcoded "Prefer ADRs and architecture docs".
+    const withoutKinds = buildStructuredQuery("why did we choose SQLite", { intent: "rationale" });
+    expect(withoutKinds).not.toContain("Prefer");
+    expect(withoutKinds).toContain("intent: Answer a question.");
+  });
+
+  test("intent classification uses the vault's kind vocabulary, not literals (ADR-0047)", () => {
+    // "memo" is a location noun only for a vault that HAS a memo kind.
+    expect(classifyIntent("which memo covers retries")).toBe("general");
+    expect(classifyIntent("which memo covers retries", ["memo", "memos"])).toBe("location");
   });
 });
 
