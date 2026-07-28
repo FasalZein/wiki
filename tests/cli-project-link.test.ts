@@ -147,15 +147,37 @@ describe("buildPointerBlock", () => {
     expect(block).toContain("<!-- wiki:end -->");
   });
 
-  test("v2 block closes the CONTEXT.md gap (SLICE-0049, ADR-0032)", () => {
+  test("the block states a durability tier, not a location ban (ADR-0047)", () => {
     // The pointer block is the only guidance guaranteed in context when a delivery
-    // skill is invoked without the wiki skill loaded — it must name the repo files
-    // those skills try to create.
-    expect(BLOCK_VERSION).toBeGreaterThanOrEqual(2);
+    // skill is invoked without the wiki skill loaded. v2 banned locations outright
+    // (`CONTEXT.md`, `docs/adr/`, "OS temp dirs"), which also banned the scratch
+    // space a session legitimately needs. v3 routes by durability instead.
+    expect(BLOCK_VERSION).toBeGreaterThanOrEqual(3);
     const block = buildPointerBlock("acme");
-    expect(block).toContain("CONTEXT.md");
-    expect(block.toLowerCase()).toContain("glossary");
-    expect(block).toContain("docs/adr/");
+    expect(block).toContain("Durable project knowledge");
+    expect(block).toContain("/tmp");
+    expect(block).toContain(".pi/artifacts/");
+    expect(block).toContain("stay in this repo");
+    expect(block).toContain('wiki search "<query>" --project acme');
+    // No blanket ban survives — scratch and repo-operational files are allowed.
+    expect(block).not.toContain("no OS temp dirs");
+  });
+
+  test("the block names the kinds THIS vault defines, not a hardcoded taxonomy (ADR-0047)", () => {
+    const block = buildPointerBlock("acme", ["decision", "experiment", "protocol"]);
+
+    expect(block).toContain("decision, experiment, protocol");
+    // The v2 wording hardcoded a taxonomy — including "glossary", never a kind.
+    expect(block.toLowerCase()).not.toContain("glossary");
+    expect(block).not.toContain("PRDs, slices");
+  });
+
+  test("a caller with no loaded vault still stamps a valid binding", () => {
+    const block = buildPointerBlock("acme");
+
+    expect(block).toContain(`<!-- wiki:begin v${BLOCK_VERSION} project=acme -->`);
+    expect(block).toContain("Durable project knowledge lives in the wiki vault");
+    expect(block).toContain("<!-- wiki:end -->");
   });
 
   test("restamping a v1 block upgrades it to the current version (SLICE-0049)", async () => {
@@ -177,7 +199,7 @@ describe("buildPointerBlock", () => {
     const content = await readFile(filePath, "utf8");
     expect(content).toContain(`<!-- wiki:begin v${BLOCK_VERSION} project=acme -->`);
     expect(content).not.toContain("Old v1 body");
-    expect(content).toContain("CONTEXT.md");
+    expect(content).toContain("Durable project knowledge");
     expect(content).toContain("# Repo content");
     expect((content.match(/<!-- wiki:begin/g) ?? []).length).toBe(1);
   });

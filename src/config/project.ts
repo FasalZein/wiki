@@ -19,6 +19,14 @@ export type ProjectConfig = {
   /** Opt-in strict mode: when true, a strong dedup match blocks create unless an override flag is passed.
    * Default false — dedup is advisory (warn + link), matching a general memory layer; blocking is opt-in per project. */
   dedup_strong_blocks: boolean;
+  /** Opt-in repo policy: when true, `wiki doctor` reports a linked repo's own
+   * `CONTEXT.md` / `docs/adr/` as contract drift.
+   *
+   * Default false (ADR-0047). Storage is tiered by durability, not by banned
+   * location: a repo may legitimately keep operational docs, and only THIS
+   * project can say whether its repo's CONTEXT.md is drift or a deliberate
+   * contributor-facing file. */
+  repo_exclusive_artifacts: boolean;
 };
 
 export class ProjectConfigError extends Error {
@@ -95,6 +103,8 @@ export async function loadProjectConfig(projectPath: string): Promise<ProjectCon
     dedup_lexical_weak: numberValue(data.dedup_lexical_weak, 0.8),
     dedup_lexical_strong: numberValue(data.dedup_lexical_strong, 0.92),
     dedup_strong_blocks: typeof data.dedup_strong_blocks === "boolean" ? data.dedup_strong_blocks : false,
+    repo_exclusive_artifacts:
+      typeof data.repo_exclusive_artifacts === "boolean" ? data.repo_exclusive_artifacts : false,
   };
 }
 

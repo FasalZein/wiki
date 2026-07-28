@@ -24,13 +24,16 @@ async function makeVaultWithLinkedRepo(opts: {
   repoDir: string;
   agentsMd?: string;
   claudeMd?: string;
+  /** ADR-0047: repo contract-drift policing is opt-in per project. */
+  repoExclusiveArtifacts?: boolean;
 }): Promise<string> {
   const vaultRoot = await makeTempDir();
   const projDir = join(vaultRoot, "projects", opts.projectName);
   await mkdir(projDir, { recursive: true });
 
   const today = new Date().toISOString().slice(0, 10);
-  const projectMd = `---\nproject: ${opts.projectName}\nstatus: planning\ncreated: ${today}\nrepo: ${opts.repoDir}\ntest_command: bun test\nlinked_repos:\n  - ${opts.repoDir}\n---\n# ${opts.projectName}\n`;
+  const optIn = opts.repoExclusiveArtifacts === true ? "repo_exclusive_artifacts: true\n" : "";
+  const projectMd = `---\nproject: ${opts.projectName}\nstatus: planning\ncreated: ${today}\nrepo: ${opts.repoDir}\ntest_command: bun test\n${optIn}linked_repos:\n  - ${opts.repoDir}\n---\n# ${opts.projectName}\n`;
   await writeFile(join(projDir, "_project.md"), projectMd);
 
   // Write AGENTS.md / CLAUDE.md in the repo dir if content is given
@@ -206,6 +209,7 @@ describe("doctor contract-drift checks", () => {
       repoDir,
       agentsMd: block + "\n",
       claudeMd: block + "\n",
+      repoExclusiveArtifacts: true,
     });
 
     const result = await runDoctor(vaultRoot);
@@ -228,6 +232,7 @@ describe("doctor contract-drift checks", () => {
       repoDir,
       agentsMd: block + "\n",
       claudeMd: block + "\n",
+      repoExclusiveArtifacts: true,
     });
 
     const result = await runDoctor(vaultRoot);
@@ -236,6 +241,28 @@ describe("doctor contract-drift checks", () => {
     expect(drift).toHaveLength(1);
     expect(drift[0]?.message).toContain("0001-use-x.md");
     expect(drift[0]?.message).toContain("wiki create decision");
+  });
+
+  test("a repo CONTEXT.md is NOT drift by default — policing is opt-in (ADR-0047)", async () => {
+    // Storage is tiered by durability, not by banned location: a repo's
+    // CONTEXT.md is as often a deliberate contributor-facing file as it is
+    // drift, and only the project can tell them apart. Without the opt-in,
+    // doctor stays silent about what the repo keeps.
+    const repoDir = await makeTempDir();
+    const block = buildPointerBlock("acme");
+    await writeFile(join(repoDir, "CONTEXT.md"), "# Contributor context\n");
+    await mkdir(join(repoDir, "docs", "adr"), { recursive: true });
+    await writeFile(join(repoDir, "docs", "adr", "0001-use-x.md"), "# Use X\n");
+    const vaultRoot = await makeVaultWithLinkedRepo({
+      projectName: "acme",
+      repoDir,
+      agentsMd: block + "\n",
+      claudeMd: block + "\n",
+    });
+
+    const result = await runDoctor(vaultRoot);
+
+    expect(result.issues.filter((i) => i.type === "contract-drift")).toHaveLength(0);
   });
 
   test("clean bound repo produces no contract-drift issues", async () => {
@@ -283,6 +310,7 @@ describe("doctor contract-drift remediation derives from structure", () => {
       repoDir,
       agentsMd: block + "\n",
       claudeMd: block + "\n",
+      repoExclusiveArtifacts: true,
     });
     // Write a wiki.json that has no doc/notes at all — only prd and decision
     await writeFile(
@@ -311,6 +339,7 @@ describe("doctor contract-drift remediation derives from structure", () => {
       repoDir,
       agentsMd: block + "\n",
       claudeMd: block + "\n",
+      repoExclusiveArtifacts: true,
     });
     // Write a wiki.json with notes as a top-level kind (10-kind migration)
     await writeFile(
@@ -349,7 +378,7 @@ describe("doctor --project scoping", () => {
       await writeFile(join(repoDir, "CLAUDE.md"), block + "\n");
       await writeFile(
         join(projDir, "_project.md"),
-        `---\nproject: ${name}\nstatus: planning\ncreated: ${today}\nlinked_repos:\n  - ${repoDir}\n---\n# ${name}\n`,
+        `---\nproject: ${name}\nstatus: planning\ncreated: ${today}\nrepo_exclusive_artifacts: true\nlinked_repos:\n  - ${repoDir}\n---\n# ${name}\n`,
       );
     }
 

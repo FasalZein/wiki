@@ -148,8 +148,10 @@ async function linkProject(args: string[]): Promise<CliResult> {
     throw error;
   }
 
-  // Stamp the pointer block into AGENTS.md and CLAUDE.md
-  await stampRepo(repoDir, projectName);
+  // Stamp the pointer block into AGENTS.md and CLAUDE.md. The block names the
+  // kinds THIS vault defines (ADR-0047) rather than a hardcoded taxonomy.
+  const linkStructure = await loadStructure(vaultRoot);
+  await stampRepo(repoDir, projectName, Object.keys(linkStructure.kinds));
 
   // Record repo in _project.md linked_repos list (idempotent).
   const raw = await readFile(projectMdPath, "utf8");

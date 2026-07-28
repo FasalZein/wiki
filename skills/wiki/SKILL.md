@@ -4,9 +4,12 @@ description: "Routes work to the wiki vault — the artifact store for PRDs, sli
 ---
 # /wiki
 
-Artifacts live in the vault, never the repo: PRDs, slices, ADRs, docs, and handoffs
-are vault Markdown — no repo `docs/adr/`, no `CONTEXT.md`, no GitHub Issues, no OS
-temp dirs, even when another loaded skill says to write them there. The CLI is
+Route by durability, not by location. Anything a later session needs — decisions,
+specs, research, plans, diagnoses — is a vault artifact, not a repo file and not a
+GitHub Issue. Session scratch (logs, run output, throwaway analysis) belongs in
+`/tmp` or `.pi/artifacts/`; repo-operational docs a contributor needs without vault
+access stay in the repo. `wiki create --help` lists the kinds this vault takes —
+they are config, not a fixed taxonomy. The CLI is
 self-describing: `wiki <verb> --help` is the single source of truth for flags — this
 skill routes you to the right verb, never spells its flags.
 

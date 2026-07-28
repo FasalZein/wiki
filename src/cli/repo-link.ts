@@ -10,7 +10,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 /** Increment this when the block format changes incompatibly. */
-export const BLOCK_VERSION = 2;
+export const BLOCK_VERSION = 3;
 
 const BEGIN_RE = /<!-- wiki:begin v\d+ project=[^\s]+ -->/;
 const BEGIN_CAPTURE_RE = /<!-- wiki:begin v\d+ project=(\S+) -->/;
@@ -36,15 +36,35 @@ export async function readLinkedProject(repoDir: string): Promise<string | null>
   return null;
 }
 
-export function buildPointerBlock(project: string): string {
+/**
+ * The repo's pointer block: what binds this repo to a vault project, and the
+ * storage rule an agent reads before it writes anything.
+ *
+ * ADR-0047 changed both halves. The kind list is GENERATED from the active
+ * vault's `wiki.json` rather than hardcoded — the v2 block named "PRDs, slices,
+ * ADRs, decisions, docs, glossary terms, and handoffs" for every vault, including
+ * "glossary", which was never a kind. And the rule is tiered by DURABILITY
+ * instead of banning locations: v2 forbade `CONTEXT.md`, `docs/adr/`, and "OS
+ * temp dirs" outright, which also forbade the scratch space a session legitimately
+ * needs. Durable knowledge earns a vault artifact; a throwaway log does not.
+ *
+ * `kinds` is optional so a caller without a loaded vault still stamps a valid
+ * binding — the block then states the rule without enumerating kinds.
+ */
+export function buildPointerBlock(project: string, kinds?: readonly string[]): string {
+  const durable =
+    kinds !== undefined && kinds.length > 0
+      ? `Durable project knowledge (${kinds.join(", ")}) lives in the wiki vault under project \`${project}\` — not in this repo, not in GitHub Issues.`
+      : `Durable project knowledge lives in the wiki vault under project \`${project}\` — not in this repo, not in GitHub Issues.`;
   const lines = [
     `<!-- wiki:begin v${BLOCK_VERSION} project=${project} -->`,
     `## Wiki vault`,
     ``,
-    `All PRDs, slices, ADRs, decisions, docs, glossary terms, and handoffs for this project live in the wiki vault (project: ${project}), **never in this repo and never in GitHub Issues** — no repo \`CONTEXT.md\`, no \`docs/adr/\`, no OS temp dirs, even when a skill says to write them.`,
+    durable,
     ``,
-    `- For any delivery work, load the \`wiki\` skill first.`,
-    `- Recall context with: \`wiki search "<query>" --project ${project}\``,
+    `- Recall before acting: \`wiki search "<query>" --project ${project}\``,
+    `- Session scratch — logs, run output, throwaway analysis — goes to \`/tmp\` or \`.pi/artifacts/\`, not the vault.`,
+    `- Repo-operational docs (README, CONTRIBUTING, anything a contributor needs without vault access) stay in this repo.`,
     ``,
     `<!-- wiki:end -->`,
   ];
@@ -55,7 +75,7 @@ export function buildPointerBlock(project: string): string {
  * Stamp the pointer block at the top of `filePath`.
  * Creates the file if absent. Replaces any existing wiki block idempotently.
  */
-export async function stampPointerBlock(filePath: string, project: string): Promise<void> {
+export async function stampPointerBlock(filePath: string, project: string, kinds?: readonly string[]): Promise<void> {
   let existing = "";
   try {
     existing = await readFile(filePath, "utf8");
@@ -66,7 +86,7 @@ export async function stampPointerBlock(filePath: string, project: string): Prom
     // File doesn't exist — start with empty string
   }
 
-  const block = buildPointerBlock(project);
+  const block = buildPointerBlock(project, kinds);
   const newContent = spliceBlock(existing, block);
   await writeFile(filePath, newContent, "utf8");
 }
@@ -110,8 +130,8 @@ export const LINK_FILES = ["AGENTS.md", "CLAUDE.md"] as const;
 /**
  * Stamp all target files in `repoDir` for the given project.
  */
-export async function stampRepo(repoDir: string, project: string): Promise<void> {
+export async function stampRepo(repoDir: string, project: string, kinds?: readonly string[]): Promise<void> {
   await Promise.all(
-    LINK_FILES.map((file) => stampPointerBlock(join(repoDir, file), project)),
+    LINK_FILES.map((file) => stampPointerBlock(join(repoDir, file), project, kinds)),
   );
 }

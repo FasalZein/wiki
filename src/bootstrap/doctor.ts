@@ -9,6 +9,7 @@ import { loadStructure, type Structure } from "../artifacts/registry";
 import { slugifyTitle } from "../artifacts/store";
 import { withProjectLock } from "../artifacts/lock";
 import { BLOCK_VERSION } from "../cli/repo-link";
+import { loadProjectConfig } from "../config/project";
 import { exists } from "../util";
 
 export type DriftIssue = {
@@ -313,7 +314,9 @@ export async function checkProjectRepoBindings(vaultPath: string, project: strin
       }
     }
 
-    issues.push(...(await checkRepoContractDrift(project, repoPath, structure)));
+    if (await repoExclusiveArtifacts(join(vaultPath, "projects", project))) {
+      issues.push(...(await checkRepoContractDrift(project, repoPath, structure)));
+    }
   }
 
   return issues;
@@ -321,8 +324,14 @@ export async function checkProjectRepoBindings(vaultPath: string, project: strin
 
 /**
  * Contract-drift check (ADR-0032 Layer 2): a bound repo must not carry the artifacts
- * upstream skills try to write locally — a root CONTEXT.md (glossary) or docs/adr/.
+ * upstream skills try to write locally — a root CONTEXT.md or docs/adr/.
  * Prevention via guidance is probabilistic; this is the detection net.
+ *
+ * ADR-0047 made it OPT-IN (`repo_exclusive_artifacts: true` in _project.md).
+ * Storage is tiered by durability, not by banned location, and a repo's
+ * CONTEXT.md is as often a deliberate contributor-facing file as it is drift —
+ * a distinction only the project can make. Vaults that want the old net keep it
+ * by setting the flag.
  */
 
 /** Derive the remediation command for a CONTEXT.md contract-drift issue.
@@ -340,6 +349,16 @@ function contextMdRemediationCmd(project: string, structure: Structure): string 
     return `wiki create notes --project ${project}`;
   }
   return `wiki create <kind> --project ${project}`;
+}
+
+/** The project's opt-in for repo contract-drift policing (ADR-0047). A project
+ *  whose config cannot be read is not opted in. */
+async function repoExclusiveArtifacts(projectPath: string): Promise<boolean> {
+  try {
+    return (await loadProjectConfig(projectPath)).repo_exclusive_artifacts;
+  } catch {
+    return false;
+  }
 }
 
 async function checkRepoContractDrift(project: string, repoPath: string, structure: Structure): Promise<DriftIssue[]> {
