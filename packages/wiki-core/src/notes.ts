@@ -29,7 +29,8 @@ export function parseNoteText(text: string): { frontmatter: Record<string, unkno
   const match = /^\uFEFF?---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(text);
   if (!match) return { frontmatter: {}, body: text };
   try {
-    const data: unknown = matter(`---\n${match[1] ?? ""}\n---\n`).data;
+    // Passing options bypasses gray-matter's cache, which otherwise retains failed parses.
+    const data: unknown = matter(`---\n${match[1] ?? ""}\n---\n`, { language: "yaml" }).data;
     if (!isObject(data)) throw new Error("frontmatter must be a YAML mapping");
     return { frontmatter: data, body: text.slice(match[0].length) };
   } catch (error) {

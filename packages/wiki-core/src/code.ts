@@ -1,8 +1,10 @@
+import { randomUUID } from "node:crypto";
+import * as path from "node:path";
 import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
-import { type RecordResult, recordObservation } from "./sources.ts";
-import type { Vault } from "./store.ts";
-import { assertRequestId, WikiError } from "./types.ts";
+import { type RecordResult, type CodeLocator, loadObservation, recordObservation, verifyObservationBlobs } from "./sources.ts";
+import { canonicalJson, createFileExclusive, isDigest, isObject, readJsonRecord, sha256, type Vault, wikiPath } from "./store.ts";
+import { assertRequestId, type Digest, SCHEMA_VERSION, WikiError } from "./types.ts";
 
 /** A configured repository resolved once to an immutable local commit. */
 export type ResolvedRepo =
@@ -10,7 +12,8 @@ export type ResolvedRepo =
   | { ok: false; repo: string; reason: string };
 
 function git(repoPath: string, args: string[]): Buffer {
-  return execFileSync("git", ["-C", repoPath, ...args], {
+  // Replacement refs are mutable indirections, not part of an immutable commit's identity.
+  return execFileSync("git", ["--no-replace-objects", "-C", repoPath, ...args], {
     stdio: ["ignore", "pipe", "pipe"],
     maxBuffer: Number.POSITIVE_INFINITY,
   });
@@ -56,10 +59,18 @@ export function readAtCommit(repo: Extract<ResolvedRepo, { ok: true }>, path: st
   return new Uint8Array(git(repo.path, ["cat-file", "blob", oid]));
 }
 
-/**
- * Capture committed code files. The ref resolves once; every path is read from that commit.
- * With a request id, observation ids are `<requestId>.<index>` in path order.
- */
+interface CodeCaptureRequest {
+  schema: typeof SCHEMA_VERSION;
+  id: string;
+  repo: string;
+  repoPath: string;
+  ref: string;
+  commit: string;
+  observedAt: string;
+  files: { path: string; digest: Digest; observationId: string }[];
+}
+
+/** Capture committed files, binding the full ordered snapshot before any source effects. */
 export function captureCode(vault: Vault, repoName: string, paths: string[], requestId?: string): RecordResult[] {
   if (paths.length === 0) throw new WikiError("usage", "capture code needs at least one --path");
   paths.forEach(assertRepoPath);
@@ -70,14 +81,62 @@ export function captureCode(vault: Vault, repoName: string, paths: string[], req
   const files = paths.map((p) => {
     const bytes = readAtCommit(repo, p);
     if (bytes === null) throw new WikiError("not_found", `${p} is not a file at ${repo.ref} (${repo.commit})`);
-    return { p, bytes };
+    return { p, bytes, digest: sha256(bytes) };
   });
-  return files.map(({ p, bytes }, i) => {
-    return recordObservation(vault, {
-      locator: { kind: "code", repo: repo.repo, repoPath: repo.path, path: p, ref: repo.ref, commit: repo.commit, scope: "local-commit" },
-      original: { bytes, mediaType: "application/octet-stream" },
-      extracted: null,
-      ...(requestId === undefined ? {} : { requestId: `${requestId}.${i}` }),
-    });
+  let claimed: CodeCaptureRequest = {
+    schema: SCHEMA_VERSION, id: requestId ?? `capture-${randomUUID()}`,
+    repo: repo.repo, repoPath: repo.path, ref: repo.ref, commit: repo.commit,
+    observedAt: new Date().toISOString(),
+    files: files.map((file) => ({ path: file.p, digest: file.digest, observationId: `obs-${randomUUID()}` })),
+  };
+  if (requestId !== undefined) {
+    const claimFile = wikiPath(vault, "code-requests", `${requestId}.json`);
+    if (!createFileExclusive(vault, claimFile, `${JSON.stringify(claimed, null, 2)}\n`)) {
+      const prior = parseCodeRequest(readJsonRecord(claimFile), requestId);
+      const identity = (r: CodeCaptureRequest) => canonicalJson({
+        repo: r.repo, repoPath: r.repoPath, ref: r.ref, commit: r.commit,
+        files: r.files.map((f) => ({ path: f.path, digest: f.digest })),
+      });
+      if (identity(prior) !== identity(claimed)) throw new WikiError("conflict", `code capture request ${requestId} already binds different inputs`);
+      claimed = prior;
+    }
+  }
+  const effects = files.map((file, i) => {
+    const bound = claimed.files[i];
+    if (!bound || bound.path !== file.p || bound.digest !== file.digest) throw new WikiError("damaged", "code capture request does not match its captured files");
+    return { ...file, observationId: bound.observationId };
   });
+  const locator = (p: string): CodeLocator => ({ kind: "code", repo: claimed.repo, repoPath: claimed.repoPath, path: p, ref: claimed.ref, commit: claimed.commit, scope: "local-commit" });
+  // Validate all retained effects before adding any missing effect during an identical resume.
+  for (const file of claimed.files) {
+    if (!fs.existsSync(wikiPath(vault, "sources", `${file.observationId}.json`))) continue;
+    const prior = loadObservation(vault, file.observationId);
+    verifyObservationBlobs(vault, prior);
+    if (canonicalJson(prior.locator) !== canonicalJson(locator(file.path)) || prior.original.digest !== file.digest ||
+        prior.original.mediaType !== "application/octet-stream" || prior.extracted !== null) {
+      throw new WikiError("damaged", `code capture effect ${file.observationId} differs from its request claim`);
+    }
+  }
+  return effects.map(({ p, bytes, observationId }) => recordObservation(vault, {
+    locator: locator(p), original: { bytes, mediaType: "application/octet-stream" }, extracted: null,
+    observedAt: claimed.observedAt, requestId: observationId,
+  }));
+}
+
+function parseCodeRequest(raw: Record<string, unknown>, id: string): CodeCaptureRequest {
+  const bad = (field: string) => new WikiError("damaged", `code capture request ${id} is malformed: ${field}`);
+  if (raw.id !== id) throw bad("id");
+  if (typeof raw.repo !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(raw.repo)) throw bad("repo");
+  if (typeof raw.repoPath !== "string" || !path.isAbsolute(raw.repoPath) || raw.repoPath.includes("\0")) throw bad("repoPath");
+  if (typeof raw.ref !== "string" || raw.ref === "" || raw.ref.startsWith("-") || raw.ref.includes("\0")) throw bad("ref");
+  if (typeof raw.commit !== "string" || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(raw.commit)) throw bad("commit");
+  if (typeof raw.observedAt !== "string" || Number.isNaN(Date.parse(raw.observedAt))) throw bad("observedAt");
+  if (!Array.isArray(raw.files) || raw.files.length === 0) throw bad("files");
+  const files = raw.files.map((f: unknown) => {
+    if (!isObject(f) || typeof f.path !== "string" || !isDigest(f.digest) || typeof f.observationId !== "string") throw bad("file identity");
+    try { assertRepoPath(f.path); assertRequestId(f.observationId); } catch { throw bad("file locator"); }
+    return { path: f.path, digest: f.digest, observationId: f.observationId };
+  });
+  if (new Set(files.map((f) => f.observationId)).size !== files.length) throw bad("duplicate observation identity");
+  return { schema: SCHEMA_VERSION, id, repo: raw.repo, repoPath: raw.repoPath, ref: raw.ref, commit: raw.commit, observedAt: raw.observedAt, files };
 }

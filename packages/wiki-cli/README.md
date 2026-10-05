@@ -45,7 +45,7 @@ Original bytes and extracted text are stored as separate content digests. The sa
 HTML charset handling follows the HTML Standard in two places:
 
 - A transport `charset` that this Node build can decode wins over a `<meta>` charset.
-- A `<meta>` charset is read only from the first 1024 bytes. Authors must place that declaration inside those bytes. A declaration after that prefix is ignored, and the bytes are then decoded as UTF-8. Invalid UTF-8 fails instead of being guessed.
+- An active `<meta>` charset outside comments is read only from the first 1024 bytes. Authors must place that declaration inside those bytes. A declaration after that prefix is ignored, and the bytes are then decoded as UTF-8. Invalid UTF-8 fails instead of being guessed.
 
 Pandoc's HTML reader drops script and style contents before this CLI sees them. Those strings are not retained and are not run. Iframe fallback text is kept, and the iframe URL is not fetched. If Pandoc still emits a `RawBlock` or `RawInline`, the observation records that omission and the raw markup is not copied into the extracted text.
 
@@ -59,7 +59,7 @@ Cancellation is the process `SIGINT` or `SIGTERM` signal, which aborts the HTTP 
 
 Run the private packages from this repository with its declared dependencies available. Node must be at least 22.18.0. Node 26.3.0 was tested. Node runs the source TypeScript with built-in type stripping; there is no compilation or root `dist` output. A published package, a global install, and Windows execution are not verified.
 
-The core uses the existing `gray-matter` 4.0.3 YAML engine (`js-yaml` safe loading, 3.14.2 in the tested installation). It parses only YAML frontmatter. Language-tagged JavaScript frontmatter is never evaluated. Normal YAML comments, quoted escapes and unrelated nested properties are supported. Note IDs and authorities must be strings. The note digest covers exact file bytes, including frontmatter and whitespace; meaningful external edits do not depend on modification time.
+The core uses the existing `gray-matter` 4.0.3 YAML engine (`js-yaml` safe loading, 3.14.2 in the tested installation). It parses only YAML frontmatter and bypasses gray-matter's failed-parse cache. Language-tagged JavaScript frontmatter is never evaluated. Normal YAML comments, quoted escapes and unrelated nested properties are supported. Note IDs and authorities must be strings. The note digest covers exact file bytes, including frontmatter and whitespace; meaningful external edits do not depend on modification time.
 
 ## Referenced notes
 
@@ -73,10 +73,21 @@ Use `capture text` or `capture file` for an imported document snapshot that does
 
 ## Evidence boundaries
 
-A code observation binds to the canonical local repository path, configured reference, immutable commit and source path. Remapping a repository key or reference needs a new review even if file bytes match. An unchanged source at a later commit on the same binding can remain consistent with the reviewed content. Reads never fetch a remote repository.
+A code observation binds to the canonical local repository path, configured reference, immutable commit and source path. Remapping a repository key or reference needs a new review even if file bytes match. An unchanged source at a later commit on the same binding can remain consistent with the reviewed content. All Git evidence lookups disable replacement-object interpretation, including commit resolution and blob reads. Reads never fetch a remote repository.
 
 Checks record caller-asserted provenance, not authenticated identity or owner approval. `authenticated` must remain `false`; a damaged record cannot assert otherwise. Missing or malformed relevant records, unsupported schemas, lost snapshots and inconsistent byte counts cannot produce attested status. Existing early pilot code observations without the required repository binding path are invalid evidence; there is no migration or guessed binding repair in this slice.
 
 Replaying an identical request keeps its original recording time. Different content or other provenance under that ID conflicts. Use a new request ID for a distinct observation or review, including a new review of identical bytes. If the latest recording time has conflicting check outcomes, the read reports invalid evidence with an ambiguous-ordering reason. A genuinely later review can resolve that ordering. Request spelling cannot break a conflict in favor of positive evidence.
 
 Check recording retains immutable evidence and does not overwrite Markdown. This is not an automatic publication feature or a guarantee of coordination with Obsidian writers.
+
+
+### Immutable request claims
+
+Check requests are claimed once per vault in `.wiki/check-requests/<id>.json`, before per-note evidence effects. The exclusive immutable claim records the selected check inputs and time. A same-ID request with different inputs conflicts before note effects. Identical concurrent writers reconcile the same retained result. A claim without its evidence effect is incomplete, not completed or attested; an identical explicit retry can finish that effect. Missing, damaged or inconsistent claims fail closed. An undecodable global check claim has unknown note relevance, so derived/intent reads conservatively report invalid evidence instead of skipping it.
+
+Code capture with `--request-id` claims the whole ordered input in `.wiki/code-requests/<id>.json`: repository binding, resolved immutable commit, every path and digest, and assigned observation IDs. Changing order, cardinality, binding or resolved snapshot under that ID conflicts before new source effects. If the configured branch moved, use a new request ID to capture that new snapshot. An interrupted identical snapshot can resume missing effects using its original observation IDs and retrieval time. Existing effects are validated before more effects are retained.
+
+Code observation IDs are independently assigned identities returned by the operation. They are not derived as `<request-id>.<index>` and cannot alias an unrelated ordinal-looking import request. Capture without a request ID creates distinct observations and makes no replay/recovery promise.
+
+These request records are retained operation inputs, not a scheduler or job journal. They coordinate cooperating core/CLI writers only. They do not coordinate Obsidian publication, authenticate a checker, or establish exactly-once remote execution or billing. This undistributed disposable-vault implementation has no migration for earlier check evidence lacking its required claim; reads cannot treat that evidence as positive. No existing vault is rewritten automatically.

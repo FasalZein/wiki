@@ -84,45 +84,51 @@ export function recordCheck(vault: Vault, input: RecordCheckInput): { check: Che
     recordedAt: input.recordedAt ?? new Date().toISOString(),
   };
 
-  // Replay before any write: same id anywhere in the evidence log.
   if (Number.isNaN(Date.parse(check.recordedAt))) throw new WikiError("invalid_input", "recordedAt must be a valid time");
+  if (note.digest !== input.noteDigest) {
+    if (hasBlob(vault, input.noteDigest)) getBlob(vault, input.noteDigest);
+    else throw new WikiError("conflict", `reviewed note revision ${input.noteDigest} is neither current (${note.digest}) nor retained; read and review the current note`);
+  }
 
-  const existing = findCheckFile(vault, input.requestId);
-  if (existing) {
-    const prior = parseCheck(readJsonRecord(existing), path.basename(existing), path.basename(path.dirname(existing)));
-    const same = (c: CheckRecord) => canonicalJson({ ...c, recordedAt: null });
-    if (same(prior) !== same(check)) {
+  // One immutable vault-wide claim selects the inputs and recording time before note effects.
+  // A claim is not completion: an identical writer can finish its missing evidence record.
+  const claimFile = checkRequestFile(vault, input.requestId);
+  let claimed = check;
+  if (!createFileExclusive(vault, claimFile, `${JSON.stringify(check, null, 2)}\n`)) {
+    claimed = loadCheckRequest(vault, input.requestId);
+    const identity = (c: CheckRecord) => canonicalJson({ ...c, recordedAt: null });
+    if (identity(claimed) !== identity(check)) {
       throw new WikiError("conflict", `check request ${input.requestId} already recorded different inputs`);
     }
-    return { check: prior, replayed: true };
   }
-
-  if (note.digest === input.noteDigest) {
-    putBlob(vault, note.bytes);
-  } else if (hasBlob(vault, input.noteDigest)) {
-    getBlob(vault, input.noteDigest);
-  } else {
-    throw new WikiError(
-      "conflict",
-      `reviewed note revision ${input.noteDigest} is neither current (${note.digest}) nor retained; read and review the current note`,
-    );
+  const file = path.join(evidenceDir(vault, claimed.noteId), `${claimed.id}.json`);
+  if (fs.existsSync(file)) {
+    verifyCheckEffect(vault, claimed, file);
+    getBlob(vault, claimed.noteDigest);
+    return { check: claimed, replayed: true };
   }
-
-  const file = path.join(evidenceDir(vault, note.id), `${input.requestId}.json`);
-  if (!createFileExclusive(vault, file, `${JSON.stringify(check, null, 2)}\n`)) {
-    throw new WikiError("conflict", `check request ${input.requestId} was recorded concurrently`);
-  }
-  return { check, replayed: false };
+  if (note.digest === claimed.noteDigest) putBlob(vault, note.bytes);
+  getBlob(vault, claimed.noteDigest);
+  const created = createFileExclusive(vault, file, `${JSON.stringify(claimed, null, 2)}\n`);
+  if (!created) verifyCheckEffect(vault, claimed, file);
+  return { check: claimed, replayed: !created };
 }
 
-function findCheckFile(vault: Vault, requestId: string): string | null {
-  const root = wikiPath(vault, "evidence");
-  if (!fs.existsSync(root)) return null;
-  for (const dir of fs.readdirSync(root)) {
-    const file = path.join(root, dir, `${requestId}.json`);
-    if (fs.existsSync(file)) return file;
+function checkRequestFile(vault: Vault, id: string): string {
+  return wikiPath(vault, "check-requests", `${assertRequestId(id)}.json`);
+}
+
+function loadCheckRequest(vault: Vault, id: string): CheckRecord {
+  const raw = readJsonRecord(checkRequestFile(vault, id));
+  if (typeof raw.noteId !== "string") throw new WikiError("damaged", `check request ${id} has no note identity`);
+  return parseCheck(raw, `${id}.json`, raw.noteId);
+}
+
+function verifyCheckEffect(vault: Vault, claimed: CheckRecord, file: string): void {
+  const effect = parseCheck(readJsonRecord(file), `${claimed.id}.json`, claimed.noteId);
+  if (canonicalJson(effect) !== canonicalJson(claimed)) {
+    throw new WikiError("damaged", `check effect ${claimed.id} differs from its vault-wide request claim`);
   }
-  return null;
 }
 
 /**
@@ -131,12 +137,30 @@ function findCheckFile(vault: Vault, requestId: string): string | null {
  */
 export function loadChecks(vault: Vault, noteId: string): CheckRecord[] {
   const dir = evidenceDir(vault, noteId);
-  if (!fs.existsSync(dir)) return [];
-  return fs.readdirSync(dir).map((name) => parseCheck(readJsonRecord(path.join(dir, name)), name, noteId));
+  const checks = fs.existsSync(dir)
+    ? fs.readdirSync(dir).map((name) => parseCheck(readJsonRecord(path.join(dir, name)), name, noteId))
+    : [];
+  for (const check of checks) {
+    const claimed = loadCheckRequest(vault, check.id);
+    if (canonicalJson(claimed) !== canonicalJson(check)) throw new WikiError("damaged", `check ${check.id} differs from its request claim`);
+  }
+  const requests = wikiPath(vault, "check-requests");
+  if (fs.existsSync(requests)) {
+    // An undecodable global claim has unknown relevance; fail closed rather than skip it.
+    for (const name of fs.readdirSync(requests)) {
+      if (!name.endsWith(".json")) throw new WikiError("damaged", `malformed check request filename ${name}`);
+      const claimed = loadCheckRequest(vault, name.slice(0, -5));
+      if (claimed.noteId === noteId && !checks.some((c) => c.id === claimed.id)) {
+        throw new WikiError("damaged", `check request ${claimed.id} is incomplete: evidence record is missing`);
+      }
+    }
+  }
+  return checks;
 }
 
 function parseCheck(r: Record<string, unknown>, name: string, noteId: string): CheckRecord {
   const bad = (why: string) => new WikiError("damaged", `check record ${name} is malformed: ${why}`);
+  try { assertNoteId(noteId); } catch { throw bad("noteId"); }
   if (typeof r.id !== "string") throw bad("id");
   try { assertRequestId(r.id); } catch { throw bad("id"); }
   if (`${r.id}.json` !== name) throw bad("id does not match file name");

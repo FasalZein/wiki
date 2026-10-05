@@ -199,8 +199,10 @@ function attributes(source: string): Map<string, string> {
 
 function metaCharset(bytes: Uint8Array): string | null {
   const head = Buffer.from(bytes.subarray(0, HTML_CHARSET_PRESCAN_BYTES)).toString("latin1");
-  for (const match of head.matchAll(/<meta\b([^>]*)>/gi)) {
-    const attrs = attributes(match[1] ?? "");
+  // Skip comments in the original byte prefix; do not join text around removed comments.
+  for (const match of head.matchAll(/<!--[\s\S]*?(?:-->|$)|<meta\b([^>]*)>/gi)) {
+    if (match[1] === undefined) continue;
+    const attrs = attributes(match[1]);
     const direct = attrs.get("charset");
     if (direct) return direct.toLowerCase();
     if (attrs.get("http-equiv")?.toLowerCase() !== "content-type") continue;

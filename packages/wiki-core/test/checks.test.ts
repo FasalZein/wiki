@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, test } from "node:test";
-import { createNote, importTextFile, initVault, readNote, recordCheck, WikiError } from "../src/index.ts";
+import { createNote, importTextFile, initVault, parseNoteText, readNote, recordCheck, WikiError } from "../src/index.ts";
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-check-acceptance-"));
 after(() => fs.rmSync(temp, { recursive: true, force: true }));
@@ -66,4 +66,24 @@ test("recording an already retained reviewed revision does not sample or overwri
   assert.equal(read.status, "changed");
   assert.equal(read.check?.noteDigest, input.noteDigest);
   assert.match(read.body, /unreviewed external change/);
+});
+
+test("review R3: repeated unsafe and malformed YAML keeps failing in the same process", () => {
+  const unsafe = '---\nid: cached-unsafe\nauthority: derived\nfunction: !!js/function "function () { return 42; }"\n---\nbody\n';
+  const malformed = '---\nid: cached-malformed\nauthority: derived\ntags: [broken\n---\nbody\n';
+  for (const input of [unsafe, malformed]) {
+    const invalid = (error: unknown) => error instanceof WikiError && error.code === "invalid_input";
+    assert.throws(() => parseNoteText(input), invalid);
+    assert.throws(() => parseNoteText(input), invalid, "unchanged bad YAML must never turn into an empty valid mapping");
+  }
+});
+
+test("review R3: a malformed duplicate cannot disappear from repeated reads of an attested note", () => {
+  const { vault, input } = fixture();
+  recordCheck(vault, { ...input, requestId: "checked", outcome: "supports" });
+  assert.equal(readNote(vault, "limit").status, "attested");
+  fs.writeFileSync(path.join(vault.root, "duplicate.md"), '---\nid: limit\nauthority: derived\nfunction: !!js/function "function () { return 42; }"\n---\nUnreviewed duplicate.\n');
+  const invalid = (error: unknown) => error instanceof WikiError && error.code === "invalid_input";
+  assert.throws(() => readNote(vault, "limit"), invalid);
+  assert.throws(() => readNote(vault, "limit"), invalid, "the same broken duplicate still exists");
 });

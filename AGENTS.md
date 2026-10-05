@@ -21,8 +21,8 @@
 
 ## Evidence and authored Markdown
 
-- Bind code evidence to its canonical repository path and configured local ref, not file bytes alone.
-- Parse authored frontmatter only as safe YAML data. Do not enable gray-matter's executable language engines or raw-byte identity filters.
+- Bind code evidence to its canonical repository path and configured local ref, not file bytes alone. Disable Git replacement objects for evidence lookups.
+- Parse authored frontmatter only as safe YAML data. Bypass gray-matter's failed-parse cache. Do not enable executable language engines or raw-byte identity filters.
 - Referenced notes need their own retained file digest. Do not inherit their trust or recursively attest a citation graph.
-- Fail closed on incomplete evidence and ambiguous equal-time outcomes. Checker metadata is asserted provenance, never authenticated approval.
+- Fail closed on incomplete request claims and ambiguous equal-time outcomes. Claim vault-wide check identity atomically before effects; a claim does not prove completion. Checker metadata is asserted provenance, never authenticated approval.
 - Synchronize race and cancellation tests at observable source or extractor events. Do not add polling delays to force an interleaving.

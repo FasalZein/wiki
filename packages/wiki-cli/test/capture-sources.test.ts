@@ -633,3 +633,23 @@ process.stdin.resume();
     }
   });
 });
+
+describe("review R5: commented charset metadata", () => {
+  test("commented meta declarations do not corrupt real UTF-8 HTML extraction", async () => {
+    const vault = await freshVault();
+    const fixture = await serve((url, response) => {
+      const comment = url === "/http-equiv"
+        ? '<meta http-equiv="content-type" content="text/html; charset=windows-1252">'
+        : '<meta charset="windows-1252">';
+      response.writeHead(200, { "content-type": "text/html" });
+      response.end(`<!DOCTYPE html><!-- ${comment} --><meta charset="utf-8"><p>café</p>`);
+    });
+    try {
+      for (const endpoint of ["/charset", "/http-equiv"]) {
+        const observation = (await ok(vault, "capture", "web", `${fixture.origin}${endpoint}`)).observation;
+        assert.equal(observation.extracted.extractor.charset, "utf-8");
+        assert.equal((await ok(vault, "source", "show", observation.id, "--text")).text, "café");
+      }
+    } finally { await fixture.close(); }
+  });
+});

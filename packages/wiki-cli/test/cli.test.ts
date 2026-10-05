@@ -1,8 +1,10 @@
 // Spawns the real CLI under Node against disposable vaults and Git repositories.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import * as fs from "node:fs";
+import { once } from "node:events";
+import { createInterface } from "node:readline";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, describe, test } from "node:test";
@@ -519,11 +521,12 @@ process.exit(result.status || 0);
     };
     const capture = wrapped("capture", "code", "--repo", "app", "--path", "a.txt", "--path", "b.txt", "--request-id", "two-files");
     assert.deepEqual(capture.observations.map((o: any) => o.locator.commit), [zero, zero]);
-    assert.equal(ok(cli(vault, "source", "show", "two-files.0", "--text")).text, "A zero\n");
-    assert.equal(ok(cli(vault, "source", "show", "two-files.1", "--text")).text, "B zero\n");
+    const [firstSource, secondSource] = capture.observations;
+    assert.equal(ok(cli(vault, "source", "show", firstSource.id, "--text")).text, "A zero\n");
+    assert.equal(ok(cli(vault, "source", "show", secondSource.id, "--text")).text, "B zero\n");
     assert.equal(git(repo, "rev-parse", "main"), one);
     const note = ok(cli(vault, "note", "create", "--id", "two", "--authority", "derived", "--title", "Two", "--body", "Both say zero.\n"));
-    ok(cli(vault, "check", "two", "--note-digest", note.digest, "--source", "two-files.0", "--source", "two-files.1", "--outcome", "supports", "--checker", "a", "--method", "human", "--request-id", "two-check"));
+    ok(cli(vault, "check", "two", "--note-digest", note.digest, "--source", firstSource.id, "--source", secondSource.id, "--outcome", "supports", "--checker", "a", "--method", "human", "--request-id", "two-check"));
     git(repo, "update-ref", "refs/heads/main", zero);
     fs.rmSync(marker);
     fs.writeFileSync(log, "");
@@ -583,5 +586,156 @@ describe("acceptance: missing bindings and lifecycle status", () => {
     assert.equal(read.status, "superseded");
     assert.equal(read.check, null);
     assert.equal(read.body, "An old policy.\n");
+  });
+});
+
+describe("review R1: Git replacement refs", () => {
+  test("changing replacement refs between blob lookups cannot change immutable evidence", () => {
+    const vault = freshVault();
+    const repo = freshRepo({ "a.txt": "A zero\n", "b.txt": "B zero\n" });
+    const zero = git(repo, "rev-parse", "HEAD");
+    const one = commit(repo, { "a.txt": "A one\n", "b.txt": "B one\n" }, "replacement");
+    git(repo, "update-ref", "refs/heads/main", zero);
+    ok(cli(vault, "repo", "add", "app", "--path", repo));
+    const wrapperDir = path.join(temp, `replace-wrapper-${++counter}`);
+    fs.mkdirSync(wrapperDir);
+    const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+    const marker = path.join(wrapperDir, "replaced");
+    const log = path.join(wrapperDir, "commands.jsonl");
+    fs.writeFileSync(path.join(wrapperDir, "git"), `#!${process.execPath}\n` + `
+const { spawnSync } = require('node:child_process');
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(args) + '\\n');
+const result = spawnSync(${JSON.stringify(realGit)}, args);
+if (args.includes('cat-file') && !fs.existsSync(${JSON.stringify(marker)})) {
+  fs.writeFileSync(${JSON.stringify(marker)}, 'replaced');
+  const change = spawnSync(${JSON.stringify(realGit)}, ['-C', ${JSON.stringify(repo)}, 'replace', ${JSON.stringify(zero)}, ${JSON.stringify(one)}]);
+  if (change.status !== 0) process.exit(change.status || 1);
+}
+process.stdout.write(result.stdout); process.stderr.write(result.stderr); process.exit(result.status || 0);
+`, { mode: 0o755 });
+    const captured = spawnSync(process.execPath, [BIN, "--vault", vault, "--json", "capture", "code", "--repo", "app", "--path", "a.txt", "--path", "b.txt", "--request-id", "replacement-race"], {
+      encoding: "utf8", env: { ...process.env, WIKI_VAULT: "", PATH: `${wrapperDir}${path.delimiter}${process.env.PATH}` },
+    });
+    assert.equal(captured.status, 0, captured.stderr);
+    const observations = JSON.parse(captured.stdout).observations;
+    assert.deepEqual(observations.map((o: any) => o.locator.commit), [zero, zero]);
+    assert.equal(git(repo, "rev-parse", "main"), zero, "the configured branch never moved");
+    assert.equal(ok(cli(vault, "source", "show", observations[0].id, "--text")).text, "A zero\n");
+    assert.equal(ok(cli(vault, "source", "show", observations[1].id, "--text")).text, "B zero\n");
+    const note = ok(cli(vault, "note", "create", "--id", "replacement", "--authority", "derived", "--title", "Replacement", "--body", "Both say zero.\n"));
+    ok(cli(vault, "check", "replacement", "--note-digest", note.digest, "--source", observations[0].id, "--source", observations[1].id, "--outcome", "supports", "--checker", "a", "--method", "human", "--request-id", "replacement-check"));
+    assert.equal(ok(cli(vault, "read", "replacement")).status, "attested", "reads also ignore replacement commits");
+    const blobZero = git(repo, "--no-replace-objects", "rev-parse", `${zero}:b.txt`);
+    const blobOne = git(repo, "--no-replace-objects", "rev-parse", `${one}:b.txt`);
+    git(repo, "replace", blobZero, blobOne);
+    assert.equal(ok(cli(vault, "read", "replacement")).status, "attested", "blob replacement is also disabled");
+    const commands: string[][] = fs.readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    assert.ok(commands.every((args) => args.includes("--no-replace-objects")));
+  });
+});
+
+describe("review R4: complete code capture request identity", () => {
+  for (const [label, initial, changed] of [
+    ["growing path list", ["a.txt"], ["a.txt", "b.txt"]],
+    ["shrinking path list", ["a.txt", "b.txt"], ["a.txt"]],
+    ["reordered path list", ["a.txt", "b.txt"], ["b.txt", "a.txt"]],
+  ] as const) {
+    test(label, () => {
+      const vault = freshVault();
+      const repo = freshRepo({ "a.txt": "A\n", "b.txt": "B\n" });
+      ok(cli(vault, "repo", "add", "app", "--path", repo));
+      const args = (paths: readonly string[]) => ["capture", "code", "--repo", "app", ...paths.flatMap((p) => ["--path", p]), "--request-id", "batch"];
+      ok(cli(vault, ...args(initial)));
+      const sources = path.join(vault, ".wiki/sources");
+      const before = fs.readdirSync(sources).sort().map((name) => [name, fs.readFileSync(path.join(sources, name), "utf8")]);
+      assert.equal(cli(vault, ...args(changed)).status, 3, "the full ordered input is part of the request");
+      assert.deepEqual(fs.readdirSync(sources).sort().map((name) => [name, fs.readFileSync(path.join(sources, name), "utf8")]), before, "conflict has no additional source effect");
+    });
+  }
+
+  test("a batch request never aliases a different observation request's ordinal-looking ID", () => {
+    const vault = freshVault();
+    const repo = freshRepo({ "a.txt": "A\n", "b.txt": "B\n" });
+    ok(cli(vault, "repo", "add", "app", "--path", repo));
+    const file = path.join(temp, `ordinal-${++counter}.txt`);
+    fs.writeFileSync(file, "Independent import.\n");
+    const existing = ok(cli(vault, "capture", "text", file, "--request-id", "batch.1")).observation;
+    const captured = ok(cli(vault, "capture", "code", "--repo", "app", "--path", "a.txt", "--path", "b.txt", "--request-id", "batch"));
+    assert.equal(captured.observations.length, 2);
+    assert.ok(captured.observations.every((o: any) => o.id !== existing.id));
+    assert.equal(ok(cli(vault, "source", "show", existing.id, "--text")).text, "Independent import.\n");
+  });
+});
+
+describe("review R4: interrupted capture recovery", () => {
+  for (const stopBeforeEffect of [1, 2]) test(`an identical batch resumes after interruption before source effect ${stopBeforeEffect}`, async () => {
+    const vault = freshVault();
+    const repo = freshRepo({ "a.txt": "A\n", "b.txt": "B\n" });
+    ok(cli(vault, "repo", "add", "app", "--path", repo));
+    const coreUrl = new URL("../../wiki-core/src/index.ts", import.meta.url).href;
+    const script = `
+const fs = require('node:fs');
+const { syncBuiltinESMExports } = require('node:module');
+const realLink = fs.linkSync;
+let sources = 0;
+fs.linkSync = (source, target) => {
+  if (target.includes('/sources/') && ++sources === ${stopBeforeEffect}) {
+    fs.writeSync(1, 'second-effect-pending\\n');
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
+  }
+  return realLink(source, target);
+};
+syncBuiltinESMExports();
+import(${JSON.stringify(coreUrl)}).then(core => core.captureCode(core.openVault(${JSON.stringify(vault)}), 'app', ['a.txt', 'b.txt'], 'resume-batch'));`;
+    const child = spawn(process.execPath, ["-e", script], { stdio: ["ignore", "pipe", "pipe"] });
+    child.stderr.resume();
+    const lines = createInterface({ input: child.stdout });
+    const closed = once(child, "close");
+    let boundIds: string[] = [];
+    try {
+      const [event] = await once(lines, "line");
+      assert.equal(event, "second-effect-pending");
+      const claim = JSON.parse(fs.readFileSync(path.join(vault, ".wiki/code-requests/resume-batch.json"), "utf8"));
+      boundIds = claim.files.map((f: any) => f.observationId);
+      assert.equal(boundIds.length, 2);
+      assert.equal(fs.existsSync(path.join(vault, ".wiki/sources")) ? fs.readdirSync(path.join(vault, ".wiki/sources")).length : 0, stopBeforeEffect - 1);
+    } finally {
+      child.kill("SIGKILL");
+      await closed;
+      lines.close();
+    }
+    const args = ["capture", "code", "--repo", "app", "--path", "a.txt", "--path", "b.txt", "--request-id", "resume-batch"];
+    const resumed = ok(cli(vault, ...args));
+    assert.deepEqual(resumed.observations.map((o: any) => o.id), boundIds);
+    assert.deepEqual(resumed.observations.map((o: any) => o.replayed), stopBeforeEffect === 1 ? [false, false] : [true, false]);
+    assert.equal(fs.readdirSync(path.join(vault, ".wiki/sources")).length, 2);
+    assert.ok(ok(cli(vault, ...args)).observations.every((o: any) => o.replayed));
+  });
+
+  test("a damaged batch claim fails closed before another source effect", () => {
+    const vault = freshVault();
+    const repo = freshRepo({ "a.txt": "A\n", "b.txt": "B\n" });
+    ok(cli(vault, "repo", "add", "app", "--path", repo));
+    const args = ["capture", "code", "--repo", "app", "--path", "a.txt", "--path", "b.txt", "--request-id", "damaged-batch"];
+    const original = ok(cli(vault, ...args));
+    const before = original.observations.map((o: any) => ok(cli(vault, "source", "show", o.id)));
+    fs.writeFileSync(path.join(vault, ".wiki/code-requests/damaged-batch.json"), '{"schema":1,');
+    assert.equal(cli(vault, ...args).status, 6);
+    assert.deepEqual(original.observations.map((o: any) => ok(cli(vault, "source", "show", o.id))), before);
+    assert.equal(fs.readdirSync(path.join(vault, ".wiki/sources")).length, 2);
+  });
+
+  test("a changed immutable capture snapshot conflicts without adding sources", () => {
+    const vault = freshVault();
+    const repo = freshRepo({ "a.txt": "A zero\n", "b.txt": "B zero\n" });
+    ok(cli(vault, "repo", "add", "app", "--path", repo));
+    const args = ["capture", "code", "--repo", "app", "--path", "a.txt", "--path", "b.txt", "--request-id", "immutable-batch"];
+    ok(cli(vault, ...args));
+    const before = fs.readdirSync(path.join(vault, ".wiki/sources")).sort();
+    commit(repo, { "b.txt": "B one\n" }, "changed snapshot");
+    assert.equal(cli(vault, ...args).status, 3);
+    assert.deepEqual(fs.readdirSync(path.join(vault, ".wiki/sources")).sort(), before);
   });
 });
