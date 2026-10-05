@@ -1,0 +1,11 @@
+{
+  "name": "@wiki/core",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Node-compatible knowledge core: Markdown notes, retained source snapshots, checks, and trust reads. No Pi dependency.",
+  "type": "module",
+  "exports": "./src/index.ts",
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}

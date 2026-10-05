@@ -1,0 +1,13 @@
+{
+  "name": "@wiki/cli",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Standalone wiki-cli over @wiki/core. Runs under Node without Pi or a background service.",
+  "type": "module",
+  "bin": {
+    "wiki-cli": "./bin/wiki-cli.js"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}
