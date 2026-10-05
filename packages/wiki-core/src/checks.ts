@@ -85,9 +85,11 @@ export function recordCheck(vault: Vault, input: RecordCheckInput): { check: Che
   };
 
   // Replay before any write: same id anywhere in the evidence log.
+  if (Number.isNaN(Date.parse(check.recordedAt))) throw new WikiError("invalid_input", "recordedAt must be a valid time");
+
   const existing = findCheckFile(vault, input.requestId);
   if (existing) {
-    const prior = readJsonRecord(existing) as unknown as CheckRecord;
+    const prior = parseCheck(readJsonRecord(existing), path.basename(existing), path.basename(path.dirname(existing)));
     const same = (c: CheckRecord) => canonicalJson({ ...c, recordedAt: null });
     if (same(prior) !== same(check)) {
       throw new WikiError("conflict", `check request ${input.requestId} already recorded different inputs`);
@@ -130,33 +132,40 @@ function findCheckFile(vault: Vault, requestId: string): string | null {
 export function loadChecks(vault: Vault, noteId: string): CheckRecord[] {
   const dir = evidenceDir(vault, noteId);
   if (!fs.existsSync(dir)) return [];
-  return fs.readdirSync(dir).map((name) => {
-    const file = path.join(dir, name);
-    const r = readJsonRecord(file);
-    const bad = (why: string) => new WikiError("damaged", `check record ${name} is malformed: ${why}`);
-    if (`${String(r.id)}.json` !== name) throw bad("id does not match file name");
-    if (r.noteId !== noteId) throw bad("noteId does not match evidence directory");
-    if (!isDigest(r.noteDigest)) throw bad("noteDigest");
-    if (!CHECK_OUTCOMES.includes(r.outcome as CheckOutcome)) throw bad("outcome");
-    if (typeof r.recordedAt !== "string" || Number.isNaN(Date.parse(r.recordedAt))) throw bad("recordedAt");
-    if (!isObject(r.checker) || typeof r.checker.name !== "string") throw bad("checker");
-    if (!Array.isArray(r.sources) || r.sources.length === 0) throw bad("sources");
-    for (const s of r.sources) {
-      if (!isObject(s) || typeof s.observationId !== "string" || !isDigest(s.digest)) throw bad("source entry");
-    }
-    return r as unknown as CheckRecord;
-  });
+  return fs.readdirSync(dir).map((name) => parseCheck(readJsonRecord(path.join(dir, name)), name, noteId));
 }
 
-/** Most recent check by recording time; ties break on id for determinism. */
+function parseCheck(r: Record<string, unknown>, name: string, noteId: string): CheckRecord {
+  const bad = (why: string) => new WikiError("damaged", `check record ${name} is malformed: ${why}`);
+  if (typeof r.id !== "string") throw bad("id");
+  try { assertRequestId(r.id); } catch { throw bad("id"); }
+  if (`${r.id}.json` !== name) throw bad("id does not match file name");
+  if (r.noteId !== noteId) throw bad("noteId does not match evidence directory");
+  if (!isDigest(r.noteDigest)) throw bad("noteDigest");
+  if (r.outcome !== "supports" && r.outcome !== "contradicts") throw bad("outcome");
+  if (typeof r.recordedAt !== "string" || Number.isNaN(Date.parse(r.recordedAt))) throw bad("recordedAt");
+  const checker = r.checker;
+  if (!isObject(checker) || typeof checker.name !== "string" || checker.name.trim() === "" ||
+      (checker.method !== "human" && checker.method !== "agent") || checker.authenticated !== false) throw bad("checker provenance");
+  if (!Array.isArray(r.sources) || r.sources.length === 0) throw bad("sources");
+  const sources = r.sources.map((s: unknown) => {
+    if (!isObject(s) || typeof s.observationId !== "string" || !isDigest(s.digest)) throw bad("source entry");
+    try { assertRequestId(s.observationId); } catch { throw bad("source observation id"); }
+    return { observationId: s.observationId, digest: s.digest };
+  });
+  return {
+    schema: SCHEMA_VERSION, id: r.id, noteId, noteDigest: r.noteDigest, sources, outcome: r.outcome,
+    checker: { name: checker.name, method: checker.method, authenticated: false }, recordedAt: r.recordedAt,
+  };
+}
+
+/** Most recent check. Conflicting outcomes at the latest time have no safe decisive ordering. */
 export function latestCheck(checks: CheckRecord[]): CheckRecord | null {
-  let latest: CheckRecord | null = null;
-  for (const c of checks) {
-    if (!latest) latest = c;
-    else {
-      const d = Date.parse(c.recordedAt) - Date.parse(latest.recordedAt);
-      if (d > 0 || (d === 0 && c.id > latest.id)) latest = c;
-    }
+  if (checks.length === 0) return null;
+  const latestTime = Math.max(...checks.map((c) => Date.parse(c.recordedAt)));
+  const latest = checks.filter((c) => Date.parse(c.recordedAt) === latestTime);
+  if (new Set(latest.map((c) => c.outcome)).size > 1) {
+    throw new WikiError("damaged", "ambiguous check ordering: latest checks have equal recording times and conflicting outcomes; record a later review");
   }
-  return latest;
+  return latest.sort((a, b) => a.id.localeCompare(b.id)).at(-1) ?? null;
 }

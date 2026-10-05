@@ -278,7 +278,9 @@ function renderInlines(value: unknown, limitations: Set<string>): string {
 }
 
 function renderTable(value: unknown, limitations: Set<string>): string {
-  const lines: string[] = [];
+  // Table captions are blocks, not cells; the cell walker alone loses their text.
+  const caption = renderBlocks(arrayAt(arrayAt(value, 1), 1), limitations);
+  const lines: string[] = caption === "" ? [] : [caption];
   const visit = (node: unknown): void => {
     if (Array.isArray(node)) {
       const cell = node[4];

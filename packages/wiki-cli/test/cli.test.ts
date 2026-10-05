@@ -1,5 +1,6 @@
 // Spawns the real CLI under Node against disposable vaults and Git repositories.
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -165,7 +166,8 @@ describe("code-backed checks", () => {
     fs.utimesSync(noteFile, before.atime, new Date(before.mtimeMs - 86_400_000));
     const r = ok(cli(vault, "read", id));
     assert.equal(r.status, "changed");
-    assert.match(r.body, /never/);
+    assert.equal(r.body, "Login never succeeds.\n");
+    assert.equal(r.digest, `sha256:${createHash("sha256").update(fs.readFileSync(noteFile)).digest("hex")}`);
     assert.notEqual(r.digest, r.check.noteDigest);
   });
 
@@ -322,5 +324,264 @@ describe("text import", () => {
     ok(cli(vault, "note", "create", "--id", "mine", "--authority", "personal", "--title", "Mine", "--body", "x\n"));
     const d = ok(cli(vault, "read", "mine")).digest;
     assert.equal(cli(vault, "check", "mine", "--note-digest", d, "--source", obs.id, "--outcome", "supports", "--checker", "a", "--method", "human", "--request-id", "c").status, 2);
+  });
+});
+
+describe("acceptance: bound repository identity", () => {
+  test("remapping a repo key to another repo with identical bytes invalidates its check", () => {
+    const { vault, id } = checkedCodeNote();
+    const replacement = freshRepo({ "src/auth.ts": "export const login = () => true;\n" });
+    ok(cli(vault, "repo", "add", "app", "--path", replacement, "--ref", "main"));
+    const read = ok(cli(vault, "read", id));
+    assert.equal(read.status, "changed");
+    assert.match(read.sources[0].reason, /binding/);
+  });
+
+  test("switching a configured ref to an identical branch invalidates its check", () => {
+    const { vault, repo, id } = checkedCodeNote();
+    git(repo, "branch", "review-branch", "main");
+    ok(cli(vault, "repo", "add", "app", "--path", repo, "--ref", "review-branch"));
+    assert.equal(ok(cli(vault, "read", id)).status, "changed");
+  });
+});
+
+describe("acceptance: complete retained evidence validation", () => {
+  for (const [label, checker] of [
+    ["unrecognized checker method", { name: "alice", method: "oracle", authenticated: false }],
+    ["claimed authenticated identity", { name: "alice", method: "human", authenticated: true }],
+    ["missing checker provenance", { name: "alice" }],
+    ["empty checker", { name: "", method: "human", authenticated: false }],
+  ] as const) {
+    test(label, () => {
+      const { vault, id } = checkedCodeNote();
+      const file = path.join(vault, ".wiki/evidence", id, `chk-${id}.json`);
+      const record = JSON.parse(fs.readFileSync(file, "utf8"));
+      fs.writeFileSync(file, JSON.stringify({ ...record, checker }));
+      assert.equal(ok(cli(vault, "read", id)).status, "invalid");
+    });
+  }
+
+  for (const [label, mutate] of [
+    ["invalid observation time", (r: any) => { r.observedAt = "not-a-time"; }],
+    ["wrong code scope", (r: any) => { r.locator.scope = "remote-current"; }],
+    ["traversing code path", (r: any) => { r.locator.path = "../sentinel"; }],
+    ["missing repository binding identity", (r: any) => { delete r.locator.repoPath; }],
+    ["wrong original byte count", (r: any) => { r.original.size += 1; }],
+  ] as const) {
+    test(label, () => {
+      const { vault, id, obs } = checkedCodeNote();
+      const file = path.join(vault, ".wiki/sources", `${obs.id}.json`);
+      const record = JSON.parse(fs.readFileSync(file, "utf8"));
+      mutate(record);
+      fs.writeFileSync(file, JSON.stringify(record));
+      assert.equal(ok(cli(vault, "read", id)).status, "invalid");
+    });
+  }
+
+  test("missing extractor provenance cannot attest retained text", () => {
+    const vault = freshVault();
+    const file = path.join(temp, `provenance-${++counter}.txt`);
+    fs.writeFileSync(file, "Claim source.\n");
+    const obs = ok(cli(vault, "capture", "text", file, "--request-id", "src")).observation;
+    const note = ok(cli(vault, "note", "create", "--id", "n", "--authority", "derived", "--title", "N", "--body", "Claim.\n"));
+    ok(cli(vault, "check", "n", "--note-digest", note.digest, "--source", obs.id, "--outcome", "supports", "--checker", "a", "--method", "human", "--request-id", "c"));
+    const recordPath = path.join(vault, ".wiki/sources/src.json");
+    const record = JSON.parse(fs.readFileSync(recordPath, "utf8"));
+    record.extracted.extractor = {};
+    fs.writeFileSync(recordPath, JSON.stringify(record));
+    assert.equal(ok(cli(vault, "read", "n")).status, "invalid");
+  });
+
+  test("a missing retained reviewed note cannot yield positive evidence", () => {
+    const { vault, id, read } = checkedCodeNote();
+    const hex = read.digest.slice("sha256:".length);
+    fs.rmSync(path.join(vault, ".wiki/objects/sha256", hex.slice(0, 2), hex));
+    assert.equal(ok(cli(vault, "read", id)).status, "invalid");
+  });
+});
+
+describe("acceptance: safe Obsidian YAML", () => {
+  test("inline comments and quoted scalars preserve authored identity and body", () => {
+    const vault = freshVault();
+    fs.writeFileSync(path.join(vault, "notes/edited.md"), "---\nid: edited # identity\nauthority: derived # evidence-backed\ntitle: 'Owner''s note' # title\ntags: [one, two]\ntrust: attested # untrusted\n---\nBody with  two spaces.\n");
+    const read = ok(cli(vault, "read", "edited"));
+    assert.equal(read.status, "unchecked");
+    assert.equal(read.title, "Owner's note");
+    assert.equal(read.body, "Body with  two spaces.\n");
+    assert.ok(read.reasons.some((reason: string) => reason.includes('"trust"')));
+  });
+
+  test("escaped quoted identity is found without a raw-byte prefilter", () => {
+    const vault = freshVault();
+    fs.writeFileSync(path.join(vault, "notes/renamed.md"), String.raw`---
+id: "\u0065scaped"
+authority: personal
+---
+An idea.
+`);
+    assert.equal(ok(cli(vault, "read", "escaped")).status, "owner-authored");
+    assert.equal(cli(vault, "note", "create", "--id", "escaped", "--authority", "personal", "--title", "Another", "--body", "other").status, 3);
+  });
+
+  test("non-data frontmatter is never evaluated", () => {
+    const vault = freshVault();
+    fs.writeFileSync(path.join(vault, "notes/script.md"), '---js\n(() => { throw new Error("EXECUTED_FRONTMATTER"); })()\n---\nbody\n');
+    const result = cli(vault, "read", "script");
+    assert.equal(result.status, 4);
+    assert.equal(result.stderr.includes("EXECUTED_FRONTMATTER"), false);
+    fs.rmSync(path.join(vault, "notes/script.md"));
+    fs.writeFileSync(path.join(vault, "notes/tagged.md"), '---\nid: tagged\nauthority: derived\nfunction: !!js/function "function () { return 42; }"\n---\nbody\n');
+    assert.equal(cli(vault, "read", "tagged").status, 2, "unsafe YAML tags are rejected");
+  });
+});
+
+describe("acceptance: referenced note snapshots", () => {
+  test("captures exact note bytes, survives rename, and detects old-mtime source edits", () => {
+    const vault = freshVault();
+    const source = ok(cli(vault, "note", "create", "--id", "idea", "--authority", "personal", "--title", "Idea", "--body", "Owner says ten.\n"));
+    const sourceFile = path.join(vault, source.path);
+    const original = fs.readFileSync(sourceFile);
+    const capture = ok(cli(vault, "capture", "note", "idea", "--request-id", "idea-snapshot"));
+    assert.equal(capture.observation.locator.kind, "note");
+    assert.equal(capture.observation.locator.noteId, "idea");
+    assert.equal(capture.observation.locator.noteDigest, source.digest);
+    assert.equal(capture.observation.original.digest, source.digest);
+    assert.equal(ok(cli(vault, "source", "show", "idea-snapshot", "--text")).text, original.toString("utf8"));
+    assert.equal(ok(cli(vault, "capture", "note", "idea", "--request-id", "idea-snapshot")).replayed, true);
+    const second = ok(cli(vault, "capture", "note", "idea", "--request-id", "another-observation"));
+    assert.equal(second.replayed, false);
+    assert.equal(second.observation.original.digest, source.digest);
+    const target = ok(cli(vault, "note", "create", "--id", "derived", "--authority", "derived", "--title", "Derived", "--body", "The idea mentions ten.\n"));
+    ok(cli(vault, "check", "derived", "--note-digest", target.digest, "--source", "idea-snapshot", "--outcome", "supports", "--checker", "a", "--method", "human", "--request-id", "review"));
+    assert.equal(ok(cli(vault, "read", "derived")).status, "attested");
+    const renamed = path.join(vault, "renamed.md");
+    fs.renameSync(sourceFile, renamed);
+    assert.equal(ok(cli(vault, "read", "derived")).status, "attested");
+    const before = fs.statSync(renamed);
+    fs.appendFileSync(renamed, "An external edit.\n");
+    fs.utimesSync(renamed, before.atime, before.mtime);
+    const read = ok(cli(vault, "read", "derived"));
+    assert.equal(read.status, "changed");
+    assert.equal(read.sources[0].locator.noteDigest, source.digest);
+    assert.equal(ok(cli(vault, "source", "show", "idea-snapshot", "--text")).text, original.toString("utf8"));
+    assert.equal(cli(vault, "capture", "note", "idea", "--request-id", "idea-snapshot").status, 3);
+    fs.rmSync(renamed);
+    assert.equal(ok(cli(vault, "read", "derived")).status, "unavailable");
+  });
+
+  test("moving a referenced note after review cannot attest its unreviewed revision", () => {
+    const vault = freshVault();
+    const note = ok(cli(vault, "note", "create", "--id", "source", "--authority", "record", "--title", "Source", "--body", "Observation zero.\n"));
+    const observation = ok(cli(vault, "capture", "note", "source")).observation;
+    const target = ok(cli(vault, "note", "create", "--id", "target", "--authority", "derived", "--title", "Target", "--body", "Recorded zero.\n"));
+    fs.appendFileSync(path.join(vault, note.path), "Observation one.\n");
+    ok(cli(vault, "check", "target", "--note-digest", target.digest, "--source", observation.id, "--outcome", "supports", "--checker", "a", "--method", "human", "--request-id", "c"));
+    assert.equal(ok(cli(vault, "read", "target")).status, "changed");
+    assert.equal(cli(vault, "capture", "note", "../source").status, 2);
+  });
+});
+
+describe("acceptance: immutable local commit and locator isolation", () => {
+  test("capture and read each resolve a moving branch once for all code paths", () => {
+    const vault = freshVault();
+    const repo = freshRepo({ "a.txt": "A zero\n", "b.txt": "B zero\n" });
+    const zero = git(repo, "rev-parse", "HEAD");
+    const one = commit(repo, { "a.txt": "A one\n", "b.txt": "B one\n" }, "one");
+    git(repo, "update-ref", "refs/heads/main", zero);
+    fs.writeFileSync(path.join(repo, "a.txt"), "Uncommitted text.\n");
+    ok(cli(vault, "repo", "add", "app", "--path", repo));
+    const wrappers = path.join(temp, `git-wrapper-${++counter}`);
+    fs.mkdirSync(wrappers);
+    const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+    const log = path.join(wrappers, "commands.jsonl");
+    const marker = path.join(wrappers, "moved");
+    fs.writeFileSync(path.join(wrappers, "git"), `#!${process.execPath}\n` + `
+const { spawnSync } = require('node:child_process');
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(args) + '\\n');
+const result = spawnSync(${JSON.stringify(realGit)}, args);
+if (args.includes('cat-file') && !fs.existsSync(${JSON.stringify(marker)})) {
+  fs.writeFileSync(${JSON.stringify(marker)}, 'moved');
+  const move = spawnSync(${JSON.stringify(realGit)}, ['-C', ${JSON.stringify(repo)}, 'update-ref', 'refs/heads/main', ${JSON.stringify(one)}]);
+  if (move.status !== 0) process.exit(move.status || 1);
+}
+process.stdout.write(result.stdout);
+process.stderr.write(result.stderr);
+process.exit(result.status || 0);
+`, { mode: 0o755 });
+    const wrapped = (...args: string[]) => {
+      const result = spawnSync(process.execPath, [BIN, "--vault", vault, "--json", ...args], {
+        encoding: "utf8", env: { ...process.env, WIKI_VAULT: "", PATH: `${wrappers}${path.delimiter}${process.env.PATH}` },
+      });
+      assert.equal(result.status, 0, result.stderr);
+      return JSON.parse(result.stdout);
+    };
+    const capture = wrapped("capture", "code", "--repo", "app", "--path", "a.txt", "--path", "b.txt", "--request-id", "two-files");
+    assert.deepEqual(capture.observations.map((o: any) => o.locator.commit), [zero, zero]);
+    assert.equal(ok(cli(vault, "source", "show", "two-files.0", "--text")).text, "A zero\n");
+    assert.equal(ok(cli(vault, "source", "show", "two-files.1", "--text")).text, "B zero\n");
+    assert.equal(git(repo, "rev-parse", "main"), one);
+    const note = ok(cli(vault, "note", "create", "--id", "two", "--authority", "derived", "--title", "Two", "--body", "Both say zero.\n"));
+    ok(cli(vault, "check", "two", "--note-digest", note.digest, "--source", "two-files.0", "--source", "two-files.1", "--outcome", "supports", "--checker", "a", "--method", "human", "--request-id", "two-check"));
+    git(repo, "update-ref", "refs/heads/main", zero);
+    fs.rmSync(marker);
+    fs.writeFileSync(log, "");
+    const read = wrapped("read", "two");
+    assert.equal(read.status, "attested");
+    assert.equal(read.repos.length, 1);
+    assert.equal(read.repos[0].commit, zero);
+    const commands: string[][] = fs.readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    assert.equal(commands.filter((args) => args.includes("--verify")).length, 1);
+    assert.equal(ok(cli(vault, "read", "two")).status, "changed", "next read observes moved main without guessing contradiction");
+  });
+
+  test("source IDs and code locators cannot select arbitrary local files", () => {
+    const vault = freshVault();
+    const sentinel = path.join(temp, `sentinel-${++counter}.txt`);
+    fs.writeFileSync(sentinel, "Outside sentinel.\n");
+    const repo = freshRepo({ "safe.txt": "safe\n" });
+    fs.symlinkSync(sentinel, path.join(repo, "link.txt"));
+    git(repo, "add", "link.txt");
+    git(repo, "commit", "-q", "-m", "link");
+    ok(cli(vault, "repo", "add", "app", "--path", repo));
+    for (const locator of ["../sentinel.txt", sentinel, "a/../../sentinel.txt", "a\\..\\sentinel.txt"]) {
+      assert.equal(cli(vault, "capture", "code", "--repo", "app", "--path", locator).status, 2);
+    }
+    for (const id of ["../sentinel", sentinel, "%2e%2e%2fsentinel"]) assert.equal(cli(vault, "source", "show", id, "--text").status, 2);
+    const link = ok(cli(vault, "capture", "code", "--repo", "app", "--path", "link.txt")).observations[0];
+    assert.equal(ok(cli(vault, "source", "show", link.id, "--text")).text, sentinel, "a Git symlink blob is the link target string, not its external contents");
+    assert.equal(fs.readFileSync(sentinel, "utf8"), "Outside sentinel.\n");
+    for (const repoKey of ["missing", "constructor", "toString"]) {
+      assert.equal(cli(vault, "capture", "code", "--repo", repoKey, "--path", "safe.txt").status, 7);
+    }
+  });
+});
+
+describe("acceptance: missing bindings and lifecycle status", () => {
+  test("removing a repository binding does not default to another source path", () => {
+    const { vault, id } = checkedCodeNote();
+    fs.writeFileSync(path.join(vault, ".wiki/vault.json"), JSON.stringify({ schema: 1, repos: {} }));
+    const read = ok(cli(vault, "read", id));
+    assert.equal(read.status, "unavailable");
+    assert.match(read.sources[0].reason, /not configured/);
+    assert.equal(read.body, "Login always succeeds.\n");
+  });
+
+  test("an unknown source schema is invalid evidence, not a retained positive snapshot", () => {
+    const { vault, id, obs } = checkedCodeNote();
+    const file = path.join(vault, ".wiki/sources", `${obs.id}.json`);
+    const record = JSON.parse(fs.readFileSync(file, "utf8"));
+    fs.writeFileSync(file, JSON.stringify({ ...record, schema: 99 }));
+    assert.equal(ok(cli(vault, "read", id)).status, "invalid");
+  });
+
+  test("owner-authored supersession marks an intent note non-current without approving it", () => {
+    const vault = freshVault();
+    fs.writeFileSync(path.join(vault, "notes/old-policy.md"), '---\nid: old-policy\nauthority: intent\nsuperseded_by: new-policy\ntrust: attested\n---\nAn old policy.\n');
+    const read = ok(cli(vault, "read", "old-policy"));
+    assert.equal(read.status, "superseded");
+    assert.equal(read.check, null);
+    assert.equal(read.body, "An old policy.\n");
   });
 });

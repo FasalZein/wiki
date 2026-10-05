@@ -2,7 +2,7 @@ import { type CheckRecord, latestCheck, loadChecks } from "./checks.ts";
 import { readAtCommit, type ResolvedRepo, resolveRepo } from "./code.ts";
 import { loadNote } from "./notes.ts";
 import { evidenceDigest, loadObservation, type SourceLocator, verifyObservationBlobs } from "./sources.ts";
-import { sha256, type Vault } from "./store.ts";
+import { getBlob, sha256, type Vault } from "./store.ts";
 import { type Authority, type Digest, type TrustStatus, WikiError } from "./types.ts";
 
 /** Per-source result. `current` means the bound snapshot still matches its source. */
@@ -83,6 +83,7 @@ export function readNote(vault: Vault, id: string): ReadResult {
   let check: CheckRecord | null;
   try {
     check = latestCheck(loadChecks(vault, note.id));
+    if (check) getBlob(vault, check.noteDigest);
   } catch (error) {
     reasons.push(`evidence log unusable: ${(error as Error).message}`);
     return result("invalid", null, [], []);
@@ -131,6 +132,17 @@ function sourceStatus(vault: Vault, binding: CheckRecord["sources"][number], rep
   if (evidenceDigest(observation) !== binding.digest) {
     return out("invalid", "observation digest differs from the digest the check bound to", locator, observedAt);
   }
+  if (locator.kind === "note") {
+    try {
+      const current = loadNote(vault, locator.noteId);
+      return current.digest === locator.noteDigest
+        ? out("current", `referenced note ${locator.noteId} matches reviewed snapshot ${locator.noteDigest}`, locator, observedAt)
+        : out("changed", `referenced note ${locator.noteId} differs from reviewed snapshot ${locator.noteDigest}`, locator, observedAt);
+    } catch (error) {
+      if (error instanceof WikiError) return out(error.code === "not_found" ? "unavailable" : "invalid", error.message, locator, observedAt);
+      throw error;
+    }
+  }
   if (locator.kind !== "code") {
     return out("retained", `retained snapshot from ${observedAt}; not re-fetched or re-imported by this read`, locator, observedAt);
   }
@@ -140,6 +152,9 @@ function sourceStatus(vault: Vault, binding: CheckRecord["sources"][number], rep
     repos.set(locator.repo, repo);
   }
   if (!repo.ok) return out("unavailable", repo.reason, locator, observedAt);
+  if (repo.path !== locator.repoPath || repo.ref !== locator.ref) {
+    return out("changed", "repository binding differs from the reviewed repository path or local ref", locator, observedAt);
+  }
   const bytes = readAtCommit(repo, locator.path);
   if (bytes === null) return out("changed", `${locator.path} is missing at ${repo.ref} (${repo.commit})`, locator, observedAt);
   if (sha256(bytes) !== binding.digest) {

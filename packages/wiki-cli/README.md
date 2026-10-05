@@ -54,3 +54,29 @@ An unknown Pandoc block or inline type fails the capture. The failure names the 
 A valid PDF with no text layer imports as empty extracted text. A corrupt PDF fails and does not invent text. This CLI does not OCR scanned pages.
 
 Cancellation is the process `SIGINT` or `SIGTERM` signal, which aborts the HTTP fetch and the extractor process. A cancelled capture does not record an observation. There is no retry loop and no size or time limit inside the tool.
+
+## Local runtime and Markdown
+
+Run the private packages from this repository with its declared dependencies available. Node must be at least 22.18.0. Node 26.3.0 was tested. Node runs the source TypeScript with built-in type stripping; there is no compilation or root `dist` output. A published package, a global install, and Windows execution are not verified.
+
+The core uses the existing `gray-matter` 4.0.3 YAML engine (`js-yaml` safe loading, 3.14.2 in the tested installation). It parses only YAML frontmatter. Language-tagged JavaScript frontmatter is never evaluated. Normal YAML comments, quoted escapes and unrelated nested properties are supported. Note IDs and authorities must be strings. The note digest covers exact file bytes, including frontmatter and whitespace; meaningful external edits do not depend on modification time.
+
+## Referenced notes
+
+```text
+capture note <note-id> [--request-id <id>]
+```
+
+This captures exact Markdown bytes of a note in the selected vault. The observation records its stable note ID and full file digest. `source show <observation-id> --text` returns those retained Markdown bytes as text, including frontmatter. A rename keeps the identity. A content edit invalidates the old snapshot's consistency with the current note. A missing referenced note reports unavailable evidence. Capture does not inherit the referenced note's trust status or turn a personal idea into an externally proven claim.
+
+Use `capture text` or `capture file` for an imported document snapshot that does not track subsequent edits to its original path. Use `capture note` for a citation whose current note revision must remain consistent with the reviewed snapshot. No dependency graph or recursive trust calculation runs during reads.
+
+## Evidence boundaries
+
+A code observation binds to the canonical local repository path, configured reference, immutable commit and source path. Remapping a repository key or reference needs a new review even if file bytes match. An unchanged source at a later commit on the same binding can remain consistent with the reviewed content. Reads never fetch a remote repository.
+
+Checks record caller-asserted provenance, not authenticated identity or owner approval. `authenticated` must remain `false`; a damaged record cannot assert otherwise. Missing or malformed relevant records, unsupported schemas, lost snapshots and inconsistent byte counts cannot produce attested status. Existing early pilot code observations without the required repository binding path are invalid evidence; there is no migration or guessed binding repair in this slice.
+
+Replaying an identical request keeps its original recording time. Different content or other provenance under that ID conflicts. Use a new request ID for a distinct observation or review, including a new review of identical bytes. If the latest recording time has conflicting check outcomes, the read reports invalid evidence with an ambiguous-ordering reason. A genuinely later review can resolve that ordering. Request spelling cannot break a conflict in favor of positive evidence.
+
+Check recording retains immutable evidence and does not overwrite Markdown. This is not an automatic publication feature or a guarantee of coordination with Obsidian writers.

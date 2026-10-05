@@ -32,7 +32,7 @@ export function resolveRepo(vault: Vault, name: string): ResolvedRepo {
   } catch {
     return { ok: false, repo: name, reason: `ref ${binding.ref} does not resolve to a commit in ${binding.path}` };
   }
-  return { ok: true, repo: name, path: binding.path, ref: binding.ref, commit, scope: "local-commit" };
+  return { ok: true, repo: name, path: fs.realpathSync(binding.path), ref: binding.ref, commit, scope: "local-commit" };
 }
 
 /** Repository-relative POSIX path with no traversal. */
@@ -74,7 +74,7 @@ export function captureCode(vault: Vault, repoName: string, paths: string[], req
   });
   return files.map(({ p, bytes }, i) => {
     return recordObservation(vault, {
-      locator: { kind: "code", repo: repo.repo, path: p, ref: repo.ref, commit: repo.commit, scope: "local-commit" },
+      locator: { kind: "code", repo: repo.repo, repoPath: repo.path, path: p, ref: repo.ref, commit: repo.commit, scope: "local-commit" },
       original: { bytes, mediaType: "application/octet-stream" },
       extracted: null,
       ...(requestId === undefined ? {} : { requestId: `${requestId}.${i}` }),

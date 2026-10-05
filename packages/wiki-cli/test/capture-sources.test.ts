@@ -415,8 +415,10 @@ describe("web capture", () => {
 
   test("cancellation and a bad timestamp do not record an observation", async () => {
     const vault = await freshVault();
+    let sawHangingRequest!: () => void;
+    const hangingRequest = new Promise<void>((resolve) => { sawHangingRequest = resolve; });
     const fixture = await serve((url, response) => {
-      if (url === "/hang") return;
+      if (url === "/hang") { sawHangingRequest(); return; }
       response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       response.end("<p>Should not be required.</p>");
     });
@@ -427,16 +429,7 @@ describe("web capture", () => {
       const child = spawn(process.execPath, [BIN, "--vault", vault, "--json", "capture", "web", `${fixture.origin}/hang`, "--request-id", "web-hang"], {
         env: { ...process.env, WIKI_VAULT: "" },
       });
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error("fixture server did not see the hanging request")), 5000);
-        const timerId = setInterval(() => {
-          if (fixture.hits.includes("/hang")) {
-            clearTimeout(timer);
-            clearInterval(timerId);
-            resolve();
-          }
-        }, 15);
-      });
+      await hangingRequest;
       child.kill("SIGTERM");
       const [status] = (await once(child, "exit")) as [number | null, NodeJS.Signals | null];
       assert.equal(status, 7);
@@ -537,5 +530,106 @@ describe("PDF import and file dispatch", () => {
     assert.match(result.json.error.message, /pdftotext/);
     assert.match(result.json.error.message, /external runtime dependency/);
     assert.equal(fs.existsSync(sources(vault)), false);
+  });
+});
+
+describe("acceptance: retained extraction evidence", () => {
+  test("table captions and nested cells remain in actual Pandoc extraction", async () => {
+    const vault = await freshVault();
+    const fixture = await serve((_url, response) => {
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      response.end('<table><caption>Evidence caption</caption><thead><tr><th>Heading cell</th></tr></thead><tbody><tr><td>Body <strong>nested cell</strong></td></tr></tbody></table>');
+    });
+    try {
+      const observation = (await ok(vault, "capture", "web", `${fixture.origin}/table`)).observation;
+      assert.equal((await ok(vault, "source", "show", observation.id, "--text")).text, "Evidence caption\nHeading cell\nBody nested cell");
+    } finally { await fixture.close(); }
+  });
+});
+
+describe("acceptance: retained bytes and extractor cancellation", () => {
+  test("a stopped web server does not affect retained source reads or cause a refetch", async () => {
+    const vault = await freshVault();
+    const original = Buffer.from("Retained web fact.\r\n", "utf8");
+    const fixture = await serve((_url, response) => {
+      response.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+      response.end(original);
+    });
+    let closed = false;
+    try {
+      const observation = (await ok(vault, "capture", "web", `${fixture.origin}/fact`, "--request-id", "retained-web")).observation;
+      const hex = observation.original.digest.slice("sha256:".length);
+      assert.deepEqual(fs.readFileSync(path.join(vault, ".wiki/objects/sha256", hex.slice(0, 2), hex)), original);
+      await fixture.close();
+      closed = true;
+      const note = await ok(vault, "note", "create", "--id", "fact", "--authority", "derived", "--title", "Fact", "--body", "A retained web fact.\n");
+      await ok(vault, "check", "fact", "--note-digest", note.digest, "--source", observation.id, "--outcome", "supports", "--checker", "a", "--method", "human", "--request-id", "web-review");
+      const read = await ok(vault, "read", "fact");
+      assert.equal(read.status, "attested");
+      assert.equal(read.sources[0].state, "retained");
+      assert.match(read.sources[0].reason, /not re-fetched/);
+      assert.equal((await ok(vault, "source", "show", observation.id, "--text")).text, original.toString("utf8"));
+      assert.deepEqual(fixture.hits, ["/fact"]);
+    } finally { if (!closed) await fixture.close(); }
+  });
+
+  test("PDF original and extraction survive loss of the mutable import file and support a check", async () => {
+    const vault = await freshVault();
+    const file = path.join(temp, `retained-${++counter}.pdf`);
+    fs.writeFileSync(file, HELLO_PDF);
+    const observation = (await ok(vault, "capture", "pdf", file, "--request-id", "retained-pdf")).observation;
+    const hex = observation.original.digest.slice("sha256:".length);
+    assert.deepEqual(fs.readFileSync(path.join(vault, ".wiki/objects/sha256", hex.slice(0, 2), hex)), HELLO_PDF);
+    fs.rmSync(file);
+    const note = await ok(vault, "note", "create", "--id", "pdf-fact", "--authority", "derived", "--title", "PDF", "--body", "The document says hello.\n");
+    await ok(vault, "check", "pdf-fact", "--note-digest", note.digest, "--source", observation.id, "--outcome", "supports", "--checker", "a", "--method", "human", "--request-id", "pdf-review");
+    assert.equal((await ok(vault, "read", "pdf-fact")).status, "attested");
+    assert.equal((await ok(vault, "source", "show", observation.id, "--text")).text, HELLO_TEXT);
+    const textHex = observation.extracted.digest.slice("sha256:".length);
+    fs.rmSync(path.join(vault, ".wiki/objects/sha256", textHex.slice(0, 2), textHex));
+    assert.equal((await ok(vault, "read", "pdf-fact")).status, "invalid");
+  });
+
+  test("SIGTERM cancels an in-flight extractor and leaves no child or observation", async () => {
+    const vault = await freshVault();
+    const file = path.join(temp, `cancel-${++counter}.pdf`);
+    fs.writeFileSync(file, HELLO_PDF);
+    const wrapperDir = path.join(temp, `extractor-${++counter}`);
+    fs.mkdirSync(wrapperDir);
+    let sawExtractor!: (pid: number) => void;
+    const extractorReady = new Promise<number>((resolve) => { sawExtractor = resolve; });
+    const fixture = await serve((url, _response) => {
+      const pid = Number(new URL(url, "http://fixture.invalid").searchParams.get("pid"));
+      sawExtractor(pid); // Keep the request open until cancellation closes the child.
+    });
+    const realTool = spawnSync("which", ["pdftotext"], { encoding: "utf8" }).stdout.trim();
+    fs.writeFileSync(path.join(wrapperDir, "pdftotext"), `#!${process.execPath}\n` + `
+if (process.argv.includes('-v')) {
+  const r = require('node:child_process').spawnSync(${JSON.stringify(realTool)}, ['-v']);
+  process.stdout.write(r.stdout); process.stderr.write(r.stderr); process.exit(r.status || 0);
+}
+require('node:http').get(${JSON.stringify(`${fixture.origin}/ready?pid=`)} + process.pid);
+process.stdin.resume();
+`, { mode: 0o755 });
+    const child = spawn(process.execPath, [BIN, "--vault", vault, "--json", "capture", "pdf", file, "--request-id", "cancelled-pdf"], {
+      env: { ...process.env, WIKI_VAULT: "", PATH: `${wrapperDir}${path.delimiter}${process.env.PATH}` },
+    });
+    const out: Buffer[] = [];
+    child.stdout.on("data", (chunk: Buffer) => out.push(chunk));
+    child.stderr.resume();
+    const closed = once(child, "close");
+    try {
+      const extractorPid = await extractorReady;
+      assert.ok(Number.isSafeInteger(extractorPid) && extractorPid > 0);
+      child.kill("SIGTERM");
+      const [status] = await closed;
+      assert.equal(status, 7);
+      assert.match(Buffer.concat(out).toString("utf8"), /capture cancelled/);
+      assert.throws(() => process.kill(extractorPid, 0), (error: unknown) => (error as NodeJS.ErrnoException).code === "ESRCH");
+      assert.equal(fs.existsSync(sources(vault)), false);
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) { child.kill("SIGTERM"); await closed; }
+      await fixture.close();
+    }
   });
 });

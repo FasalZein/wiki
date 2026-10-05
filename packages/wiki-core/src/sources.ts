@@ -1,3 +1,4 @@
+import { assertRepoPath } from "./code.ts";
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -12,7 +13,8 @@ import {
   type Vault,
   wikiPath,
 } from "./store.ts";
-import { assertRequestId, type Digest, SCHEMA_VERSION, WikiError } from "./types.ts";
+import { loadNote } from "./notes.ts";
+import { assertNoteId, assertRequestId, type Digest, SCHEMA_VERSION, WikiError } from "./types.ts";
 
 /**
  * Source capture contract shared by all adapters (text, code, web, PDF).
@@ -46,6 +48,8 @@ export interface TextLocator {
 export interface CodeLocator {
   kind: "code";
   repo: string;
+  /** Canonical local repository path at capture time; part of the evidence binding. */
+  repoPath: string;
   /** Repository-relative POSIX path. */
   path: string;
   /** Configured local ref, resolved once per capture. */
@@ -69,9 +73,17 @@ export interface DocumentLocator {
   path: string;
 }
 
-export type SourceLocator = TextLocator | CodeLocator | WebLocator | DocumentLocator;
+export interface NoteLocator {
+  kind: "note";
+  /** Stable identity in this vault, independent of file name. */
+  noteId: string;
+  /** Exact Markdown file bytes that were captured, not a later revision. */
+  noteDigest: Digest;
+}
+
+export type SourceLocator = TextLocator | CodeLocator | WebLocator | DocumentLocator | NoteLocator;
 export type SourceKind = SourceLocator["kind"];
-const SOURCE_KINDS: readonly SourceKind[] = ["text", "code", "web", "pdf"];
+const SOURCE_KINDS: readonly SourceKind[] = ["text", "code", "web", "pdf", "note"];
 
 export interface ObservationInput {
   locator: SourceLocator;
@@ -129,6 +141,7 @@ export function recordObservation(vault: Vault, input: ObservationInput): Record
     original: { digest: originalDigest, size: input.original.bytes.byteLength, mediaType: input.original.mediaType },
     extracted,
   };
+  parseObservation(observation, id);
   const file = observationFile(vault, id);
   if (createFileExclusive(vault, file, `${JSON.stringify(observation, null, 2)}\n`)) {
     return { observation, replayed: false };
@@ -146,32 +159,95 @@ export function recordObservation(vault: Vault, input: ObservationInput): Record
 export function loadObservation(vault: Vault, id: string): SourceObservation {
   const file = observationFile(vault, id);
   if (!fs.existsSync(file)) throw new WikiError("damaged", `source observation ${id} is missing`);
-  const r = readJsonRecord(file);
+  return parseObservation(readJsonRecord(file), id);
+}
+
+function parseObservation(value: unknown, id: string): SourceObservation {
   const bad = (why: string) => new WikiError("damaged", `source observation ${id} is malformed: ${why}`);
+  if (!isObject(value)) throw bad("record");
+  const r = value;
   if (r.id !== id) throw bad("id does not match file name");
-  if (typeof r.observedAt !== "string") throw bad("observedAt");
+  if (typeof r.observedAt !== "string" || Number.isNaN(Date.parse(r.observedAt))) throw bad("observedAt");
   const loc = r.locator;
   if (!isObject(loc) || !SOURCE_KINDS.includes(loc.kind as SourceKind)) throw bad("locator");
-  const orig = r.original;
-  if (!isObject(orig) || !isDigest(orig.digest) || typeof orig.size !== "number" || typeof orig.mediaType !== "string") {
-    throw bad("original");
-  }
-  const ext = r.extracted;
-  if (ext !== null) {
-    if (!isObject(ext) || !isDigest(ext.digest) || typeof ext.size !== "number" || !isObject(ext.extractor)) {
-      throw bad("extracted");
+  const text = (value: unknown, field: string): string => {
+    if (typeof value !== "string" || value.trim() === "") throw bad(field);
+    return value;
+  };
+  const absolutePath = (value: unknown, field: string): string => {
+    const p = text(value, field);
+    if (!path.isAbsolute(p) || p.includes("\0")) throw bad(field);
+    return p;
+  };
+  const httpUrl = (value: unknown): string => {
+    const raw = text(value, "web URL");
+    try {
+      const url = new URL(raw);
+      if (url.protocol === "http:" || url.protocol === "https:") return raw;
+    } catch { /* Invalid retained locator. */ }
+    throw bad("web URL");
+  };
+  let locator: SourceLocator;
+  switch (loc.kind) {
+    case "text": locator = { kind: "text", path: absolutePath(loc.path, "text path") }; break;
+    case "pdf": locator = { kind: "pdf", path: absolutePath(loc.path, "PDF path") }; break;
+    case "code": {
+      const repo = text(loc.repo, "repository key");
+      if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(repo)) throw bad("repository key");
+      const sourcePath = text(loc.path, "code path");
+      try { assertRepoPath(sourcePath); } catch { throw bad("code path"); }
+      const ref = text(loc.ref, "code ref");
+      if (ref.startsWith("-") || ref.includes("\0")) throw bad("code ref");
+      const commit = text(loc.commit, "code commit");
+      if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(commit) || loc.scope !== "local-commit") throw bad("code commit or scope");
+      locator = { kind: "code", repo, repoPath: absolutePath(loc.repoPath, "repository binding path"), path: sourcePath, ref, commit, scope: "local-commit" };
+      break;
     }
+    case "note": {
+      const noteId = text(loc.noteId, "referenced note id");
+      try { assertNoteId(noteId); } catch { throw bad("referenced note id"); }
+      if (!isDigest(loc.noteDigest)) throw bad("referenced note digest");
+      locator = { kind: "note", noteId, noteDigest: loc.noteDigest };
+      break;
+    }
+    case "web": {
+      if (typeof loc.httpStatus !== "number" || !Number.isInteger(loc.httpStatus) || loc.httpStatus < 200 || loc.httpStatus > 299) throw bad("HTTP status");
+      locator = { kind: "web", url: httpUrl(loc.url), finalUrl: loc.finalUrl === null ? null : httpUrl(loc.finalUrl), httpStatus: loc.httpStatus };
+      break;
+    }
+    default: throw bad("locator kind");
   }
-  if (loc.kind === "code" && (typeof loc.repo !== "string" || typeof loc.path !== "string" || typeof loc.ref !== "string" || typeof loc.commit !== "string")) {
-    throw bad("code locator");
+  const blob = (value: unknown): BlobRef => {
+    if (!isObject(value) || !isDigest(value.digest) || typeof value.size !== "number" || !Number.isSafeInteger(value.size) || value.size < 0) throw bad("blob identity or size");
+    return { digest: value.digest, size: value.size };
+  };
+  const orig = r.original;
+  if (!isObject(orig)) throw bad("original");
+  const original = { ...blob(orig), mediaType: text(orig.mediaType, "media type") };
+  let extracted: SourceObservation["extracted"] = null;
+  if (r.extracted !== null) {
+    const ext = r.extracted;
+    if (!isObject(ext) || !isObject(ext.extractor)) throw bad("extracted provenance");
+    const ex = ext.extractor;
+    const extractor: Extractor = { name: text(ex.name, "extractor name"), version: text(ex.version, "extractor version") };
+    if (ex.charset !== undefined) extractor.charset = text(ex.charset, "extractor charset");
+    if (ex.limitations !== undefined) {
+      if (!Array.isArray(ex.limitations) || !ex.limitations.every((v: unknown) => typeof v === "string" && v.trim() !== "")) throw bad("extractor limitations");
+      extractor.limitations = ex.limitations;
+    }
+    extracted = { ...blob(ext), extractor };
   }
-  return r as unknown as SourceObservation;
+  if (locator.kind === "note" && (locator.noteDigest !== original.digest || extracted !== null)) throw bad("referenced note snapshot identity");
+  return { schema: SCHEMA_VERSION, id, locator, observedAt: r.observedAt, original, extracted };
 }
 
 /** Verify that every retained blob of an observation is present and intact. */
 export function verifyObservationBlobs(vault: Vault, observation: SourceObservation): void {
-  getBlob(vault, observation.original.digest);
-  if (observation.extracted) getBlob(vault, observation.extracted.digest);
+  const verify = (ref: BlobRef): void => {
+    if (getBlob(vault, ref.digest).byteLength !== ref.size) throw new WikiError("damaged", `retained snapshot ${ref.digest} has the wrong byte count`);
+  };
+  verify(observation.original);
+  if (observation.extracted) verify(observation.extracted);
 }
 
 /** Text the observation retains for reading: extracted text, else UTF-8 original. */
@@ -229,6 +305,17 @@ export function importTextFile(vault: Vault, file: string, requestId?: string): 
     locator: { kind: "text", path: real },
     original: { bytes, mediaType },
     extracted: { text, extractor: { name: "utf8-text", version: "1" } },
+    ...(requestId === undefined ? {} : { requestId }),
+  });
+}
+
+/** Capture a note in this vault as immutable source bytes without inheriting its trust status. */
+export function captureNote(vault: Vault, noteId: string, requestId?: string): RecordResult {
+  const note = loadNote(vault, noteId);
+  return recordObservation(vault, {
+    locator: { kind: "note", noteId: note.id, noteDigest: note.digest },
+    original: { bytes: note.bytes, mediaType: "text/markdown" },
+    extracted: null,
     ...(requestId === undefined ? {} : { requestId }),
   });
 }

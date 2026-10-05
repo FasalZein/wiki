@@ -8,6 +8,7 @@ import {
   type CheckMethod,
   type CheckOutcome,
   captureCode,
+  captureNote,
   captureWeb,
   createNote,
   importDocumentFile,
@@ -38,6 +39,7 @@ Usage: wiki-cli <command> [options]   (global: --vault <dir> or WIKI_VAULT, --js
   capture file <file> [--request-id <id>]        import text or PDF by extension; other types are refused
   capture web <url> [--request-id <id>] [--observed-at <iso>]
                                                  fetch one http(s) URL with pandoc (external program)
+  capture note <note-id> [--request-id <id>]    snapshot exact Markdown bytes of a note in this vault
   capture code --repo <name> --path <p>... [--request-id <id>]
                                                  snapshot committed files at the configured local ref
   source show <observation-id> [--text]          show a retained source observation
@@ -182,6 +184,11 @@ async function run(signal: AbortSignal): Promise<void> {
         emit({ replayed: r.replayed, observation: r.observation }, `${r.replayed ? "replayed" : "captured"} ${r.observation.id} ${r.observation.original.digest}`);
         return;
       }
+      if (sub === "note") {
+        const r = captureNote(vault(), need("<note-id>", arg), requestId().requestId);
+        emit({ replayed: r.replayed, observation: r.observation }, `${r.replayed ? "replayed" : "captured"} ${r.observation.id} ${r.observation.original.digest}`);
+        return;
+      }
       if (sub === "code") {
         const results = captureCode(vault(), need("--repo", opts.repo), opts.path ?? [], requestId().requestId);
         emit(
@@ -195,7 +202,7 @@ async function run(signal: AbortSignal): Promise<void> {
         );
         return;
       }
-      throw new WikiError("usage", `capture supports: text, pdf, file, web, code (got ${sub ?? "nothing"})`);
+      throw new WikiError("usage", `capture supports: text, pdf, file, web, code, note (got ${sub ?? "nothing"})`);
     }
     case "source": {
       if (sub !== "show") throw new WikiError("usage", "expected: source show <observation-id>");

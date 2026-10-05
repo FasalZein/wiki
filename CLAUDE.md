@@ -18,3 +18,11 @@
 - Legacy CLI (`src/`, `tests/`): `bun run typecheck` and `bun test tests/`. Run `tests/`, not the whole tree; `reference/` and `archive/` hold non-product code.
 - New core and CLI (`packages/wiki-core`, `packages/wiki-cli`): `bun run verify:next` (Node typecheck plus `node --test` CLI integration tests, Node >= 22.18).
 - Tests use disposable temp vaults and Git repositories only. Never point a test or a manual run at the archive vault.
+
+## Evidence and authored Markdown
+
+- Bind code evidence to its canonical repository path and configured local ref, not file bytes alone.
+- Parse authored frontmatter only as safe YAML data. Do not enable gray-matter's executable language engines or raw-byte identity filters.
+- Referenced notes need their own retained file digest. Do not inherit their trust or recursively attest a citation graph.
+- Fail closed on incomplete evidence and ambiguous equal-time outcomes. Checker metadata is asserted provenance, never authenticated approval.
+- Synchronize race and cancellation tests at observable source or extractor events. Do not add polling delays to force an interleaving.
