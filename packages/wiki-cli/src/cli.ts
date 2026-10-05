@@ -8,7 +8,10 @@ import {
   type CheckMethod,
   type CheckOutcome,
   captureCode,
+  captureWeb,
   createNote,
+  importDocumentFile,
+  importPdfFile,
   importTextFile,
   initVault,
   loadObservation,
@@ -31,6 +34,10 @@ Usage: wiki-cli <command> [options]   (global: --vault <dir> or WIKI_VAULT, --js
   note create --id <id> --authority <a> --title <t> (--body <text> | --body-file <file>)
                                                  authority: ${AUTHORITIES.join(" | ")}
   capture text <file> [--request-id <id>]        import UTF-8 .txt/.md with original bytes
+  capture pdf <file> [--request-id <id>]         import a PDF with pdftotext (external program)
+  capture file <file> [--request-id <id>]        import text or PDF by extension; other types are refused
+  capture web <url> [--request-id <id>] [--observed-at <iso>]
+                                                 fetch one http(s) URL with pandoc (external program)
   capture code --repo <name> --path <p>... [--request-id <id>]
                                                  snapshot committed files at the configured local ref
   source show <observation-id> [--text]          show a retained source observation
@@ -69,6 +76,7 @@ const { values: opts, positionals } = (() => {
         body: { type: "string" },
         "body-file": { type: "string" },
         "request-id": { type: "string" },
+        "observed-at": { type: "string" },
         repo: { type: "string" },
         text: { type: "boolean", default: false },
         "note-digest": { type: "string" },
@@ -99,6 +107,10 @@ function requestId(): { requestId?: string } {
   return opts["request-id"] === undefined ? {} : { requestId: opts["request-id"] };
 }
 
+function observedAt(): { observedAt?: string } {
+  return opts["observed-at"] === undefined ? {} : { observedAt: opts["observed-at"] };
+}
+
 function emit(data: Record<string, unknown>, text: string): void {
   process.stdout.write(opts.json ? `${JSON.stringify({ ok: true, ...data }, null, 2)}\n` : `${text}\n`);
 }
@@ -119,7 +131,7 @@ function renderRead(r: ReadResult): string {
   return lines.join("\n");
 }
 
-function run(): void {
+async function run(signal: AbortSignal): Promise<void> {
   const [command, sub, arg] = positionals;
   if (opts.help || command === undefined || command === "help") {
     process.stdout.write(USAGE);
@@ -155,6 +167,21 @@ function run(): void {
         emit({ replayed: r.replayed, observation: r.observation }, `${r.replayed ? "replayed" : "captured"} ${r.observation.id} ${r.observation.original.digest}`);
         return;
       }
+      if (sub === "pdf") {
+        const r = await importPdfFile(vault(), need("<file>", arg), { ...requestId(), ...observedAt(), signal });
+        emit({ replayed: r.replayed, observation: r.observation }, `${r.replayed ? "replayed" : "captured"} ${r.observation.id} ${r.observation.original.digest}`);
+        return;
+      }
+      if (sub === "file") {
+        const r = await importDocumentFile(vault(), need("<file>", arg), { ...requestId(), ...observedAt(), signal });
+        emit({ replayed: r.replayed, observation: r.observation }, `${r.replayed ? "replayed" : "captured"} ${r.observation.id} ${r.observation.original.digest}`);
+        return;
+      }
+      if (sub === "web") {
+        const r = await captureWeb(vault(), need("<url>", arg), { ...requestId(), ...observedAt(), signal });
+        emit({ replayed: r.replayed, observation: r.observation }, `${r.replayed ? "replayed" : "captured"} ${r.observation.id} ${r.observation.original.digest}`);
+        return;
+      }
       if (sub === "code") {
         const results = captureCode(vault(), need("--repo", opts.repo), opts.path ?? [], requestId().requestId);
         emit(
@@ -168,7 +195,7 @@ function run(): void {
         );
         return;
       }
-      throw new WikiError("usage", `capture supports: text, code (got ${sub ?? "nothing"})`);
+      throw new WikiError("usage", `capture supports: text, pdf, file, web, code (got ${sub ?? "nothing"})`);
     }
     case "source": {
       if (sub !== "show") throw new WikiError("usage", "expected: source show <observation-id>");
@@ -205,13 +232,21 @@ function run(): void {
   }
 }
 
-try {
-  run();
-} catch (error) {
-  const known = error instanceof WikiError;
-  const code = known ? error.code : "error";
-  const message = (error as Error).message;
-  if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, error: { code, message } }, null, 2)}\n`);
-  process.stderr.write(`wiki-cli: ${code}: ${message}\n`);
-  process.exitCode = known ? EXIT[error.code] : 1;
-}
+const abort = new AbortController();
+const stop = (): void => abort.abort();
+process.once("SIGINT", stop);
+process.once("SIGTERM", stop);
+
+run(abort.signal)
+  .catch((error: unknown) => {
+    const known = error instanceof WikiError;
+    const code = known ? error.code : "error";
+    const message = error instanceof Error ? error.message : String(error);
+    if (opts.json) process.stdout.write(`${JSON.stringify({ ok: false, error: { code, message } }, null, 2)}\n`);
+    process.stderr.write(`wiki-cli: ${code}: ${message}\n`);
+    process.exitCode = known ? EXIT[error.code] : 1;
+  })
+  .finally(() => {
+    process.off("SIGINT", stop);
+    process.off("SIGTERM", stop);
+  });

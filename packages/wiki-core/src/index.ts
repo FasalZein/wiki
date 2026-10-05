@@ -5,3 +5,4 @@ export * from "./sources.ts";
 export * from "./code.ts";
 export * from "./checks.ts";
 export * from "./read.ts";
+export * from "./extract.ts";

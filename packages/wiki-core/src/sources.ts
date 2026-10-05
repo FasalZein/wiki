@@ -24,10 +24,17 @@ import { assertRequestId, type Digest, SCHEMA_VERSION, WikiError } from "./types
  */
 
 export interface Extractor {
-  /** Stable extractor name, e.g. `utf8-text`, `pdftotext`. */
+  /** Stable extractor name, e.g. `utf8-text`, `pdftotext`, `pandoc`. */
   name: string;
   /** Extractor version string as observed at capture time. */
   version: string;
+  /** Decoder label when original bytes were decoded before extraction. */
+  charset?: string;
+  /**
+   * Explicit gaps in the extracted text.
+   * Absent when the extractor represented the whole document.
+   */
+  limitations?: readonly string[];
 }
 
 export interface TextLocator {
