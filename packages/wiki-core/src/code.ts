@@ -113,7 +113,7 @@ export function captureCode(vault: Vault, repoName: string, paths: string[], req
     const prior = loadObservation(vault, file.observationId);
     verifyObservationBlobs(vault, prior);
     if (canonicalJson(prior.locator) !== canonicalJson(locator(file.path)) || prior.original.digest !== file.digest ||
-        prior.original.mediaType !== "application/octet-stream" || prior.extracted !== null) {
+        prior.original.mediaType !== "application/octet-stream" || prior.extracted !== null || prior.observedAt !== claimed.observedAt) {
       throw new WikiError("damaged", `code capture effect ${file.observationId} differs from its request claim`);
     }
   }

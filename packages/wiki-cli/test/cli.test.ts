@@ -714,6 +714,46 @@ import(${JSON.stringify(coreUrl)}).then(core => core.captureCode(core.openVault(
     assert.ok(ok(cli(vault, ...args)).observations.every((o: any) => o.replayed));
   });
 
+  test("a changed batch timestamp fails before recovery adds a source effect", () => {
+    const vault = freshVault();
+    const repo = freshRepo({ "a.txt": "A\n", "b.txt": "B\n" });
+    ok(cli(vault, "repo", "add", "app", "--path", repo));
+    const coreUrl = new URL("../../wiki-core/src/index.ts", import.meta.url).href;
+    const interrupted = spawnSync(process.execPath, ["-e", `
+const fs = require('node:fs');
+const { syncBuiltinESMExports } = require('node:module');
+const realLink = fs.linkSync;
+let sources = 0;
+fs.linkSync = (source, target) => {
+  if (target.includes('/sources/') && ++sources === 2) throw new Error('fixture interrupted before second source');
+  return realLink(source, target);
+};
+syncBuiltinESMExports();
+import(${JSON.stringify(coreUrl)}).then(core => core.captureCode(core.openVault(${JSON.stringify(vault)}), 'app', ['a.txt', 'b.txt'], 'timestamp-batch'));
+`], { encoding: "utf8" });
+    assert.equal(interrupted.status, 1);
+    assert.match(interrupted.stderr, /fixture interrupted before second source/);
+    const sources = path.join(vault, ".wiki/sources");
+    const snapshot = () => fs.readdirSync(sources).sort().map((name) => [name, fs.readFileSync(path.join(sources, name), "utf8")]);
+    const before = snapshot();
+    assert.equal(before.length, 1);
+    const claimFile = path.join(vault, ".wiki/code-requests/timestamp-batch.json");
+    const claim = JSON.parse(fs.readFileSync(claimFile, "utf8"));
+    const originalTime = claim.observedAt;
+    const changedTime = "2027-01-01T00:00:00.000Z";
+    assert.notEqual(originalTime, changedTime);
+    fs.writeFileSync(claimFile, JSON.stringify({ ...claim, observedAt: changedTime }));
+    const args = ["capture", "code", "--repo", "app", "--path", "a.txt", "--path", "b.txt", "--request-id", "timestamp-batch"];
+    const rejected = cli(vault, ...args);
+    assert.equal(rejected.status, 6, "inconsistent retained provenance must fail closed");
+    assert.match(rejected.stderr, /differs from its request claim/);
+    assert.deepEqual(snapshot(), before, "a damaged claim cannot add or alter a source effect");
+    fs.writeFileSync(claimFile, JSON.stringify(claim));
+    const resumed = ok(cli(vault, ...args));
+    assert.deepEqual(resumed.observations.map((o: any) => o.observedAt), [originalTime, originalTime]);
+    assert.deepEqual(resumed.observations.map((o: any) => o.replayed), [true, false]);
+  });
+
   test("a damaged batch claim fails closed before another source effect", () => {
     const vault = freshVault();
     const repo = freshRepo({ "a.txt": "A\n", "b.txt": "B\n" });
