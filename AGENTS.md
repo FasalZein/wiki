@@ -16,7 +16,7 @@
 ## Verification scope
 
 - Legacy CLI (`src/`, `tests/`): `bun run typecheck` and `bun test tests/`. Run `tests/`, not the whole tree; `reference/` and `archive/` hold non-product code.
-- New core and CLI (`packages/wiki-core`, `packages/wiki-cli`): `bun run verify:next` (Node typecheck plus `node --test` CLI integration tests, Node >= 22.18).
+- Node packages (`packages/wiki-core`, `packages/wiki-cli`, `packages/okf-wiki`): `bun run verify:next` covers source and tests at the batch gate (Node typecheck plus `node --test` CLI integration tests, Node >= 22.18).
 - Tests use disposable temp vaults and Git repositories only. Never point a test or a manual run at the archive vault.
 
 ## Evidence and authored Markdown
