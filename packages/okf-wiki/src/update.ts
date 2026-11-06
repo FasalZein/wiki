@@ -36,7 +36,7 @@ export function readUpdateCandidate(file: string): UpdateCandidate {
   } catch { throw new WikiError("usage", "Candidate must be a readable regular file containing valid UTF-8"); }
   finally { if (fd !== undefined) fs.closeSync(fd); }
 }
-function targetBytes(root: string, relative: string): Buffer {
+function captureTarget(root: string, relative: string): { bytes: Buffer; mode: number } {
   const invalid = canonicalPathProblem(relative);
   if (invalid) throw new WikiError("usage", invalid.message);
   const parts = relative.split("/");
@@ -46,14 +46,15 @@ function targetBytes(root: string, relative: string): Buffer {
   if (!target.stat.isFile()) throw new WikiError("usage", "Expected a regular Markdown topic: " + relative);
   const fd = fs.openSync(target.full, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK | fs.constants.O_NOFOLLOW);
   try {
-    if (!fs.fstatSync(fd).isFile()) throw new WikiError("usage", "Expected a regular Markdown topic: " + relative);
-    return fs.readFileSync(fd);
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile()) throw new WikiError("usage", "Expected a regular Markdown topic: " + relative);
+    return { bytes: fs.readFileSync(fd), mode: stat.mode & 0o777 };
   } finally { fs.closeSync(fd); }
 }
-function compare(root: string, relative: string, expected: string): Buffer {
-  const bytes = targetBytes(root, relative), current = digest(bytes);
+function compare(root: string, relative: string, expected: string) {
+  const target = captureTarget(root, relative), current = digest(target.bytes);
   if (current !== expected) throw new UpdateConflictError(relative, expected, current);
-  return bytes;
+  return target;
 }
 function difference(before: Buffer, after: UpdateCandidate) {
   // Common edge lines keep proposal output focused without normalizing retained bytes.
@@ -71,9 +72,9 @@ export function updateTopic(root: string, relative: string, expected: string, ca
   if (inventory.diagnostics.some(d => d.path === relative && d.rule === "title.duplicate")) throw new WikiError("conflict", "Duplicate normalized title at " + relative);
   inventory.diagnostics.push(...indexDestinationDiagnostics(root, inventory.indexes.keys()));
   if (inventory.diagnostics.length) throw new CreateValidationError(inventory.diagnostics);
-  const result = { path: relative, digest: candidate.digest, candidateDigest: candidate.digest, ...difference(before, candidate) };
+  const result = { path: relative, digest: candidate.digest, candidateDigest: candidate.digest, ...difference(before.bytes, candidate) };
   if (dryRun) return { ...result, outcome: "dry-run" as const, navigation: "unchanged", log: "unchanged" };
-  if (before.equals(candidate.bytes)) {
+  if (before.bytes.equals(candidate.bytes)) {
     compare(root, relative, expected);
     return { ...result, outcome: "unchanged" as const, navigation: "unchanged", log: "unchanged" };
   }
@@ -81,7 +82,9 @@ export function updateTopic(root: string, relative: string, expected: string, ca
   const temporaryPath = ".wiki/tmp/" + randomUUID(), tmp = containedEntry(root, temporaryPath).full;
   let primary: unknown, renamed = false;
   try {
-    fs.writeFileSync(tmp, candidate.bytes, { flag: "wx" });
+    // Stage privately from creation, then retain the actual target access bits, not candidate/umask defaults.
+    fs.writeFileSync(tmp, candidate.bytes, { flag: "wx", mode: 0o600 });
+    fs.chmodSync(tmp, before.mode);
     // Last full-byte read after validation and temp preparation, immediately before rename.
     compare(root, relative, expected);
     fs.renameSync(tmp, containedEntry(root, relative).full);

@@ -326,8 +326,12 @@ write the vault. It can run while a cooperating mutation lock is held; it is not
 reservation for later apply.
 
 Apply uses the same non-stealing vault mutation lock as new, type add, and index.
-It validates under that lock, prepares a complete temporary file, then re-reads
-and hashes the actual full target bytes immediately before atomic rename. A stale
+It validates under that lock and creates the temporary file with mode 0600
+(the process umask can restrict this further) before writing candidate bytes.
+It copies the actual target's read/write/execute permission bits to that file,
+not the candidate's mode or default umask permissions. It then re-reads and hashes
+the actual full target bytes immediately before atomic rename. This preserves
+POSIX access bits; ACLs, xattrs and ownership preservation are not established. A stale
 base exits 3 with path, expected, and current digests. Re-read and reconsider the
 candidate after a conflict. Never automatically retry an old candidate with a new
 digest. Missing targets exit 4; unsafe targets or invalid candidates exit 2;

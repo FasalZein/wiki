@@ -144,7 +144,7 @@ for (const kind of ["directory", "fifo", "symlink", "utf8"] as const) test("okf:
 
 function guarded(vault: string, expect: string, file: string, mode: string, ...args: string[]) {
   const result = spawnSync(process.execPath, ["--import", fileURLToPath(new URL("./update-io-guard.js", import.meta.url)), BIN, "--json", "--vault", vault, "update", relative, "--expect", expect, "--file", file, ...args], {
-    encoding: "utf8", cwd: temp, env: { ...process.env, HOME: temp, WIKI_VAULT: "", OKF_UPDATE_GUARD: mode }, timeout: 15000,
+    encoding: "utf8", cwd: temp, env: { ...process.env, HOME: temp, WIKI_VAULT: "", OKF_UPDATE_GUARD: mode, OKF_UPDATE_MODE_EVENTS: file + ".events.json" }, timeout: 15000,
   });
   assert.equal(result.error, undefined); assert.equal(result.stderr, "");
   assert.equal(result.stdout.trim().split("\n").length, 1);
@@ -233,4 +233,39 @@ test("okf:08 no-op release failure never reports written or adds a historical en
   const result = guarded(vault, note.digest, candidate(bytes), "release-fail");
   assert.notEqual(result.status, 0); assert.equal(result.data.written, undefined);
   assert.equal(result.data.cleanup.retained, true); assert.equal(read(vault), bytes); assert.equal(read(vault, "log.md"), log);
+});
+
+
+for (const [targetMode, candidateMode] of [[0o600, 0o600], [0o640, 0o600], [0o400, 0o644]] as const) test("okf:08 permissions private first-write and target access preserved: " + targetMode.toString(8), () => {
+  const { vault, note, bytes } = fresh(), proposed = bytes + "Synthetic private candidate\n", file = candidate(proposed);
+  fs.chmodSync(path.join(vault, relative), targetMode); fs.chmodSync(file, candidateMode);
+  fs.chmodSync(path.join(vault, ".wiki/tmp"), 0o755);
+  const result = guarded(vault, note.digest, file, "permissions");
+  const events = JSON.parse(fs.readFileSync(file + ".events.json", "utf8"));
+  assert.equal(result.status, 0, JSON.stringify(result)); assert.equal(result.data.outcome, "updated");
+  assert.deepEqual({ events, targetMode: fs.statSync(path.join(vault, relative)).mode & 0o777 }, {
+    events: [{ event: "created", mode: 0o600, size: 0 }, { event: "written", mode: 0o600, size: Buffer.byteLength(proposed) }], targetMode,
+  });
+  assert.equal(fs.statSync(file).mode & 0o777, candidateMode);
+  assert.equal(read(vault), proposed); assert.equal(result.data.digest, digest(proposed));
+  assert.deepEqual(fs.readdirSync(path.join(vault, ".wiki/tmp")), []);
+});
+
+test("okf:08 permissions stale conflict retains private candidate after cleanup failure", () => {
+  const { vault, note, bytes } = fresh(), proposed = bytes + "Synthetic private candidate\n", file = candidate(proposed);
+  fs.chmodSync(path.join(vault, relative), 0o600); fs.chmodSync(file, 0o600);
+  fs.chmodSync(path.join(vault, ".wiki/tmp"), 0o755);
+  const result = guarded(vault, note.digest, file, "stale-cleanup-permissions");
+  const events = JSON.parse(fs.readFileSync(file + ".events.json", "utf8"));
+  assert.equal(result.status, 3, JSON.stringify(result)); assert.equal(result.data.error.code, "conflict");
+  assert.equal(result.data.written, undefined); assert.equal(result.data.expected, note.digest);
+  assert.equal(result.data.current, digest("External writer bytes\n")); assert.equal(result.data.temporaryCleanup.retained, true);
+  const retained = path.join(vault, result.data.temporaryCleanup.path);
+  assert.deepEqual({ events, retainedMode: fs.statSync(retained).mode & 0o777 }, {
+    events: [{ event: "created", mode: 0o600, size: 0 }, { event: "written", mode: 0o600, size: Buffer.byteLength(proposed) }], retainedMode: 0o600,
+  });
+  assert.equal(fs.readFileSync(retained, "utf8"), proposed);
+  assert.equal(fs.statSync(path.join(vault, relative)).mode & 0o777, 0o600);
+  assert.equal(read(vault), "External writer bytes\n");
+  assert.deepEqual(fs.readdirSync(path.join(vault, ".wiki/locks")), []);
 });
