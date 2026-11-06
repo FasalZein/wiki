@@ -10,8 +10,8 @@ node packages/okf-wiki/bin/okf-wiki.js --vault /explicit/disposable/vault init -
 WIKI_VAULT=/explicit/disposable/vault node packages/okf-wiki/bin/okf-wiki.js init --json
 ```
 
-Only `init` is implemented in B01. The directory argument is an explicit vault
-selection. `--vault` takes precedence over `WIKI_VAULT`; an init directory also
+Implemented commands are `init`, `type list`, `type add`, and the registry/frontmatter
+portion of `lint`. The init directory argument is an explicit vault selection. `--vault` takes precedence over `WIKI_VAULT`; an init directory also
 takes precedence over the environment. Conflicting flag and positional
 directories fail with exit 2. There is no default vault. Relative vault locations
 resolve from the current working directory. Parent filesystem aliases resolve
@@ -32,7 +32,8 @@ Registry files are editable data, not a fixed type universe. Each record has
 `{level, text}` entries, and a literal Markdown body `template`. An absent `scopes`
 allows all supported scopes. Templates do not execute or interpolate code.
 The source schema includes retained-asset metadata for later capture commands.
-Schema validation, registry editing, note commands, and search belong to later slices.
+Registry validation and exclusive scaffolding are implemented. Note writes and search
+belong to later slices.
 
 Init publishes complete files exclusively, with the configuration last as the
 completion marker. A compatible repeat checks the managed layout and leaves
@@ -49,12 +50,66 @@ the missing or malformed managed paths and does not repair or overwrite them.
 Inspect retained files before choosing a fresh empty destination or recovering
 manually. Do not treat a config-free partial vault as an empty target.
 
+## Registry and frontmatter validation
+
+Install the package-local, pinned dependencies without changing the root dependency
+set or lockfile:
+
+```sh
+heavy -- npm ci --prefix packages/okf-wiki --ignore-scripts
+```
+
+This package owns its npm lockfile. Ajv evaluates draft-2020-12 schemas with
+`ajv-formats` date-time validation. YAML uses the core data schema, preserves
+timestamps as strings, rejects unknown tags and duplicate keys, and has no parse
+cache. Plain `---` delimiters cannot select a language engine.
+
+```sh
+node packages/okf-wiki/bin/okf-wiki.js --vault /explicit/disposable/vault type list --json
+node packages/okf-wiki/bin/okf-wiki.js --vault /explicit/disposable/vault type add glossary --folder glossary --json
+node packages/okf-wiki/bin/okf-wiki.js --vault /explicit/disposable/vault lint --json
+node packages/okf-wiki/bin/okf-wiki.js --vault /explicit/disposable/vault lint projects/wiki/glossary/terms.md --json
+```
+
+The registry, not CLI source, defines accepted type names. Each schema may use
+fragment-local JSON pointers and anchors, including `$defs`. Remote/relative-file
+references and external schema identifiers are refused without network access.
+Registry records reject unknown configuration keys. Templates are literal Markdown
+body text, never executed or interpolated. Placeholder-looking syntax, fenced code
+examples, and Markdown thematic breaks remain literal text. Complete leading
+frontmatter blocks, including language-tagged blocks, are refused because templates
+supply bodies only. Template engine configuration is not an accepted registry field.
+Required headings must appear in the template.
+Folders must be safe, non-reserved names and cannot overlap in allowed scopes.
+Exact `scopes` restrictions are optional; absent means all supported scopes.
+
+`type list` returns names, folders, required fields/headings, and optional scopes.
+`type add` publishes a complete JSON scaffold exclusively and records a type-added
+log entry. It refuses existing files, does not migrate notes, and installs no hooks.
+Review its JSON and run whole-vault lint before committing a registry change.
+A later log failure reports `written: true`, the published path, and its digest;
+it does not remove the published scaffold or invent a successful log entry.
+
+A custom schema can narrow the common profile but cannot remove required fields,
+string/date-time contracts, tag casing, lifecycle value syntax, or the flat-data
+restriction. Source notes still require resource and retrieval metadata. Extra
+flat properties must be declared by the type schema. Validation never coerces
+values or supplies defaults. Diagnostics sort by path, rule, and message and
+include `path`, `rule`, `message`, and `fix`. Lint failures exit 1 with error code
+`lint`; successful lint reports `checks: ["registry", "frontmatter"]`.
+
+**Current boundary:** lint checks registry integrity and authored frontmatter,
+including exact type scope restrictions. It does not yet check canonical folder
+placement, body/headings, duplicate titles, lifecycle target references, links,
+or generated indexes. A successful lint result is not yet full-product lint.
+A path selection still validates the entire registry. Lint never rewrites files.
+
 ## Verification
 
 From the repository root:
 
 ```sh
-OKF_TEST_PATTERN="okf:01" heavy -- bun run test:okf
+OKF_TEST_PATTERN="okf:01|okf:02" heavy -- bun run test:okf
 heavy -- bun run typecheck:okf
 ```
 
@@ -66,7 +121,7 @@ after every slice. Current process tests use disposable fixtures only.
 
 ### Planned `boot:okf` contract (B20, not executable yet)
 
-There is **no boot script** in B01. Do not add a passing placeholder to the
+There is **no boot script** yet. Do not add a passing placeholder to the
 manifest. B20 will supply `heavy -- bun run boot:okf`: start the source Node CLI
 in temporary storage, run init/new/show/lint/index-check, assert their results,
 clean up, and exit. Any search smoke must use isolated qmd state and explicitly
