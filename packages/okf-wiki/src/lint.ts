@@ -19,7 +19,8 @@ function scopeOf(relative: string): string | undefined {
   if (parts[0] === "projects" && safeName(parts[1] ?? "")) return "projects/" + parts[1];
   return undefined;
 }
-export function inspectVault(root: string, selected?: string) {
+export interface ProspectiveNote { path: string; markdown: string }
+export function inspectVault(root: string, selected?: string, prospective?: ProspectiveNote) {
   const { types, diagnostics } = loadRegistry(root);
   const notes: { path: string; scope: string | undefined; data: Record<string, unknown>; canonical: boolean; body: string; tree: ReturnType<typeof parseMarkdown> }[] = [];
   const directories: NavigationDirectory[] = [{ path: "", type: "" }];
@@ -46,8 +47,18 @@ export function inspectVault(root: string, selected?: string) {
       if (!generated) fail(relative, "path.layout", "Unexpected index outside a maintained directory", "Place generated indexes only at vault, scope, or registered-folder roots");
       return;
     }
+    const bytes = fs.readFileSync(full);
+    let markdown: string;
+    try { markdown = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes); }
+    catch {
+      fail(relative, "document.utf8", "Note is not valid UTF-8", "Save the complete note as valid UTF-8 without replacing or discarding authored bytes");
+      return;
+    }
+    inspectNote(relative, markdown);
+  }
+  function inspectNote(relative: string, markdown: string) {
     let parsed: ReturnType<typeof parseNoteText>;
-    try { parsed = parseNoteText(fs.readFileSync(full, "utf8")); }
+    try { parsed = parseNoteText(markdown); }
     catch (error) { fail(relative, "frontmatter.yaml", error instanceof Error ? error.message : String(error), "Use safe YAML mapping data with plain --- delimiters"); return; }
     const { frontmatter: data, body } = parsed;
     const type = types.find(t => t.record.name === data.type);
@@ -85,11 +96,22 @@ export function inspectVault(root: string, selected?: string) {
   // Registry diagnostics are always applicable, even for an invalid selected path.
   if (selected !== undefined && diagnostics.some(d => d.path === selected && d.rule.startsWith("path."))) return { diagnostics: sortDiagnostics(diagnostics), indexes: new Map<string, string>() };
   for (const name of fs.readdirSync(root).sort()) if (!SKIP.has(name)) visit(name);
+  if (prospective) {
+    const parents = prospective.path.split("/").slice(0, -1);
+    for (let i = 1; i <= parents.length; i++) {
+      const relative = parents.slice(0, i).join("/");
+      const directory = maintainedDirectory(relative, types);
+      if (directory && !directories.some(d => d.path === relative)) { directories.push(directory); indexes.add(relative + "/index.md"); }
+    }
+    inspectNote(prospective.path, prospective.markdown);
+  }
   const topics = new Set(notes.filter(n => n.canonical).map(n => n.path));
+  const plannedTargets = new Set(indexes);
+  if (prospective) plannedTargets.add(prospective.path);
   const titles = new Map<string, typeof notes>();
   for (const note of notes) {
     // Whole-vault callers repair planned indexes or report freshness; selected lint requires existing link targets.
-    diagnostics.push(...linkDiagnostics(root, note.path, note.body, note.tree, relative => topics.has(relative) || indexes.has(relative) || isCaptureAsset(relative), selected === undefined ? indexes : undefined));
+    diagnostics.push(...linkDiagnostics(root, note.path, note.body, note.tree, relative => topics.has(relative) || indexes.has(relative) || isCaptureAsset(relative), selected === undefined ? plannedTargets : undefined));
     if (note.data.type === "source") for (const field of ["original", "extracted"]) {
       const value = note.data[field];
       if (typeof value !== "string") continue; // The registered schema reports missing or non-string values.
@@ -99,7 +121,7 @@ export function inspectVault(root: string, selected?: string) {
     }
     if (typeof note.data.superseded_by === "string" && !topics.has(note.data.superseded_by)) fail(note.path, "lifecycle.target", "superseded_by must name an existing canonical topic: " + note.data.superseded_by, "Use a vault-relative topic path with .md and no dot segments");
     if (!note.scope || typeof note.data.title !== "string") continue;
-    const key = note.scope + "\0" + caseFold(note.data.title.trim());
+    const key = note.scope + "\0" + caseFold(note.data.title.trim().normalize("NFC")).normalize("NFC");
     const group = titles.get(key) ?? [];
     group.push(note); titles.set(key, group);
   }

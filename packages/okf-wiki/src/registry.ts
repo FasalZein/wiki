@@ -193,7 +193,7 @@ export class RegistryWriteError extends WikiError {
     this.digest = "sha256:" + createHash("sha256").update(bytes).digest("hex");
   }
 }
-export function addType(root: string, name: string, folder: string): string {
+export function addType(root: string, name: string, folder: string): { path: string; digest: string } {
   if (!safeName(name) || !safeName(folder)) throw new WikiError("usage", "Use safe, non-reserved lowercase hyphenated type and folder names");
   const relative = ".wiki/types/" + name + ".json";
   // Preserve exclusive-create conflicts for an existing leaf, including a symlink.
@@ -217,7 +217,7 @@ export function addType(root: string, name: string, folder: string): string {
     const entry = "**type-added** [" + name + "](" + relative + ")\n\n";
     fs.writeFileSync(log, heading + entry + (previous.startsWith(heading) ? previous.slice(heading.length) : previous));
   } catch { throw new RegistryWriteError(relative, bytes); }
-  return relative;
+  return { path: relative, digest: "sha256:" + createHash("sha256").update(bytes).digest("hex") };
 }
 export function schemaDiagnostics(file: string, errors: ErrorObject[] | null | undefined): Diagnostic[] {
   return (errors ?? []).map(e => issue(file, "frontmatter.schema", (e.instancePath || "/") + " " + e.message + " " + JSON.stringify(e.params), "Correct the field to satisfy the common profile and registered type schema"));
