@@ -279,6 +279,14 @@ Separate note/index/log writes are not a multi-file transaction. Normal completi
 returns path, title, description, and the complete sha256: digest, with current
 indexes and exactly one **created** log line. A later index/log failure leaves the
 note intact and returns ok: false, written: true, its path and digest, and repair
-instructions, never a success result. Rejected validation, busy, and collision
+instructions, never a success result. A failed temporary-name cleanup after exclusive
+publication also reports the published path/digest and retained temporaryPath; do not
+retry the content write. Final output waits for lock cleanup. A release failure
+returns one error object with cleanup details and the retained lock path. Completed
+actions include outcome: completed and their published paths and digest (or per-index
+digests). A primary action failure keeps its error and publication metadata when
+release also fails. Existing concepts must decode as strict UTF-8 before validation;
+malformed bytes produce a document.utf8 diagnostic and block navigation/publication.
+Rejected validation, busy, and collision
 requests publish no topic or success log. Mutations do not stage or commit Git,
 load models, start qmd, or change global configuration.

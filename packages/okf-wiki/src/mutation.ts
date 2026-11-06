@@ -3,6 +3,14 @@ import * as os from "node:os";
 import { randomUUID } from "node:crypto";
 import { containedEntry, WikiError } from "./vault.ts";
 
+export class MutationReleaseError extends Error {
+  readonly outcome: { kind: "completed" } | { kind: "failed"; error: unknown };
+  constructor(outcome: MutationReleaseError["outcome"], cause: unknown) {
+    super("Mutation lock release failed; .wiki/locks/mutation.lock is retained; inspect ownership before explicit recovery", { cause });
+    this.outcome = outcome;
+  }
+}
+
 /** Single-host, non-stealing coordination for cooperating CLI writers only. */
 export function withMutationLock<T>(root: string, action: () => T): T {
   const directory = containedEntry(root, ".wiki/locks");
@@ -16,10 +24,12 @@ export function withMutationLock<T>(root: string, action: () => T): T {
     throw error;
   }
   const owned = fs.fstatSync(fd);
+  let outcome: { ok: true; value: T } | { ok: false; error: unknown };
   try {
     fs.writeFileSync(fd, JSON.stringify({ token, pid: process.pid, hostname: os.hostname(), started: new Date().toISOString() }) + "\n");
-    return action();
-  } finally {
+    outcome = { ok: true, value: action() };
+  } catch (error) { outcome = { ok: false, error }; }
+  try {
     fs.closeSync(fd);
     // A replaced lock belongs to another owner, even if this process created the old one.
     const current = fs.lstatSync(full, { throwIfNoEntry: false });
@@ -28,5 +38,9 @@ export function withMutationLock<T>(root: string, action: () => T): T {
       try { owner = JSON.parse(fs.readFileSync(full, "utf8")); } catch { /* Retain damaged ownership records for operator inspection. */ }
       if (typeof owner === "object" && owner !== null && "token" in owner && owner.token === token) fs.unlinkSync(full);
     }
+  } catch (error) {
+    throw new MutationReleaseError(outcome.ok ? { kind: "completed" } : { kind: "failed", error: outcome.error }, error);
   }
+  if (!outcome.ok) throw outcome.error;
+  return outcome.value;
 }

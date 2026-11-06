@@ -47,7 +47,14 @@ export function inspectVault(root: string, selected?: string, prospective?: Pros
       if (!generated) fail(relative, "path.layout", "Unexpected index outside a maintained directory", "Place generated indexes only at vault, scope, or registered-folder roots");
       return;
     }
-    inspectNote(relative, fs.readFileSync(full, "utf8"));
+    const bytes = fs.readFileSync(full);
+    let markdown: string;
+    try { markdown = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes); }
+    catch {
+      fail(relative, "document.utf8", "Note is not valid UTF-8", "Save the complete note as valid UTF-8 without replacing or discarding authored bytes");
+      return;
+    }
+    inspectNote(relative, markdown);
   }
   function inspectNote(relative: string, markdown: string) {
     let parsed: ReturnType<typeof parseNoteText>;
