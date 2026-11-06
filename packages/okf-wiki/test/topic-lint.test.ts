@@ -173,3 +173,48 @@ test("okf:03 lint is read-only across success, failure, path selection, registry
   assert.equal(help.status, 0);
   assert.match(help.stdout, /links and indexes not checked/);
 });
+
+
+for (const mode of ["whole-vault", "selected-file", "selected-directory"]) test("okf:03 only canonical scope capture assets are excluded: " + mode, () => {
+  const vault = fresh();
+  for (const relative of ["personal/notes/assets/topic.md", "projects/wiki/notes/assets/topic.md", "assets/topic.md", "projects/Bad/assets/topic.md"]) {
+    note(vault, relative);
+    const selected = mode === "whole-vault" ? [] : [mode === "selected-file" ? relative : path.posix.dirname(relative)];
+    rejects(vault, relative, "path.layout", ...selected);
+    fs.unlinkSync(path.join(vault, relative));
+  }
+  for (const relative of ["personal/assets/capture/source.md", "projects/wiki/assets/capture/source.md"]) {
+    fs.mkdirSync(path.dirname(path.join(vault, relative)), { recursive: true });
+    fs.writeFileSync(path.join(vault, relative), "Literal capture without frontmatter.\nStatus: source text\n");
+  }
+  assert.equal(cli(vault, "lint").status, 0);
+  assert.equal(cli(vault, "lint", "personal").status, 0);
+  assert.equal(cli(vault, "lint", "projects/wiki").status, 0);
+});
+
+
+for (const [left, right] of [["Straße", "STRASSE"], ["ΟΣ", "οσ"]]) for (const mode of ["whole-vault", "selected-path"]) {
+  test("okf:03 Unicode case-fold duplicates " + left + "/" + right + ": " + mode, () => {
+    const vault = fresh();
+    const first = note(vault, "personal/notes/one.md", "", "", "note", " " + left + " ");
+    const second = note(vault, "personal/notes/two.md", "", "", "note", right);
+    const other = note(vault, "projects/wiki/notes/other.md", "", "", "note", right);
+    const before = [first, second, other].map(file => fs.readFileSync(path.join(vault, file), "utf8"));
+    const selected = mode === "whole-vault" ? [] : [first];
+    const result = rejects(vault, first, "title.duplicate", ...selected);
+    assert.deepEqual(result.data.diagnostics.map((d: { path: string; rule: string }) => [d.path, d.rule]), [[first, "title.duplicate"], [second, "title.duplicate"]]);
+    assert.deepEqual([first, second, other].map(file => fs.readFileSync(path.join(vault, file), "utf8")), before, "folding never rewrites authored titles");
+    assert.equal(cli(vault, "lint", other).status, 0);
+    fs.unlinkSync(path.join(vault, second));
+    assert.equal(cli(vault, "lint", ...selected).status, 0, "case-fold equivalents in different scopes are allowed");
+    assert.equal(cli(vault, "lint").status, 0);
+  });
+}
+
+
+test("okf:03 default case folding preserves accents and does not use Turkic locale tailoring", () => {
+  const vault = fresh();
+  for (const [slug, title] of [["accented", "café"], ["plain", "cafe"], ["dotted", "İ"], ["undotted", "i"]]) note(vault, "personal/notes/" + slug + ".md", "", "", "note", title);
+  assert.equal(cli(vault, "lint").status, 0);
+  assert.equal(cli(vault, "lint", "personal/notes/dotted.md").status, 0);
+});

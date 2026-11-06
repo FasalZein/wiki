@@ -1,10 +1,15 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { caseFold } from "unicode-case-folding";
 import { parseNoteText } from "./frontmatter.ts";
 import { metadataLines, missingHeadings, parseMarkdown } from "./markdown.ts";
 import { declaresProperty, loadRegistry, safeName, schemaDiagnostics, sortDiagnostics, type Diagnostic } from "./registry.ts";
 
-const SKIP = new Set([".wiki", ".git", ".obsidian", "node_modules", "assets"]);
+const SKIP = new Set([".wiki", ".git", ".obsidian", "node_modules"]);
+function isCaptureAsset(relative: string): boolean {
+  const parts = relative.split("/");
+  return parts[0] === "personal" && parts[1] === "assets" || parts[0] === "projects" && safeName(parts[1] ?? "") && parts[2] === "assets";
+}
 function scopeOf(relative: string): string | undefined {
   const parts = relative.split("/");
   if (parts[0] === "personal") return "personal";
@@ -16,12 +21,13 @@ export function lintVault(root: string, selected?: string): Diagnostic[] {
   const notes: { path: string; scope: string | undefined; data: Record<string, unknown>; canonical: boolean }[] = [];
   function fail(file: string, rule: string, message: string, fix: string) { diagnostics.push({ path: file, rule, message, fix }); }
   function visit(relative: string) {
+    if (isCaptureAsset(relative)) return;
     const full = path.join(root, relative);
     const stat = fs.lstatSync(full, { throwIfNoEntry: false });
     if (!stat) { fail(relative, "path.missing", "Missing requested path", "Select an existing note path"); return; }
     if (stat.isSymbolicLink()) { fail(relative, "path.symlink", "Symlinked note trees and files are refused", "Use regular vault-owned files and directories"); return; }
     if (stat.isDirectory()) {
-      for (const name of fs.readdirSync(full).sort()) if (!SKIP.has(name) || name === "assets" && relative === "projects") visit(relative ? relative + "/" + name : name);
+      for (const name of fs.readdirSync(full).sort()) if (!SKIP.has(name)) visit(relative ? relative + "/" + name : name);
       return;
     }
     if (!relative.endsWith(".md") || relative === "log.md") return;
@@ -59,7 +65,7 @@ export function lintVault(root: string, selected?: string): Diagnostic[] {
     if (type.record.scopes && (!scope || !type.record.scopes.includes(scope))) fail(relative, "frontmatter.scope", "Type is not allowed in scope " + String(scope), "Use one of the exact registered scopes: " + type.record.scopes.join(", "));
   }
   if (selected !== undefined) {
-    if (!selected || selected.includes("\\") || selected.includes("\0") || path.isAbsolute(selected) || selected.split("/").some(p => !p || p === "." || p === ".." || SKIP.has(p))) {
+    if (!selected || selected.includes("\\") || selected.includes("\0") || path.isAbsolute(selected) || isCaptureAsset(selected) || selected.split("/").some(p => !p || p === "." || p === ".." || SKIP.has(p))) {
       fail(selected, "path.invalid", "Expected a contained canonical note path", "Use a vault-relative path without dot segments or operational directories");
     } else {
       // Check every existing ancestor before entering the requested subtree.
@@ -78,7 +84,7 @@ export function lintVault(root: string, selected?: string): Diagnostic[] {
   for (const note of notes) {
     if (typeof note.data.superseded_by === "string" && !topics.has(note.data.superseded_by)) fail(note.path, "lifecycle.target", "superseded_by must name an existing canonical topic: " + note.data.superseded_by, "Use a vault-relative topic path with .md and no dot segments");
     if (!note.scope || typeof note.data.title !== "string") continue;
-    const key = note.scope + "\0" + note.data.title.trim().toLowerCase();
+    const key = note.scope + "\0" + caseFold(note.data.title.trim());
     const group = titles.get(key) ?? [];
     group.push(note); titles.set(key, group);
   }

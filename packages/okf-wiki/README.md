@@ -101,8 +101,13 @@ include `path`, `rule`, `message`, and `fix`. Lint failures exit 1 with error co
 
 Lint checks canonical scope/folder/slug placement, exact type scope restrictions,
 registered headings, decision Consequences hierarchy, and duplicate scoped titles
-after trimming and case normalization. Markdown structure comes from a CommonMark
-AST; code examples, HTML source blocks, and blockquotes do not satisfy headings
+after trimming and Unicode default full case folding. Folding uses the pinned,
+dependency-free MIT package `unicode-case-folding` (1.1.2), whose generated table
+comes from the Unicode Character Database
+[CaseFolding.txt](https://www.unicode.org/Public/UCD/latest/ucd/CaseFolding.txt);
+[source and license](https://github.com/avivkeller/unicode-case-folding).
+Folding affects comparison keys only, not authored titles or accents. Markdown
+structure comes from a CommonMark AST; code examples, HTML source blocks, and blockquotes do not satisfy headings
 or count as repeated Status:/Type: metadata. Templates use the same heading check.
 Lifecycle references require deprecated status and an existing canonical topic.
 
