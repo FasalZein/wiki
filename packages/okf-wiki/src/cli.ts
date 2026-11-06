@@ -1,20 +1,27 @@
 import * as fs from "node:fs";
+import { createHash } from "node:crypto";
 import { parseArgs } from "node:util";
 import * as path from "node:path";
-import { initVault, WikiError, type ErrorCode } from "./vault.ts";
-import { addType, listTypes, loadRegistry, openVault, RegistryWriteError, sortDiagnostics } from "./registry.ts";
+import { initVault, WikiError, ExclusiveCleanupError, type ErrorCode } from "./vault.ts";
+import { addType, listTypes, loadRegistry, openVault, RegistryWriteError, safeName, sortDiagnostics } from "./registry.ts";
 import { readNote } from "./read.ts";
+import { createTopic, CreatePartialError, CreateValidationError, type CreateRequest } from "./create.ts";
+import { withMutationLock, MutationReleaseError } from "./mutation.ts";
 import { inspectVault, lintVault } from "./lint.ts";
 import { indexDestinationDiagnostics, indexFreshnessDiagnostics } from "./navigation.ts";
 
 const EXIT: Record<ErrorCode, number> = { usage: 2, conflict: 3, not_found: 4, unsupported: 5, damaged: 6 };
-const USAGE = "okf-wiki (Node source CLI)\nUsage: okf-wiki init <dir> [--json]\n       okf-wiki --vault <dir> init [--json]\n       okf-wiki --vault <dir> type list [--json]\n       okf-wiki --vault <dir> type add <name> --folder <folder> [--json]\n       okf-wiki --vault <dir> lint [path] [--json]\n       okf-wiki --vault <dir> index [--check] [--json]\n       okf-wiki --vault <dir> show <path> [--section <heading>] [--json]\nWhole-vault lint checks registry, frontmatter, layout, body, lifecycle, scoped titles, links, and generated-index freshness. Selected-path lint does not check generated-index freshness.\nVault: explicit directory, --vault, or WIKI_VAULT. No default vault.\n";
+const USAGE = "okf-wiki (Node source CLI)\nUsage: okf-wiki init <dir> [--json]\n       okf-wiki --vault <dir> init [--json]\n       okf-wiki --vault <dir> type list [--json]\n       okf-wiki --vault <dir> type add <name> --folder <folder> [--json]\n       okf-wiki --vault <dir> lint [path] [--json]\n       okf-wiki --vault <dir> index [--check] [--json]\n       okf-wiki --vault <dir> new <type> (--project <p>|--personal) --title <t> --description <d> [--slug <s>] [--body-file <f>] [--tags <tag> ...] [--status <status>] [--json]\n       okf-wiki --vault <dir> show <path> [--section <heading>] [--json]\nWhole-vault lint checks registry, frontmatter, layout, body, lifecycle, scoped titles, links, and generated-index freshness. Selected-path lint does not check generated-index freshness.\nVault: explicit directory, --vault, or WIKI_VAULT. No default vault.\n";
 let json = process.argv.slice(2).includes("--json");
-function output(value: object, human: string) { process.stdout.write(json ? JSON.stringify(value) + "\n" : human); }
+type PublishedResult = { written: true; paths: string[] } & ({ digest: string } | { digests: Record<string, string> });
+let publishedResult: PublishedResult | undefined;
+const outputBuffer: { pending?: { value: object; human: string; stderr: string } } = {};
+// Only emit after the action and required lock cleanup have both finished.
+function output(value: object, human: string, stderr = "") { outputBuffer.pending = { value, human, stderr }; }
 try {
   const { values, positionals } = parseArgs({
     allowPositionals: true,
-    options: { vault: { type: "string" }, folder: { type: "string" }, section: { type: "string" }, json: { type: "boolean" }, check: { type: "boolean" }, help: { type: "boolean", short: "h" } },
+    options: { project: { type: "string" }, personal: { type: "boolean" }, title: { type: "string" }, description: { type: "string" }, slug: { type: "string" }, "body-file": { type: "string" }, tags: { type: "string", multiple: true }, status: { type: "string" }, vault: { type: "string" }, folder: { type: "string" }, section: { type: "string" }, json: { type: "boolean" }, check: { type: "boolean" }, help: { type: "boolean", short: "h" } },
   });
   json = values.json ?? false;
   if (values.help) {
@@ -22,13 +29,26 @@ try {
   } else {
     const [command, arg, ...extra] = positionals;
     const init = command === "init";
+    const create = command === "new" && arg !== undefined && extra.length === 0;
+    let request: CreateRequest | undefined;
+    if (!create && [values.project, values.personal, values.title, values.description, values.slug, values["body-file"], values.tags, values.status].some(v => v !== undefined)) throw new WikiError("usage", "Create options require new <type>");
+    if (create && arg !== undefined) {
+      if ((values.project !== undefined) === (values.personal === true) || values.personal === false || values.title === undefined || values.description === undefined) throw new WikiError("usage", "Create requires exactly one explicit --project or --personal scope, --title and --description");
+      if (values.project !== undefined && !safeName(values.project)) throw new WikiError("usage", "Use a safe non-reserved project name");
+      let body: string | undefined;
+      if (values["body-file"] !== undefined) {
+        try { body = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(fs.readFileSync(values["body-file"])); }
+        catch { throw new WikiError("usage", "Cannot read body file as valid UTF-8"); }
+      }
+      request = { type: arg, scope: values.project === undefined ? "personal" : "projects/" + values.project, title: values.title, description: values.description, slug: values.slug, body, tags: values.tags, status: values.status };
+    }
     const list = command === "type" && arg === "list" && extra.length === 0;
     const add = command === "type" && arg === "add" && extra.length === 1 && values.folder !== undefined;
     const index = command === "index" && arg === undefined && extra.length === 0;
     if (values.check !== undefined && !index) throw new WikiError("usage", "--check is only valid with index");
     const show = command === "show" && arg !== undefined && extra.length === 0;
     if (values.section !== undefined && !show) throw new WikiError("usage", "--section is only valid with show <path>");
-    if (!(show || index || init && extra.length === 0 || list || add || command === "lint" && extra.length === 0) || values.folder !== undefined && !add) throw new WikiError("usage", USAGE);
+    if (!(create || show || index || init && extra.length === 0 || list || add || command === "lint" && extra.length === 0) || values.folder !== undefined && !add) throw new WikiError("usage", USAGE);
     if (init && values.vault !== undefined && arg !== undefined && path.resolve(values.vault) !== path.resolve(arg)) {
       throw new WikiError("usage", "Conflicting vault selections: --vault and init <dir> name different directories");
     }
@@ -39,43 +59,79 @@ try {
       output({ ok: true, vault }, "Initialized profile vault: " + vault.root + "\n");
     } else {
       const root = openVault(selected);
-      if (show && arg !== undefined) {
-        const note = readNote(root, arg, values.section);
-        output({ ok: true, ...note }, note.markdown);
-      } else if (add && extra[0] !== undefined && values.folder !== undefined) {
-        const added = addType(root, extra[0], values.folder);
-        output({ ok: true, path: added }, "Created registry scaffold: " + added + "; review and run whole-vault lint before commit\n");
-      } else {
-        const registry = list ? loadRegistry(root) : undefined;
-        const inventory = index ? inspectVault(root) : undefined;
-        const diagnostics = registry ? registry.diagnostics : inventory ? inventory.diagnostics : lintVault(root, arg);
-        if (inventory && !diagnostics.length) {
-          diagnostics.push(...(values.check ? indexFreshnessDiagnostics(root, inventory.indexes) : indexDestinationDiagnostics(root, inventory.indexes.keys())));
-          sortDiagnostics(diagnostics);
+      const execute = () => {
+        if (request) {
+          const result = createTopic(root, request);
+          publishedResult = { written: true, paths: [result.path], digest: result.digest };
+          output({ ok: true, ...result }, "Created topic: " + result.path + "\nTitle: " + result.title + "\nDescription: " + result.description + "\n" + result.digest + "\n");
+        } else if (show && arg !== undefined) {
+          const note = readNote(root, arg, values.section);
+          output({ ok: true, ...note }, note.markdown);
+        } else if (add && extra[0] !== undefined && values.folder !== undefined) {
+          const added = addType(root, extra[0], values.folder);
+          publishedResult = { written: true, paths: [added.path], digest: added.digest };
+          output({ ok: true, path: added.path }, "Created registry scaffold: " + added.path + "; review and run whole-vault lint before commit\n");
+        } else {
+          const registry = list ? loadRegistry(root) : undefined;
+          const inventory = index ? inspectVault(root) : undefined;
+          const diagnostics = registry ? registry.diagnostics : inventory ? inventory.diagnostics : lintVault(root, arg);
+          if (inventory && !diagnostics.length) {
+            diagnostics.push(...(values.check ? indexFreshnessDiagnostics(root, inventory.indexes) : indexDestinationDiagnostics(root, inventory.indexes.keys())));
+            sortDiagnostics(diagnostics);
+          }
+          if (diagnostics.length) {
+            process.exitCode = 1;
+            const error = { code: "lint", message: "Wiki validation failed" };
+            output({ ok: false, error, diagnostics }, "", diagnostics.map(d => d.path + ": " + d.rule + ": " + d.message + "; fix: " + d.fix).join("\n") + "\n");
+          } else if (inventory) {
+            if (!values.check) {
+              const paths: string[] = [], digests: Record<string, string> = {};
+              for (const [relative, bytes] of inventory.indexes) {
+                fs.writeFileSync(path.join(root, relative), bytes);
+                paths.push(relative);
+                digests[relative] = "sha256:" + createHash("sha256").update(bytes).digest("hex");
+                publishedResult = { written: true, paths, digests };
+              }
+            }
+            const paths = [...inventory.indexes.keys()].sort();
+            output({ ok: true, paths, checks: ["registry", "frontmatter", "layout", "body", "lifecycle", "scoped-titles", "links", "generated-index"] }, values.check ? "Generated indexes are current\n" : "Generated navigation: " + paths.join(", ") + "\n");
+          } else if (registry) {
+            const types = listTypes(registry.types);
+            output({ ok: true, types }, types.map(t => t.name + " folder=" + t.folder + " required=" + t.requiredFields.join(",") + " headings=" + t.requiredHeadings.map(h => h.level + ":" + h.text).join(",") + " scopes=" + (t.scopes?.join(",") ?? "all")).join("\n") + "\n");
+          } else output({ ok: true, diagnostics: [], checks: ["registry", "frontmatter", "layout", "body", "lifecycle", "scoped-titles", "links", ...(arg === undefined ? ["generated-index"] : [])] }, "Wiki lint passed (registry, frontmatter, layout, body, lifecycle, scoped titles, links; generated-index freshness " + (arg === undefined ? "checked" : "not checked for selected paths") + ")\n");
         }
-        if (diagnostics.length) {
-          process.exitCode = 1;
-          const error = { code: "lint", message: "Wiki validation failed" };
-          if (json) output({ ok: false, error, diagnostics }, "");
-          else process.stderr.write(diagnostics.map(d => d.path + ": " + d.rule + ": " + d.message + "; fix: " + d.fix).join("\n") + "\n");
-        } else if (inventory) {
-          if (!values.check) for (const [relative, bytes] of inventory.indexes) fs.writeFileSync(path.join(root, relative), bytes);
-          const paths = [...inventory.indexes.keys()].sort();
-          output({ ok: true, paths, checks: ["registry", "frontmatter", "layout", "body", "lifecycle", "scoped-titles", "links", "generated-index"] }, values.check ? "Generated indexes are current\n" : "Generated navigation: " + paths.join(", ") + "\n");
-        } else if (registry) {
-          const types = listTypes(registry.types);
-          output({ ok: true, types }, types.map(t => t.name + " folder=" + t.folder + " required=" + t.requiredFields.join(",") + " headings=" + t.requiredHeadings.map(h => h.level + ":" + h.text).join(",") + " scopes=" + (t.scopes?.join(",") ?? "all")).join("\n") + "\n");
-        } else output({ ok: true, diagnostics: [], checks: ["registry", "frontmatter", "layout", "body", "lifecycle", "scoped-titles", "links", ...(arg === undefined ? ["generated-index"] : [])] }, "Wiki lint passed (registry, frontmatter, layout, body, lifecycle, scoped titles, links; generated-index freshness " + (arg === undefined ? "checked" : "not checked for selected paths") + ")\n");
-      }
+      };
+      if (create || add || index && !values.check) withMutationLock(root, execute);
+      else execute();
     }
   }
 } catch (error) {
-  const known = error instanceof WikiError;
-  const argumentError = error instanceof Error && "code" in error && typeof error.code === "string" && error.code.startsWith("ERR_PARSE_ARGS_");
-  const code = known ? error.code : argumentError ? "usage" : "internal";
-  const message = error instanceof Error ? error.message : String(error);
-  process.exitCode = known ? EXIT[error.code] : argumentError ? 2 : 1;
-  const partial = error instanceof RegistryWriteError ? { written: error.written, paths: error.paths, digest: error.digest } : {};
-  if (json) process.stdout.write(JSON.stringify({ ok: false, error: { code, message }, ...partial }) + "\n");
-  else process.stderr.write(code + ": " + message + "\n");
+  const release = error instanceof MutationReleaseError ? error : undefined;
+  const cleanup = release ? { path: ".wiki/locks/mutation.lock", retained: true, message: release.cause instanceof Error ? release.cause.message : String(release.cause) } : undefined;
+  const pending = outputBuffer.pending;
+  delete outputBuffer.pending;
+  const failure = release?.outcome.kind === "failed" ? release.outcome.error : error;
+  if (release?.outcome.kind === "completed" && pending && "ok" in pending.value && pending.value.ok === false) {
+    output({ ...pending.value, cleanup }, pending.human, pending.stderr + release.message + "\n");
+  } else {
+    const known = failure instanceof WikiError;
+    const argumentError = failure instanceof Error && "code" in failure && typeof failure.code === "string" && failure.code.startsWith("ERR_PARSE_ARGS_");
+    const code = known ? failure.code : argumentError ? "usage" : "internal";
+    const message = failure instanceof Error ? failure.message : String(failure);
+    process.exitCode = known ? EXIT[failure.code] : argumentError ? 2 : 1;
+    const partial = failure instanceof RegistryWriteError || failure instanceof CreatePartialError || failure instanceof ExclusiveCleanupError ? { written: failure.written, paths: failure.paths, digest: failure.digest } : publishedResult ?? {};
+    output({ ok: false, error: { code, message }, ...partial, ...(cleanup ? { cleanup } : {}), ...(release?.outcome.kind === "completed" && publishedResult ? { outcome: "completed" } : {}), ...(failure instanceof ExclusiveCleanupError ? { temporaryPath: failure.temporaryPath } : {}), ...(failure instanceof CreateValidationError ? { diagnostics: failure.diagnostics } : {}) }, "");
+    if (!json) {
+      process.stderr.write(code + ": " + message + "\n");
+      if (cleanup) process.stderr.write("Lock cleanup: " + cleanup.message + "; retained " + cleanup.path + "\n");
+      if (publishedResult) process.stderr.write("Written: " + publishedResult.paths.join(", ") + "\n" + ("digest" in publishedResult ? publishedResult.digest : JSON.stringify(publishedResult.digests)) + "\n");
+      if (failure instanceof RegistryWriteError || failure instanceof CreatePartialError || failure instanceof ExclusiveCleanupError) process.stderr.write("Written: " + failure.paths.join(", ") + "\n" + failure.digest + "\n");
+      if (failure instanceof CreateValidationError) process.stderr.write(failure.diagnostics.map(d => d.path + ": " + d.rule + ": " + d.message + "; fix: " + d.fix).join("\n") + "\n");
+    }
+  }
+}
+const pending = outputBuffer.pending;
+if (pending) {
+  process.stdout.write(json ? JSON.stringify(pending.value) + "\n" : pending.human);
+  if (!json && pending.stderr) process.stderr.write(pending.stderr);
 }

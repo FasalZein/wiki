@@ -35,10 +35,12 @@ function succeeds(vault: string, ...args: string[]) {
   assert.equal(result.status, 0, JSON.stringify(result));
   return result.data;
 }
-function snapshot(dir: string): unknown[] {
+function snapshot(dir: string, ignoreLockActivity = false): unknown[] {
   return fs.readdirSync(dir).sort().map(name => {
     const full = path.join(dir, name), stat = fs.lstatSync(full);
-    return [name, stat.mode, stat.mtimeMs, stat.isSymbolicLink() ? fs.readlinkSync(full) : stat.isDirectory() ? snapshot(full) : fs.readFileSync(full).toString("base64")];
+    // Rejected mutating index still acquires/releases its lock; retain all other metadata and lock contents.
+    const lockDirectory = path.basename(dir) === ".wiki" && name === "locks";
+    return [name, stat.mode, ignoreLockActivity && lockDirectory ? null : stat.mtimeMs, stat.isSymbolicLink() ? fs.readlinkSync(full) : stat.isDirectory() ? snapshot(full, ignoreLockActivity) : fs.readFileSync(full).toString("base64")];
   });
 }
 
@@ -132,12 +134,12 @@ test("okf:05 missing planned indexes can be repaired but missing authored notes 
   succeeds(vault, "lint", "personal/notes");
   for (const target of ["missing.md", "../assets/capture/missing.txt", "../unknown/index.md"]) {
     note(vault, "personal/notes/topic.md", "Topic", "A topic", "note", "[broken](" + target + ")\n");
-    const before = snapshot(vault);
+    const before = snapshot(vault, true);
     for (const args of [["index"], ["index", "--check"], ["lint"], ["lint", "personal/notes/topic.md"], ["lint", "personal/notes"]]) {
       const result = cli(vault, ...args);
       assert.equal(result.status, 1, JSON.stringify(result));
       assert.ok(result.data.diagnostics.some((d: { rule: string }) => d.rule === "link.missing"));
-      assert.deepEqual(snapshot(vault), before);
+      assert.deepEqual(snapshot(vault, true), before);
     }
   }
 });
@@ -152,12 +154,12 @@ for (const invalid of ["yaml", "unknown", "title-newline", "description-newline"
   else if (invalid === "description-newline") note(vault, "personal/notes/topic.md", "Topic", "Description\r\nInjected row");
   else if (invalid === "heading") note(vault, "personal/procedures/run.md", "Run", "A procedure", "procedure");
   else note(vault, "personal/notes/deeper/topic.md", "Invalid placement");
-  const before = snapshot(vault);
+  const before = snapshot(vault, true);
   for (const args of [["index"], ["index", "--check"], ["lint"]]) {
     const result = cli(vault, ...args);
     assert.equal(result.status, 1, JSON.stringify(result));
     assert.ok(result.data.diagnostics.length > 0);
-    assert.deepEqual(snapshot(vault), before);
+    assert.deepEqual(snapshot(vault, true), before);
   }
 });
 

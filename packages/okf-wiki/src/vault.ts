@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { inspectContainedPath } from "./paths.ts";
 
 export type ErrorCode = "usage" | "conflict" | "not_found" | "unsupported" | "damaged";
@@ -16,15 +16,36 @@ const CONFIG = { profile: "wiki-okf", version: 1 };
 const ROOT_INDEX = '---\nokf_version: "0.2"\n---\n# Wiki\n';
 const IGNORES = "/.wiki/tmp/\n/.wiki/locks/\n/.wiki/qmd.sqlite\n/.wiki/qmd.sqlite-*\n";
 
+export class ExclusiveCleanupError extends WikiError {
+  readonly written = true;
+  readonly paths: string[];
+  readonly digest: string;
+  readonly temporaryPath: string;
+  constructor(relative: string, data: string, temporaryPath: string, cause: unknown) {
+    super("damaged", "File published at " + relative + " but temporary-name cleanup failed at " + temporaryPath + "; inspect retained names, run index for navigation, and inspect log.md before any manual historical entry; do not retry publication");
+    this.paths = [relative];
+    this.digest = "sha256:" + createHash("sha256").update(data).digest("hex");
+    this.temporaryPath = temporaryPath;
+    this.cause = cause;
+  }
+}
+
 // Adapted from wiki-core's exclusive complete-file publication. No donor runtime imports.
 export function createExclusive(root: string, relative: string, data: string): void {
   const target = containedEntry(root, relative).full;
-  const tmp = containedEntry(root, ".wiki/tmp/" + randomUUID()).full;
+  const temporaryPath = ".wiki/tmp/" + randomUUID();
+  const tmp = containedEntry(root, temporaryPath).full;
   fs.writeFileSync(tmp, data, { flag: "wx" });
+  let published = false;
   try {
     fs.linkSync(tmp, target);
+    published = true;
   } finally {
-    fs.rmSync(tmp, { force: true });
+    try { fs.rmSync(tmp, { force: true }); }
+    catch (error) {
+      if (published) throw new ExclusiveCleanupError(relative, data, temporaryPath, error);
+      // Keep the primary publication failure (for example EEXIST), not a later cleanup error.
+    }
   }
 }
 

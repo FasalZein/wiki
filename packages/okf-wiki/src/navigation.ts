@@ -14,7 +14,7 @@ export function maintainedDirectory(directory: string, types: RegisteredType[]):
   return type ? { path: directory, type: type.record.name } : undefined;
 }
 function compare(a: string, b: string): number { return a < b ? -1 : a > b ? 1 : 0; }
-function text(value: string): string {
+export function markdownText(value: string): string {
   return value.replace(/\s+/gu, " ").trim().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/[\\\x60*_{}\[\]()!#|~]/g, "\\$&");
 }
 export function renderIndexes(directories: NavigationDirectory[], topics: NavigationTopic[]): Map<string, string> {
@@ -25,14 +25,14 @@ export function renderIndexes(directories: NavigationDirectory[], topics: Naviga
     const parent = path.posix.dirname(directory.path) === "." ? "" : path.posix.dirname(directory.path);
     const count = topics.filter(n => n.path.startsWith(directory.path + "/")).length;
     rows.get(parent)?.push({ type: directory.type, path: directory.path,
-      row: "* [" + text(path.posix.basename(directory.path)) + "](" + path.posix.relative(parent, directory.path + "/index.md") + ") - " + count + " concept" + (count === 1 ? "" : "s") });
+      row: "* [" + markdownText(path.posix.basename(directory.path)) + "](" + path.posix.relative(parent, directory.path + "/index.md") + ") - " + count + " concept" + (count === 1 ? "" : "s") });
   }
   for (const note of topics) rows.get(path.posix.dirname(note.path))?.push({ type: note.type, path: note.path,
-    row: "* [" + text(note.title) + "](" + path.posix.basename(note.path) + ") - " + text(note.description) });
+    row: "* [" + markdownText(note.title) + "](" + path.posix.basename(note.path) + ") - " + markdownText(note.description) });
   const output = new Map<string, string>();
   for (const [directory, items] of [...rows].sort(([a], [b]) => compare(a, b))) {
     items.sort((a, b) => compare(a.type, b.type) || compare(a.path, b.path));
-    const heading = directory ? "# " + text(path.posix.basename(directory)) : '---\nokf_version: "0.2"\n---\n# Wiki';
+    const heading = directory ? "# " + markdownText(path.posix.basename(directory)) : '---\nokf_version: "0.2"\n---\n# Wiki';
     output.set(directory ? directory + "/index.md" : "index.md", heading + (items.length ? "\n\n" + items.map(i => i.row).join("\n") : "") + "\n");
   }
   return output;
