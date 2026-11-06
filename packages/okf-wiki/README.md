@@ -11,7 +11,7 @@ WIKI_VAULT=/explicit/disposable/vault node packages/okf-wiki/bin/okf-wiki.js ini
 ```
 
 Implemented commands are `init`, `type list`, `type add`, `index`, `index --check`,
-`new`, `show` (including section selection), and `lint` (including relative links and whole-vault generated-index freshness). The init directory argument is an explicit vault selection. `--vault` takes precedence over `WIKI_VAULT`; an init directory also
+`new`, `update` (including no-effect dry-run), `show` (including section selection), and `lint` (including relative links and whole-vault generated-index freshness). The init directory argument is an explicit vault selection. `--vault` takes precedence over `WIKI_VAULT`; an init directory also
 takes precedence over the environment. Conflicting flag and positional
 directories fail with exit 2. There is no default vault. Relative vault locations
 resolve from the current working directory. Parent filesystem aliases resolve
@@ -33,7 +33,7 @@ Registry files are editable data, not a fixed type universe. Each record has
 allows all supported scopes. Templates do not execute or interpolate code.
 The source schema includes retained-asset metadata for later capture commands.
 Registry validation, exclusive scaffolding, and topic creation are implemented.
-Updates, source capture, and search belong to later slices.
+Source capture and search belong to later slices.
 
 Init publishes complete files exclusively, with the configuration last as the
 completion marker. A compatible repeat checks the managed layout and leaves
@@ -290,3 +290,73 @@ malformed bytes produce a document.utf8 diagnostic and block navigation/publicat
 Rejected validation, busy, and collision
 requests publish no topic or success log. Mutations do not stage or commit Git,
 load models, start qmd, or change global configuration.
+
+
+## Expected-digest topic updates (#22)
+
+~~~sh
+node packages/okf-wiki/bin/okf-wiki.js --vault /explicit/disposable/vault show personal/notes/topic.md --json
+node packages/okf-wiki/bin/okf-wiki.js --vault /explicit/disposable/vault update personal/notes/topic.md --expect sha256:<64-lowercase-hex-digits> --file /explicit/complete-candidate.md --dry-run --json
+node packages/okf-wiki/bin/okf-wiki.js --vault /explicit/disposable/vault update personal/notes/topic.md --expect sha256:<64-lowercase-hex-digits> --file /explicit/complete-candidate.md --json
+~~~
+
+Replace the digest placeholder with the full digest returned by show. The file is
+the complete candidate Markdown, including frontmatter, not a patch or body-only
+input. The CLI reads a regular UTF-8 file once before acquiring the mutation lock.
+It refuses directories, symlinks, FIFOs, and invalid UTF-8 without a blocking FIFO
+open. It retains the candidate's exact bytes, including BOM, CRLF, whitespace, and
+missing final newline; it never reconstructs the document from parsed metadata.
+Update flags are command-local. Renaming and moving are not update operations.
+Generated indexes, logs, operational files, and capture assets are not topic targets.
+
+Validation inventories the whole prospective vault with exactly one identity for
+the replacement target. Old target diagnostics do not survive replacement, but
+registry errors, unrelated invalid notes, incoming references, scoped normalized
+title uniqueness, and type/path agreement still apply. Invalid concepts prevent
+misleading partial navigation. The target must already exist as a regular,
+contained topic, without symlinked ancestors.
+
+Dry-run compares the observed whole-file base and validates the candidate. It
+returns outcome: dry-run, candidateDigest, digest (the candidate digest), summary
+byte and changed-line counts, and a diff with one-based startLine and removed/added
+line arrays after common edge lines are omitted. Diff text is a review aid, not an
+applyable patch; only the supplied file bytes are published. Dry-run does not acquire
+or modify locks, create temporary files, update navigation/log/search, or otherwise
+write the vault. It can run while a cooperating mutation lock is held; it is not a
+reservation for later apply.
+
+Apply uses the same non-stealing vault mutation lock as new, type add, and index.
+It validates under that lock, prepares a complete temporary file, then re-reads
+and hashes the actual full target bytes immediately before atomic rename. A stale
+base exits 3 with path, expected, and current digests. Re-read and reconsider the
+candidate after a conflict. Never automatically retry an old candidate with a new
+digest. Missing targets exit 4; unsafe targets or invalid candidates exit 2;
+duplicate scoped titles and busy cooperating writers exit 3. No rejected write
+reports written or appends a successful update log entry.
+
+Successful apply returns outcome: updated, written: true, path, digest,
+candidateDigest, summary/diff, navigation: updated, and log: appended. It writes
+current generated navigation and one **updated** log entry. A same-byte apply
+returns outcome: unchanged with navigation/log: unchanged and no written field.
+It performs no content, navigation, or log write. Both successful no-op and dry-run
+exit 0. Human output includes identity, candidate digest, summary/diff, and effect
+status; JSON has the same named information.
+
+**Exclusive-edit contract:** the owner avoids simultaneous Obsidian or external
+edits to the target during apply. Atomic rename prevents partial contents, but it
+is not compare-and-swap against noncooperating editors. An external writer can
+still race between the final read and rename. If exclusive editing cannot be met,
+stop/report or use dry-run. An authorized factual handoff may apply directly;
+there is no mandatory proposal-only workflow, authenticated approval/evidence
+record, automatic Git action, or automatic publisher.
+
+A post-publication navigation/log failure retains the new note and returns
+ok: false, written: true, paths, and its resulting digest with repair guidance.
+Run index to repair derived navigation, then inspect log.md before manually adding
+any missing historical entry. Do not invent its time or retry the content write.
+Final output waits for lock release. Release failures retain cleanup details and
+any already-written metadata; completed publication also names outcome: completed.
+A failed temporary-file cleanup before publication reports temporaryCleanup with
+the retained path and keeps the primary error (including stale conflict digests).
+Inspect that temporary file before explicit cleanup. Separate file writes are not
+a multi-file transaction and no rollback overwrites external changes.
