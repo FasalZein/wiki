@@ -16,7 +16,7 @@ const ROOT_INDEX = '---\nokf_version: "0.2"\n---\n# Wiki\n';
 const IGNORES = "/.wiki/tmp/\n/.wiki/locks/\n/.wiki/qmd.sqlite\n/.wiki/qmd.sqlite-*\n";
 
 // Adapted from wiki-core's exclusive complete-file publication. No donor runtime imports.
-function createExclusive(root: string, target: string, data: string): void {
+export function createExclusive(root: string, target: string, data: string): void {
   const tmp = path.join(root, ".wiki/tmp", randomUUID());
   fs.writeFileSync(tmp, data, { flag: "wx" });
   try {
