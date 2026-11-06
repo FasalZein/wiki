@@ -112,12 +112,33 @@ test("okf:05 missing planned indexes can be repaired but missing authored notes 
   note(vault, "personal/notes/topic.md", "Topic", "A topic", "note", "[parent](../index.md) [root](../../index.md) [folder](index.md)\n");
   fs.unlinkSync(path.join(vault, "index.md"));
   succeeds(vault, "index");
+  fs.unlinkSync(path.join(vault, "personal/notes/index.md"));
+  const beforeRepair = snapshot(vault);
+  for (const selected of ["personal/notes/topic.md", "personal/notes"]) {
+    const result = cli(vault, "lint", selected);
+    assert.equal(result.status, 1, JSON.stringify(result));
+    assert.ok(result.data.diagnostics.some((d: { path: string; rule: string }) => d.path === "personal/notes/topic.md" && d.rule === "link.missing"), JSON.stringify(result));
+    assert.ok(!result.data.diagnostics.some((d: { rule: string }) => d.rule.startsWith("index.")), "Selected lint checks authored links, not whole-vault freshness");
+    assert.deepEqual(snapshot(vault), beforeRepair);
+  }
+  for (const args of [["lint"], ["index", "--check"]]) {
+    const result = cli(vault, ...args);
+    assert.equal(result.status, 1, JSON.stringify(result));
+    assert.ok(result.data.diagnostics.some((d: { path: string; rule: string }) => d.path === "personal/notes/index.md" && d.rule === "index.missing"), JSON.stringify(result));
+    assert.deepEqual(snapshot(vault), beforeRepair);
+  }
+  succeeds(vault, "index");
+  succeeds(vault, "lint", "personal/notes/topic.md");
+  succeeds(vault, "lint", "personal/notes");
   for (const target of ["missing.md", "../assets/capture/missing.txt", "../unknown/index.md"]) {
     note(vault, "personal/notes/topic.md", "Topic", "A topic", "note", "[broken](" + target + ")\n");
-    const before = snapshot(vault), result = cli(vault, "index");
-    assert.equal(result.status, 1, JSON.stringify(result));
-    assert.ok(result.data.diagnostics.some((d: { rule: string }) => d.rule === "link.missing"));
-    assert.deepEqual(snapshot(vault), before);
+    const before = snapshot(vault);
+    for (const args of [["index"], ["index", "--check"], ["lint"], ["lint", "personal/notes/topic.md"], ["lint", "personal/notes"]]) {
+      const result = cli(vault, ...args);
+      assert.equal(result.status, 1, JSON.stringify(result));
+      assert.ok(result.data.diagnostics.some((d: { rule: string }) => d.rule === "link.missing"));
+      assert.deepEqual(snapshot(vault), before);
+    }
   }
 });
 

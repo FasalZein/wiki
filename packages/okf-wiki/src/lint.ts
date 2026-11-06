@@ -88,7 +88,8 @@ export function inspectVault(root: string, selected?: string) {
   const topics = new Set(notes.filter(n => n.canonical).map(n => n.path));
   const titles = new Map<string, typeof notes>();
   for (const note of notes) {
-    diagnostics.push(...linkDiagnostics(root, note.path, note.body, note.tree, relative => topics.has(relative) || indexes.has(relative) || isCaptureAsset(relative), indexes));
+    // Whole-vault callers repair planned indexes or report freshness; selected lint requires existing link targets.
+    diagnostics.push(...linkDiagnostics(root, note.path, note.body, note.tree, relative => topics.has(relative) || indexes.has(relative) || isCaptureAsset(relative), selected === undefined ? indexes : undefined));
     if (note.data.type === "source") for (const field of ["original", "extracted"]) {
       const value = note.data[field];
       if (typeof value !== "string") continue; // The registered schema reports missing or non-string values.
