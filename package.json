@@ -11,6 +11,9 @@
     "build": "bun build src/cli.ts --outdir dist --target bun && rm -rf dist/templates && cp -R templates dist/templates",
     "test": "bun test tests/",
     "typecheck": "tsc --noEmit",
+    "typecheck:okf": "tsc -p packages/okf-wiki/tsconfig.json",
+    "test:okf": "node packages/okf-wiki/test/run.js",
+    "verify:okf": "bun run typecheck:okf && bun run test:okf",
     "verify:next": "tsc -p packages/tsconfig.json && node --test \"packages/*/test/*.test.ts\""
   },
   "dependencies": {
