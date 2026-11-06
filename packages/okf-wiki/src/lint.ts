@@ -1,6 +1,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { caseFold } from "unicode-case-folding";
+import { linkDiagnostics } from "./links.ts";
+import { canonicalPathProblem, inspectContainedPath } from "./paths.ts";
 import { parseNoteText } from "./frontmatter.ts";
 import { metadataLines, missingHeadings, parseMarkdown } from "./markdown.ts";
 import { declaresProperty, loadRegistry, safeName, schemaDiagnostics, sortDiagnostics, type Diagnostic } from "./registry.ts";
@@ -18,14 +20,15 @@ function scopeOf(relative: string): string | undefined {
 }
 export function lintVault(root: string, selected?: string): Diagnostic[] {
   const { types, diagnostics } = loadRegistry(root);
-  const notes: { path: string; scope: string | undefined; data: Record<string, unknown>; canonical: boolean }[] = [];
+  const notes: { path: string; scope: string | undefined; data: Record<string, unknown>; canonical: boolean; body: string; tree: ReturnType<typeof parseMarkdown> }[] = [];
+  const indexes = new Set<string>();
   function fail(file: string, rule: string, message: string, fix: string) { diagnostics.push({ path: file, rule, message, fix }); }
   function visit(relative: string) {
     if (isCaptureAsset(relative)) return;
-    const full = path.join(root, relative);
-    const stat = fs.lstatSync(full, { throwIfNoEntry: false });
+    const inspected = inspectContainedPath(root, relative);
+    if (!inspected.ok) { fail(relative, inspected.problem.rule, inspected.problem.message, "Use a canonical path and regular vault-owned ancestors"); return; }
+    const { full, stat } = inspected;
     if (!stat) { fail(relative, "path.missing", "Missing requested path", "Select an existing note path"); return; }
-    if (stat.isSymbolicLink()) { fail(relative, "path.symlink", "Symlinked note trees and files are refused", "Use regular vault-owned files and directories"); return; }
     if (stat.isDirectory()) {
       for (const name of fs.readdirSync(full).sort()) if (!SKIP.has(name)) visit(relative ? relative + "/" + name : name);
       return;
@@ -35,6 +38,7 @@ export function lintVault(root: string, selected?: string): Diagnostic[] {
       const directory = path.posix.dirname(relative), scope = scopeOf(directory);
       const folder = scope && directory.startsWith(scope + "/") ? directory.slice(scope.length + 1) : undefined;
       const generated = relative === "index.md" || relative === "projects/index.md" || scope !== undefined && (directory === scope || types.some(t => t.record.folder === folder && (!t.record.scopes || t.record.scopes.includes(scope))));
+      if (generated) indexes.add(relative);
       if (!generated) fail(relative, "path.layout", "Unexpected index outside a maintained directory", "Place generated indexes only at vault, scope, or registered-folder roots");
       return;
     }
@@ -58,22 +62,20 @@ export function lintVault(root: string, selected?: string): Diagnostic[] {
     const scope = scopeOf(relative);
     const offset = segments[0] === "personal" ? 1 : 2;
     const layout = scope !== undefined && segments.length === offset + 2 && segments[offset] === type.record.folder && safeName((segments[offset + 1] ?? "").slice(0, -3));
-    notes.push({ path: relative, scope, data, canonical: layout && scope !== undefined && (!type.record.scopes || type.record.scopes.includes(scope)) });
+    notes.push({ path: relative, scope, data, body, tree, canonical: layout && scope !== undefined && (!type.record.scopes || type.record.scopes.includes(scope)) });
     if (!layout) {
       fail(relative, "path.layout", "Expected scope/" + type.record.folder + "/<slug>.md", "Use personal or projects/<safe-project>, the registered folder, and one safe slug");
     }
     if (type.record.scopes && (!scope || !type.record.scopes.includes(scope))) fail(relative, "frontmatter.scope", "Type is not allowed in scope " + String(scope), "Use one of the exact registered scopes: " + type.record.scopes.join(", "));
   }
   if (selected !== undefined) {
-    if (!selected || selected.includes("\\") || selected.includes("\0") || path.isAbsolute(selected) || isCaptureAsset(selected) || selected.split("/").some(p => !p || p === "." || p === ".." || SKIP.has(p))) {
-      fail(selected, "path.invalid", "Expected a contained canonical note path", "Use a vault-relative path without dot segments or operational directories");
+    const invalid = canonicalPathProblem(selected);
+    if (invalid || isCaptureAsset(selected) || selected.split("/").some(p => SKIP.has(p))) {
+      fail(selected, "path.invalid", invalid?.message ?? "Expected a canonical note path outside operational and capture directories", "Use a vault-relative path without dot segments or operational directories");
     } else {
-      // Check every existing ancestor before entering the requested subtree.
-      const parts = selected.split("/");
-      let symlink = false;
-      for (let i = 1; i < parts.length; i++) if (fs.lstatSync(path.join(root, ...parts.slice(0, i)), { throwIfNoEntry: false })?.isSymbolicLink()) symlink = true;
-      if (symlink) fail(selected, "path.symlink", "Symlinked ancestor is refused", "Use a regular vault-owned note tree");
-      else if (!fs.lstatSync(path.join(root, selected), { throwIfNoEntry: false })) fail(selected, "path.missing", "Missing requested path", "Select an existing note path");
+      const inspected = inspectContainedPath(root, selected);
+      if (!inspected.ok) fail(selected, inspected.problem.rule, inspected.problem.message, "Use regular vault-owned note trees");
+      else if (!inspected.stat) fail(selected, "path.missing", "Missing requested path", "Select an existing note path");
     }
   }
   // Registry diagnostics are always applicable, even for an invalid selected path.
@@ -82,6 +84,14 @@ export function lintVault(root: string, selected?: string): Diagnostic[] {
   const topics = new Set(notes.filter(n => n.canonical).map(n => n.path));
   const titles = new Map<string, typeof notes>();
   for (const note of notes) {
+    diagnostics.push(...linkDiagnostics(root, note.path, note.body, note.tree, relative => topics.has(relative) || indexes.has(relative) || isCaptureAsset(relative)));
+    if (note.data.type === "source") for (const field of ["original", "extracted"]) {
+      const value = note.data[field];
+      if (typeof value !== "string") continue; // The registered schema reports missing or non-string values.
+      const invalid = canonicalPathProblem(value);
+      const inspected = invalid ? { ok: false as const, problem: invalid } : inspectContainedPath(root, value);
+      if (!inspected.ok || !inspected.stat?.isFile() || !isCaptureAsset(value)) fail(note.path, "source.path", field + ": " + (!inspected.ok ? inspected.problem.message : "Expected an existing retained asset at a canonical capture path: " + value), "Use a canonical vault-relative retained asset path without dot segments or symlinks");
+    }
     if (typeof note.data.superseded_by === "string" && !topics.has(note.data.superseded_by)) fail(note.path, "lifecycle.target", "superseded_by must name an existing canonical topic: " + note.data.superseded_by, "Use a vault-relative topic path with .md and no dot segments");
     if (!note.scope || typeof note.data.title !== "string") continue;
     const key = note.scope + "\0" + caseFold(note.data.title.trim());

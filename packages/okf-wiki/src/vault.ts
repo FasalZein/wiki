@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
+import { inspectContainedPath } from "./paths.ts";
 
 export type ErrorCode = "usage" | "conflict" | "not_found" | "unsupported" | "damaged";
 export class WikiError extends Error {
@@ -16,8 +17,9 @@ const ROOT_INDEX = '---\nokf_version: "0.2"\n---\n# Wiki\n';
 const IGNORES = "/.wiki/tmp/\n/.wiki/locks/\n/.wiki/qmd.sqlite\n/.wiki/qmd.sqlite-*\n";
 
 // Adapted from wiki-core's exclusive complete-file publication. No donor runtime imports.
-export function createExclusive(root: string, target: string, data: string): void {
-  const tmp = path.join(root, ".wiki/tmp", randomUUID());
+export function createExclusive(root: string, relative: string, data: string): void {
+  const target = containedEntry(root, relative).full;
+  const tmp = containedEntry(root, ".wiki/tmp/" + randomUUID()).full;
   fs.writeFileSync(tmp, data, { flag: "wx" });
   try {
     fs.linkSync(tmp, target);
@@ -46,11 +48,13 @@ const LAYOUT = [
   ["index.md", "file"], ["log.md", "file"], [".gitignore", "file"],
 ] as const;
 
+export function containedEntry(root: string, relative: string): { full: string; stat: fs.Stats | undefined } {
+  const inspected = inspectContainedPath(root, relative);
+  if (!inspected.ok) throw new WikiError("usage", inspected.problem.message);
+  return inspected;
+}
 function entry(root: string, relative: string): fs.Stats | undefined {
-  const target = path.join(root, relative);
-  const stat = fs.lstatSync(target, { throwIfNoEntry: false });
-  if (stat?.isSymbolicLink()) throw new WikiError("usage", "Refusing symlink: " + target);
-  return stat;
+  return containedEntry(root, relative).stat;
 }
 
 export function initVault(dir: string): { root: string } {
@@ -80,12 +84,12 @@ export function initVault(dir: string): { root: string } {
   for (const name of ["types", "tmp", "locks"]) fs.mkdirSync(path.join(root, ".wiki", name));
   const seed = new URL("../seed/", import.meta.url);
   for (const name of fs.readdirSync(seed).sort()) {
-    createExclusive(root, path.join(root, ".wiki/types", name), fs.readFileSync(new URL(name, seed), "utf8"));
+    createExclusive(root, ".wiki/types/" + name, fs.readFileSync(new URL(name, seed), "utf8"));
   }
-  createExclusive(root, path.join(root, "index.md"), ROOT_INDEX);
-  createExclusive(root, path.join(root, "log.md"), "");
-  createExclusive(root, path.join(root, ".gitignore"), IGNORES);
+  createExclusive(root, "index.md", ROOT_INDEX);
+  createExclusive(root, "log.md", "");
+  createExclusive(root, ".gitignore", IGNORES);
   // Publish the completion marker last. An interrupted init must not be silently resumed.
-  createExclusive(root, path.join(root, ".wiki/config.json"), JSON.stringify(CONFIG, null, 2) + "\n");
+  createExclusive(root, ".wiki/config.json", JSON.stringify(CONFIG, null, 2) + "\n");
   return { root: fs.realpathSync(root) };
 }
