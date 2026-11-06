@@ -20,9 +20,96 @@ function scopeOf(relative: string): string | undefined {
   return undefined;
 }
 export interface ProspectiveNote { path: string; markdown: string }
+interface InventoryNote {
+  path: string; scope: string | undefined; data: Record<string, unknown>; canonical: boolean;
+  body: string; tree: ReturnType<typeof parseMarkdown>;
+}
+
+function selectedPathDiagnostics(root: string, selected: string): Diagnostic[] {
+  const invalid = canonicalPathProblem(selected);
+  if (invalid || isCaptureAsset(selected) || selected.split("/").some(p => SKIP.has(p))) {
+    return [{ path: selected, rule: "path.invalid", message: invalid?.message ?? "Expected a canonical note path outside operational and capture directories", fix: "Use a vault-relative path without dot segments or operational directories" }];
+  }
+  const inspected = inspectContainedPath(root, selected);
+  if (!inspected.ok) return [{ path: selected, rule: inspected.problem.rule, message: inspected.problem.message, fix: "Use regular vault-owned note trees" }];
+  if (!inspected.stat) return [{ path: selected, rule: "path.missing", message: "Missing requested path", fix: "Select an existing note path" }];
+  return [];
+}
+
+function prospectiveDirectories(relative: string, types: Parameters<typeof maintainedDirectory>[1], directories: NavigationDirectory[], indexes: Set<string>): void {
+  const parents = relative.split("/").slice(0, -1);
+  for (let i = 1; i <= parents.length; i++) {
+    const relative = parents.slice(0, i).join("/");
+    const directory = maintainedDirectory(relative, types);
+    if (directory && !directories.some(d => d.path === relative)) { directories.push(directory); indexes.add(relative + "/index.md"); }
+  }
+}
+
+function retainedAssetProblem(root: string, value: string): string | undefined {
+  const invalid = canonicalPathProblem(value);
+  const inspected = invalid ? { ok: false as const, problem: invalid } : inspectContainedPath(root, value);
+  if (!inspected.ok) return inspected.problem.message;
+  if (!inspected.stat?.isFile() || !isCaptureAsset(value)) return "Expected an existing retained asset at a canonical capture path: " + value;
+  return undefined;
+}
+
+function sourceDiagnostics(root: string, note: InventoryNote): Diagnostic[] {
+  const diagnostics: Diagnostic[] = [];
+  if (note.data.type !== "source") return diagnostics;
+  for (const field of ["original", "extracted"]) {
+    const value = note.data[field];
+    if (typeof value !== "string") continue; // The registered schema reports missing or non-string values.
+    const problem = retainedAssetProblem(root, value);
+    if (problem !== undefined) diagnostics.push({ path: note.path, rule: "source.path", message: field + ": " + problem, fix: "Use a canonical vault-relative retained asset path without dot segments or symlinks" });
+  }
+  return diagnostics;
+}
+
+function duplicateTitleDiagnostics(notes: InventoryNote[]): Diagnostic[] {
+  const titles = new Map<string, InventoryNote[]>();
+  for (const note of notes) {
+    if (!note.scope || typeof note.data.title !== "string") continue;
+    const key = note.scope + "\0" + caseFold(note.data.title.trim().normalize("NFC")).normalize("NFC");
+    const group = titles.get(key) ?? [];
+    group.push(note); titles.set(key, group);
+  }
+  return [...titles.values()].filter(group => group.length > 1).flatMap(group => group.map(note => ({
+    path: note.path, rule: "title.duplicate", message: "Duplicate title in " + note.scope + ": " + group.map(n => n.path).join(", "), fix: "Choose distinct titles within this scope",
+  })));
+}
+
+function crossNoteDiagnostics(root: string, notes: InventoryNote[], indexes: Set<string>, selected: string | undefined, prospective?: ProspectiveNote): Diagnostic[] {
+  const diagnostics: Diagnostic[] = [];
+  const topics = new Set(notes.filter(n => n.canonical).map(n => n.path));
+  const plannedTargets = new Set(indexes);
+  if (prospective) plannedTargets.add(prospective.path);
+  for (const note of notes) {
+    // Whole-vault callers repair planned indexes or report freshness; selected lint requires existing link targets.
+    diagnostics.push(...linkDiagnostics(root, note.path, note.body, note.tree, relative => topics.has(relative) || indexes.has(relative) || isCaptureAsset(relative), selected === undefined ? plannedTargets : undefined));
+    diagnostics.push(...sourceDiagnostics(root, note));
+    if (typeof note.data.superseded_by === "string" && !topics.has(note.data.superseded_by)) diagnostics.push({ path: note.path, rule: "lifecycle.target", message: "superseded_by must name an existing canonical topic: " + note.data.superseded_by, fix: "Use a vault-relative topic path with .md and no dot segments" });
+  }
+  return [...diagnostics, ...duplicateTitleDiagnostics(notes)];
+}
+
+function navigationTopics(notes: InventoryNote[]): NavigationTopic[] {
+  const navigation: NavigationTopic[] = [];
+  for (const note of notes) {
+    const { type, title, description } = note.data;
+    if (note.canonical && typeof type === "string" && typeof title === "string" && typeof description === "string") navigation.push({ path: note.path, type, title, description });
+  }
+  return navigation;
+}
+
+function selectedDiagnostics(notes: InventoryNote[], diagnostics: Diagnostic[], selected?: string): Diagnostic[] {
+  const inSelection = (file: string) => selected === undefined || file === selected || file.startsWith(selected + "/");
+  const scopes = new Set(notes.filter(n => inSelection(n.path)).map(n => n.scope));
+  if (selected !== undefined) scopes.add(scopeOf(selected));
+  return sortDiagnostics(diagnostics.filter(d => d.path.startsWith(".wiki/types/") || inSelection(d.path) || d.rule === "title.duplicate" && scopes.has(scopeOf(d.path))));
+}
 export function inspectVault(root: string, selected?: string, prospective?: ProspectiveNote) {
   const { types, diagnostics } = loadRegistry(root);
-  const notes: { path: string; scope: string | undefined; data: Record<string, unknown>; canonical: boolean; body: string; tree: ReturnType<typeof parseMarkdown> }[] = [];
+  const notes: InventoryNote[] = [];
   const directories: NavigationDirectory[] = [{ path: "", type: "" }];
   const indexes = new Set<string>(["index.md"]);
   function fail(file: string, rule: string, message: string, fix: string) { diagnostics.push({ path: file, rule, message, fix }); }
@@ -84,58 +171,19 @@ export function inspectVault(root: string, selected?: string, prospective?: Pros
     if (type.record.scopes && (!scope || !type.record.scopes.includes(scope))) fail(relative, "frontmatter.scope", "Type is not allowed in scope " + String(scope), "Use one of the exact registered scopes: " + type.record.scopes.join(", "));
   }
   if (selected !== undefined) {
-    const invalid = canonicalPathProblem(selected);
-    if (invalid || isCaptureAsset(selected) || selected.split("/").some(p => SKIP.has(p))) {
-      fail(selected, "path.invalid", invalid?.message ?? "Expected a canonical note path outside operational and capture directories", "Use a vault-relative path without dot segments or operational directories");
-    } else {
-      const inspected = inspectContainedPath(root, selected);
-      if (!inspected.ok) fail(selected, inspected.problem.rule, inspected.problem.message, "Use regular vault-owned note trees");
-      else if (!inspected.stat) fail(selected, "path.missing", "Missing requested path", "Select an existing note path");
-    }
+    const selectionProblems = selectedPathDiagnostics(root, selected);
+    diagnostics.push(...selectionProblems);
+    // Registry diagnostics are always applicable, even for an invalid selected path.
+    if (selectionProblems.length) return { diagnostics: sortDiagnostics(diagnostics), indexes: new Map<string, string>() };
   }
-  // Registry diagnostics are always applicable, even for an invalid selected path.
-  if (selected !== undefined && diagnostics.some(d => d.path === selected && d.rule.startsWith("path."))) return { diagnostics: sortDiagnostics(diagnostics), indexes: new Map<string, string>() };
-  for (const name of fs.readdirSync(root).sort()) if (!SKIP.has(name)) visit(name);
+  for (const name of fs.readdirSync(root).sort().filter(name => !SKIP.has(name))) visit(name);
   if (prospective) {
-    const parents = prospective.path.split("/").slice(0, -1);
-    for (let i = 1; i <= parents.length; i++) {
-      const relative = parents.slice(0, i).join("/");
-      const directory = maintainedDirectory(relative, types);
-      if (directory && !directories.some(d => d.path === relative)) { directories.push(directory); indexes.add(relative + "/index.md"); }
-    }
+    prospectiveDirectories(prospective.path, types, directories, indexes);
     inspectNote(prospective.path, prospective.markdown);
   }
-  const topics = new Set(notes.filter(n => n.canonical).map(n => n.path));
-  const plannedTargets = new Set(indexes);
-  if (prospective) plannedTargets.add(prospective.path);
-  const titles = new Map<string, typeof notes>();
-  for (const note of notes) {
-    // Whole-vault callers repair planned indexes or report freshness; selected lint requires existing link targets.
-    diagnostics.push(...linkDiagnostics(root, note.path, note.body, note.tree, relative => topics.has(relative) || indexes.has(relative) || isCaptureAsset(relative), selected === undefined ? plannedTargets : undefined));
-    if (note.data.type === "source") for (const field of ["original", "extracted"]) {
-      const value = note.data[field];
-      if (typeof value !== "string") continue; // The registered schema reports missing or non-string values.
-      const invalid = canonicalPathProblem(value);
-      const inspected = invalid ? { ok: false as const, problem: invalid } : inspectContainedPath(root, value);
-      if (!inspected.ok || !inspected.stat?.isFile() || !isCaptureAsset(value)) fail(note.path, "source.path", field + ": " + (!inspected.ok ? inspected.problem.message : "Expected an existing retained asset at a canonical capture path: " + value), "Use a canonical vault-relative retained asset path without dot segments or symlinks");
-    }
-    if (typeof note.data.superseded_by === "string" && !topics.has(note.data.superseded_by)) fail(note.path, "lifecycle.target", "superseded_by must name an existing canonical topic: " + note.data.superseded_by, "Use a vault-relative topic path with .md and no dot segments");
-    if (!note.scope || typeof note.data.title !== "string") continue;
-    const key = note.scope + "\0" + caseFold(note.data.title.trim().normalize("NFC")).normalize("NFC");
-    const group = titles.get(key) ?? [];
-    group.push(note); titles.set(key, group);
-  }
-  for (const group of titles.values()) if (group.length > 1) for (const note of group) fail(note.path, "title.duplicate", "Duplicate title in " + note.scope + ": " + group.map(n => n.path).join(", "), "Choose distinct titles within this scope");
-  const inSelection = (file: string) => selected === undefined || file === selected || file.startsWith(selected + "/");
-  const scopes = new Set(notes.filter(n => inSelection(n.path)).map(n => n.scope));
-  if (selected !== undefined) scopes.add(scopeOf(selected));
-  const navigation: NavigationTopic[] = [];
-  if (!diagnostics.length) for (const note of notes) {
-    const { type, title, description } = note.data;
-    if (note.canonical && typeof type === "string" && typeof title === "string" && typeof description === "string") navigation.push({ path: note.path, type, title, description });
-  }
-  return { indexes: diagnostics.length ? new Map<string, string>() : renderIndexes(directories, navigation),
-    diagnostics: sortDiagnostics(diagnostics.filter(d => d.path.startsWith(".wiki/types/") || inSelection(d.path) || d.rule === "title.duplicate" && scopes.has(scopeOf(d.path)))) };
+  diagnostics.push(...crossNoteDiagnostics(root, notes, indexes, selected, prospective));
+  return { indexes: diagnostics.length ? new Map<string, string>() : renderIndexes(directories, navigationTopics(notes)),
+    diagnostics: selectedDiagnostics(notes, diagnostics, selected) };
 }
 
 export function lintVault(root: string, selected?: string): Diagnostic[] {
