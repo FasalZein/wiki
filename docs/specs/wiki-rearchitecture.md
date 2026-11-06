@@ -324,7 +324,7 @@ Extract before publishing any source note. Missing programs, HTTP errors, unknow
 
 ### D14-D15: explicit skill-to-agent handoff
 
-The skill is a small Agent Skills-compatible document with name/description and focused references. It teaches this sequence: scope index when useful, fast find, show selected sections, deep find only on a miss, distilled handoff, then lint/index checks for actual writes. It does not require reading a whole-vault index or loading an old roster. Report measured skill context cost in tokens, with the tokenizer named; there is no invented token budget acceptance threshold.
+The repository skill is one self-contained Agent Skills-compatible file named SKILL.md, with its own name and description. That file holds the full workflow, every branch rule, the explicit handoff rules, and a completion check on each step. Order the steps. Keep each rule in the file beside the step that uses it, and state the action to take. Follow writing-for-agents for that hierarchy, those positive instructions, and those completion checks. Keep branch-only rules in the same file. The dedicated agent definition remains its own runtime role. CLI schemas remain registry data. Do not add an auxiliary skill, a reference document, a router skill, or a required instruction that appears only in the agent example. It teaches this sequence: scope index when useful, fast find, show selected sections, deep find only on a miss, distilled handoff, then lint/index checks for actual writes. It does not require reading a whole-vault index or loading an old roster. Report measured skill context cost in tokens, with the tokenizer named; there is no invented token budget acceptance threshold.
 
 The inactive repository-owned dedicated agent example defines its wiki role, permitted CLI operations, registry restrictions, review rules, conflict handling, and result contract. Its model is configurable at installation/invocation, with no selected maintenance provider. Do not hard-code Grok, Sol, Opus, DeepSeek, or a credential route into the maintenance template. The owner requested Sol for engineering. That routing does not select a wiki maintenance model; Grok Fast helpers are not a chosen maintenance model.
 
@@ -383,7 +383,7 @@ Only external network and model/process failure boundaries may be faked where no
 | AC16 | Text capture preserves original/extracted bytes and source metadata. Source content cannot close its literal block or become authored headings/links. Unsupported/invalid input publishes no source note. |
 | AC17 | Synthetic PDF fixtures retain original bytes, expected extracted text, and extractor version. Empty layer, corrupt PDF, missing tool, and cancellation have explicit outcomes. No OCR is implied. |
 | AC18 | A local HTTP fixture verifies HTML/text/PDF capture, redirects, charset handling, no linked-resource fetch, HTTP failures, sandbox extraction, unknown AST failure, and retained reads after the server stops. |
-| AC19 | Repository templates define explicit distilled handoff, search-before-create, direct authorized factual updates, owner approval of decisions/intent, optional dry-run, digest refusal, no transcript harvest, no hooks, no installed paths, and no hard-coded maintenance model. |
+| AC19 | One repository-owned SKILL.md, written to writing-for-agents, holds the workflow, branch rules, handoff rules, and completion checks. Repository templates define explicit distilled handoff, search-before-create, direct authorized factual updates, owner approval of decisions/intent, optional dry-run, digest refusal, no transcript harvest, no hooks, no installed paths, and no hard-coded maintenance model. |
 | AC20 | A synthetic handoff drives the real CLI through search/read, candidate validation, authorized create/update, lint, and index check in a disposable vault. This proves the protocol and CLI, not live model judgment or real-data egress policy. |
 | AC21 | A boot check starts the Node CLI, runs init/new/show/lint/index-check in temporary storage, and exits cleanly. Search smoke uses isolated qmd state. No root dist build, archive write, global install, or blanket Git staging occurs. |
 
@@ -423,7 +423,7 @@ These are the bounded delivery slices; their ticket drafts are local, not publis
 | B15 | PDF capture through existing extraction behavior. | B14 | D13, D16-D17 |
 | B16 | Explicit web capture through safe extraction behavior. | B15 | D13, D16-D17 |
 | B17 | Read-only doctor reports package, extractor, registry, and search readiness. | B05, B10, B15 | D08, D10-D13 |
-| B18 | Repository-owned small wiki skill and concise scope usage guide. | B08, B13 | D01-D02, D14-D15 |
+| B18 | Repository-owned one-file wiki skill. | B08, B13 | D01-D02, D14-D15 |
 | B19 | Repository-owned dedicated wiki-agent handoff template and protocol fixture. | B09, B16, B18 | D01-D02, D09, D13-D15, D17 |
 | B20 | Disposable complete CLI boot/handoff smoke, support documentation, and batch verification wiring. | B13, B16-B17, B19 | D01-D17 |
 
