@@ -55,80 +55,123 @@ export function sortDiagnostics(items: Diagnostic[]): Diagnostic[] {
 }
 function compare(a: string, b: string): number { return a < b ? -1 : a > b ? 1 : 0; }
 function issue(file: string, rule: string, message: string, fix: string): Diagnostic { return { path: file, rule, message, fix }; }
-export function openVault(dir: string): string {
-  const root = path.resolve(dir);
-  if (!fs.existsSync(root)) throw new WikiError("not_found", "Missing vault: " + root);
+function validateVaultLayout(root: string): void {
   for (const relative of ["", ".wiki", ".wiki/config.json", ".wiki/types", ".wiki/tmp", "log.md"]) {
     const item = containedEntry(root, relative).stat;
     if (!item) throw new WikiError("damaged", "Missing vault entry: " + relative);
     const directory = ["", ".wiki", ".wiki/types", ".wiki/tmp"].includes(relative);
     if (directory ? !item.isDirectory() : !item.isFile()) throw new WikiError("damaged", "Wrong vault entry kind: " + relative);
   }
+}
+function validateVaultConfiguration(config: unknown): void {
+  if (!isMapping(config) || !("profile" in config) || !("version" in config)) throw new WikiError("damaged", "Invalid configuration");
+  if (config.profile !== "wiki-okf" || config.version !== 1) throw new WikiError("unsupported", "Unsupported profile/version; no conversion performed");
+}
+export function openVault(dir: string): string {
+  const root = path.resolve(dir);
+  if (!fs.existsSync(root)) throw new WikiError("not_found", "Missing vault: " + root);
+  validateVaultLayout(root);
   let config: unknown;
   try { config = JSON.parse(fs.readFileSync(path.join(root, ".wiki/config.json"), "utf8")); }
   catch { throw new WikiError("damaged", "Invalid JSON configuration"); }
-  if (!isMapping(config) || !("profile" in config) || !("version" in config)) throw new WikiError("damaged", "Invalid configuration");
-  if (config.profile !== "wiki-okf" || config.version !== 1) throw new WikiError("unsupported", "Unsupported profile/version; no conversion performed");
+  validateVaultConfiguration(config);
   return fs.realpathSync(root);
 }
 
+function assertFragmentIdentifier(schema: Record<string, unknown>, key: string, message: string): void {
+  if (key in schema && (typeof schema[key] !== "string" || !schema[key].startsWith("#"))) throw new Error(message);
+}
+function mappingSchemaChildren(schema: Record<string, unknown>): unknown[] {
+  const children: unknown[] = [];
+  for (const key of ["properties", "patternProperties", "$defs", "definitions", "dependentSchemas", "dependencies"]) {
+    const values = schema[key];
+    if (isMapping(values)) for (const value of Object.values(values)) children.push(value);
+  }
+  return children;
+}
+function arraySchemaChildren(schema: Record<string, unknown>): unknown[] {
+  const children: unknown[] = [];
+  for (const key of ["allOf", "anyOf", "oneOf", "prefixItems"]) {
+    const values = schema[key];
+    if (Array.isArray(values)) for (const value of values) children.push(value);
+  }
+  return children;
+}
 // Visit schema positions, not arbitrary annotation/enum data. Only fragment-local refs are supported.
 function checkReferences(schema: unknown): void {
   if (!isMapping(schema)) return;
-  for (const key of ["$ref", "$dynamicRef"]) {
-    if (key in schema && (typeof schema[key] !== "string" || !schema[key].startsWith("#"))) throw new Error("Only local fragment schema references are allowed");
-  }
-  if ("$id" in schema && (typeof schema.$id !== "string" || !schema.$id.startsWith("#"))) throw new Error("External schema identifiers are not supported");
-  for (const key of ["properties", "patternProperties", "$defs", "definitions", "dependentSchemas", "dependencies"]) {
-    const values = schema[key];
-    if (isMapping(values)) for (const value of Object.values(values)) checkReferences(value);
-  }
-  for (const key of ["allOf", "anyOf", "oneOf", "prefixItems"]) {
-    const values = schema[key];
-    if (Array.isArray(values)) for (const value of values) checkReferences(value);
-  }
+  for (const key of ["$ref", "$dynamicRef"]) assertFragmentIdentifier(schema, key, "Only local fragment schema references are allowed");
+  assertFragmentIdentifier(schema, "$id", "External schema identifiers are not supported");
+  for (const value of mappingSchemaChildren(schema)) checkReferences(value);
+  for (const value of arraySchemaChildren(schema)) checkReferences(value);
   for (const key of ["not", "if", "then", "else", "items", "contains", "additionalProperties", "unevaluatedProperties", "propertyNames", "unevaluatedItems", "contentSchema"]) checkReferences(schema[key]);
+}
+type RegistryFailure = (rule: string, text: string) => void;
+function readRegistryJson(root: string, file: string, fail: RegistryFailure): { data: unknown } | undefined {
+  const relative = ".wiki/types/" + file;
+  const inspected = inspectContainedPath(root, relative);
+  if (!inspected.ok) { fail("registry.file", inspected.problem.message); return; }
+  if (!inspected.stat?.isFile() || !file.endsWith(".json")) { fail("registry.file", "Expected a regular JSON registry file"); return; }
+  try { return { data: JSON.parse(fs.readFileSync(path.join(root, relative), "utf8")) }; }
+  catch { fail("registry.json", "Malformed JSON registry record"); return; }
+}
+function registryIdentityProblem(data: TypeRecord, file: string): [string, string] | undefined {
+  if (!safeName(data.name)) return ["registry.name", "Unsafe or reserved type name: " + data.name];
+  if (file !== data.name + ".json") return ["registry.name", "Filename must match registry name " + data.name];
+  if (!safeName(data.folder)) return ["registry.folder", "Unsafe or reserved folder: " + data.folder];
+  if (data.scopes?.some(scope => scope.startsWith("projects/") && !safeName(scope.slice(9)))) return ["registry.scopes", "Invalid exact scope restriction"];
+  return undefined;
+}
+function registryTemplateProblem(data: TypeRecord): string | undefined {
+  // Templates are inert Markdown bodies. Only a complete leading frontmatter block
+  // crosses that boundary; shell examples, placeholder syntax, and thematic breaks do not.
+  if (/^\uFEFF?---(?:[A-Za-z][\w-]*)?[ \t]*\r?\n(?:[\s\S]*?\r?\n)?---[ \t]*(?:\r?\n|$)/.test(data.template)) return "Template body must not contain a leading frontmatter block";
+  if (missingHeadings(parseMarkdown(data.template), data.requiredHeadings, data.name).length) return "Template is missing a required heading";
+  return undefined;
+}
+function compileRegisteredType(data: TypeRecord): RegisteredType {
+  if (isMapping(data.frontmatterSchema) && data.frontmatterSchema.$schema !== undefined && data.frontmatterSchema.$schema !== COMMON_SCHEMA.$schema) throw new Error("Expected JSON Schema draft 2020-12");
+  checkReferences(data.frontmatterSchema);
+  // Compile each type in isolation: duplicate $ids cannot leak across records or commands.
+  const validator = new Ajv2020({ allErrors: true, strict: false, ownProperties: true });
+  addFormats.default(validator);
+  validator.addSchema(data.frontmatterSchema, "urn:wiki:type");
+  const validate = validator.compile({ allOf: [COMMON_SCHEMA, { $ref: "urn:wiki:type" }], unevaluatedProperties: false });
+  return { record: data, validate };
+}
+function loadRegistryRecord(root: string, file: string, diagnostics: Diagnostic[]): RegisteredType | undefined {
+  const fail = (rule: string, text: string) => diagnostics.push(issue(".wiki/types/" + file, rule, text, "Repair the registry record and rerun whole-vault lint"));
+  const loaded = readRegistryJson(root, file, fail);
+  if (!loaded) return;
+  const { data } = loaded;
+  if (!validRecord(data)) { fail("registry.record", ajv.errorsText(validRecord.errors)); return; }
+  const identity = registryIdentityProblem(data, file);
+  if (identity) { fail(...identity); return; }
+  const template = registryTemplateProblem(data);
+  if (template) { fail("registry.template", template); return; }
+  try { return compileRegisteredType(data); }
+  catch (error) { fail("registry.schema", "Invalid or disallowed schema: " + message(error)); return; }
+}
+function registryScopesOverlap(left: string[] | undefined, right: string[] | undefined): boolean {
+  return (left ?? right)?.some(scope => (!left || left.includes(scope)) && (!right || right.includes(scope))) ?? true;
+}
+function registryFolderDiagnostics(types: RegisteredType[]): Diagnostic[] {
+  const diagnostics: Diagnostic[] = [];
+  for (const [i, current] of types.entries()) for (const other of types.slice(i + 1)) {
+    const overlaps = registryScopesOverlap(current.record.scopes, other.record.scopes);
+    if (current.record.folder === other.record.folder && overlaps) {
+      diagnostics.push(issue(".wiki/types/" + other.record.name + ".json", "registry.folder", "Folder conflicts with type " + current.record.name, "Choose a unique folder in each allowed scope"));
+    }
+  }
+  return diagnostics;
 }
 export function loadRegistry(root: string): { types: RegisteredType[]; diagnostics: Diagnostic[] } {
   const types: RegisteredType[] = [], diagnostics: Diagnostic[] = [];
   for (const file of fs.readdirSync(path.join(root, ".wiki/types")).sort()) {
-    const relative = ".wiki/types/" + file;
-    const fail = (rule: string, text: string, fix = "Repair the registry record and rerun whole-vault lint") => diagnostics.push(issue(relative, rule, text, fix));
-    const inspected = inspectContainedPath(root, relative);
-    if (!inspected.ok) { fail("registry.file", inspected.problem.message); continue; }
-    const stat = inspected.stat;
-    if (!stat?.isFile() || !file.endsWith(".json")) { fail("registry.file", "Expected a regular JSON registry file"); continue; }
-    let data: unknown;
-    try { data = JSON.parse(fs.readFileSync(path.join(root, relative), "utf8")); }
-    catch { fail("registry.json", "Malformed JSON registry record"); continue; }
-    if (!validRecord(data)) { fail("registry.record", ajv.errorsText(validRecord.errors)); continue; }
-    if (!safeName(data.name)) { fail("registry.name", "Unsafe or reserved type name: " + data.name); continue; }
-    if (file !== data.name + ".json") { fail("registry.name", "Filename must match registry name " + data.name); continue; }
-    if (!safeName(data.folder)) { fail("registry.folder", "Unsafe or reserved folder: " + data.folder); continue; }
-    if (data.scopes?.some(scope => scope.startsWith("projects/") && !safeName(scope.slice(9)))) { fail("registry.scopes", "Invalid exact scope restriction"); continue; }
-    // Templates are inert Markdown bodies. Only a complete leading frontmatter block
-    // crosses that boundary; shell examples, placeholder syntax, and thematic breaks do not.
-    if (/^\uFEFF?---(?:[A-Za-z][\w-]*)?[ \t]*\r?\n(?:[\s\S]*?\r?\n)?---[ \t]*(?:\r?\n|$)/.test(data.template)) { fail("registry.template", "Template body must not contain a leading frontmatter block"); continue; }
-    if (missingHeadings(parseMarkdown(data.template), data.requiredHeadings, data.name).length) { fail("registry.template", "Template is missing a required heading"); continue; }
-    try {
-      if (isMapping(data.frontmatterSchema) && data.frontmatterSchema.$schema !== undefined && data.frontmatterSchema.$schema !== COMMON_SCHEMA.$schema) throw new Error("Expected JSON Schema draft 2020-12");
-      checkReferences(data.frontmatterSchema);
-      // Compile each type in isolation: duplicate $ids cannot leak across records or commands.
-      const validator = new Ajv2020({ allErrors: true, strict: false, ownProperties: true });
-      addFormats.default(validator);
-      validator.addSchema(data.frontmatterSchema, "urn:wiki:type");
-      const validate = validator.compile({ allOf: [COMMON_SCHEMA, { $ref: "urn:wiki:type" }], unevaluatedProperties: false });
-      types.push({ record: data, validate });
-    } catch (error) { fail("registry.schema", "Invalid or disallowed schema: " + message(error)); }
+    const type = loadRegistryRecord(root, file, diagnostics);
+    if (type) types.push(type);
   }
-  for (let i = 0; i < types.length; i++) for (const other of types.slice(i + 1)) {
-    const current = types[i];
-    const left = current?.record.scopes, right = other.record.scopes;
-    const overlaps = (left ?? right)?.some(scope => (!left || left.includes(scope)) && (!right || right.includes(scope))) ?? true;
-    if (current && current.record.folder === other.record.folder && overlaps) {
-      diagnostics.push(issue(".wiki/types/" + other.record.name + ".json", "registry.folder", "Folder conflicts with type " + current.record.name, "Choose a unique folder in each allowed scope"));
-    }
-  }
+  diagnostics.push(...registryFolderDiagnostics(types));
   return { types, diagnostics: sortDiagnostics(diagnostics) };
 }
 export function listTypes(types: RegisteredType[]) {
@@ -193,7 +236,7 @@ export class RegistryWriteError extends WikiError {
     this.digest = "sha256:" + createHash("sha256").update(bytes).digest("hex");
   }
 }
-export function addType(root: string, name: string, folder: string): { path: string; digest: string } {
+function typeScaffoldDestination(root: string, name: string, folder: string): string {
   if (!safeName(name) || !safeName(folder)) throw new WikiError("usage", "Use safe, non-reserved lowercase hyphenated type and folder names");
   const relative = ".wiki/types/" + name + ".json";
   // Preserve exclusive-create conflicts for an existing leaf, including a symlink.
@@ -202,6 +245,10 @@ export function addType(root: string, name: string, folder: string): { path: str
   const registry = loadRegistry(root);
   if (registry.diagnostics.length) throw new WikiError("damaged", "Repair registry before adding a type: " + registry.diagnostics[0]?.message);
   if (registry.types.some(t => t.record.folder === folder)) throw new WikiError("usage", "Folder conflicts with an existing type: " + folder);
+  return relative;
+}
+export function addType(root: string, name: string, folder: string): { path: string; digest: string } {
+  const relative = typeScaffoldDestination(root, name, folder);
   const scaffold: TypeRecord = { name, folder, frontmatterSchema: { ...COMMON_SCHEMA,
     properties: { ...COMMON_SCHEMA.properties, type: { const: name } }, additionalProperties: false }, requiredHeadings: [], template: "" };
   const bytes = JSON.stringify(scaffold, null, 2) + "\n";

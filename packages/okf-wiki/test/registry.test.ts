@@ -5,6 +5,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { declaresProperty } from "../src/registry.ts";
 
 const BIN = fileURLToPath(new URL("../bin/okf-wiki.js", import.meta.url));
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "okf-registry-"));
@@ -230,6 +231,25 @@ test("okf:02 list and validation retain required fields reached through a local 
   assert.equal(listing.status, 0);
   assert.ok(listing.data.types.find((t: { name: string }) => t.name === "glossary").requiredFields.includes("category"));
   assert.equal(indexedLint(vault).status, 0);
+});
+
+test("okf:02 schema references resolve escaped pointers, arrays, root and named anchors without inventing properties", () => {
+  const fields = { properties: { category: { type: "string" } } };
+  for (const schema of [
+    { $ref: "#", ...fields },
+    { $ref: "#/$defs/a~1b~0c", $defs: { "a/b~c": fields } },
+    { $ref: "#/$defs/0", $defs: [fields] },
+    { $ref: "#field%73", $defs: { literal: false, nested: [{ $anchor: "fields", ...fields }] } },
+    { $dynamicRef: "#fields", $defs: { named: { $dynamicAnchor: "fields", ...fields } } },
+  ]) {
+    assert.equal(declaresProperty(schema, "category"), true);
+    assert.equal(declaresProperty(schema, "absent"), false);
+  }
+  for (const schema of [
+    { $ref: "#missing", $defs: { literal: false, nested: [null, "text"] } },
+    { $ref: "#/$defs/literal/child", $defs: { literal: false } },
+    { $ref: "#/$defs/absent", $defs: {} },
+  ]) assert.equal(declaresProperty(schema, "category"), false);
 });
 
 test("okf:02 source profile keeps required locator and retrieval time with a weakened registry", () => {
