@@ -10,6 +10,7 @@
     "node": ">=22.18.0"
   },
   "dependencies": {
+    "@tobilu/qmd": "2.8.3",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
     "mdast-util-from-markdown": "2.0.2",
