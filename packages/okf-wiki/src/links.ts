@@ -57,7 +57,14 @@ export function linkDiagnostics(root: string, file: string, body: string, tree: 
     function mask(child: Nodes) {
       if (["inlineCode", "html", "link", "image", "linkReference", "imageReference"].includes(child.type)) {
         const from = child.position?.start.offset, to = child.position?.end.offset;
-        if (from !== undefined && to !== undefined) raw = raw.slice(0, from - base) + "\n".repeat(to - from) + raw.slice(to - base);
+        if (from !== undefined && to !== undefined) {
+          // Keep reference delimiters visible: an outer [ ... ] can form a wikilink.
+          // Mask label contents so genuine references with literal brackets stay examples.
+          const reference = child.type === "linkReference" || child.type === "imageReference";
+          const opening = child.type === "imageReference" ? 2 : 1;
+          const masked = reference ? body.slice(from, from + opening) + body.slice(from + opening, to - 1).replace(/[^\r\n]/g, " ") + "]" : "\n".repeat(to - from);
+          raw = raw.slice(0, from - base) + masked + raw.slice(to - base);
+        }
         return;
       }
       if ("children" in child) for (const nested of child.children) mask(nested);
@@ -67,7 +74,7 @@ export function linkDiagnostics(root: string, file: string, body: string, tree: 
       const offset = match.index;
       let escapes = 0;
       for (let i = offset - 1; i >= 0 && raw[i] === "\\"; i--) escapes++;
-      if (escapes % 2 === 0) fail("link.wikilink", "Wikilink syntax is not supported: " + match[0]);
+      if (escapes % 2 === 0) fail("link.wikilink", "Wikilink syntax is not supported: " + body.slice(base + offset, base + offset + match[0].length));
     }
   });
   return diagnostics;

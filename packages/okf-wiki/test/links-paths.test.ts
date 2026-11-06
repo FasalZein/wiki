@@ -198,6 +198,35 @@ test("okf:04 formatted wikilink labels remain forbidden but inline-code examples
   assert.equal(cli(vault, "lint").status, 0);
 });
 
+for (const prefix of ["", "!"]) for (const selected of [undefined, TOPIC]) test("okf:04 matching reference definitions cannot hide authored " + prefix + "[[topic]] in " + (selected ? "selected" : "whole") + " lint", () => {
+  const vault = fresh();
+  for (const reference of ["[topic]", "[topic][]", "[label][topic]"]) {
+    const wiki = prefix + "[" + reference + "]";
+    note(vault, wiki + "\n\n[topic]: topic.md\n");
+    const result = cli(vault, "lint", ...(selected === undefined ? [] : [selected]));
+    assert.ok(result.data.diagnostics.some((d: { rule: string }) => d.rule === "link.wikilink"), "Expected link.wikilink for " + wiki + ": " + JSON.stringify(result));
+    assert.equal(result.status, 1);
+    assert.deepEqual(result.data.diagnostics.map((d: { rule: string }) => d.rule), ["link.wikilink"]);
+    assert.ok(result.data.diagnostics[0].message.includes(wiki.slice(prefix.length)), "Report the original syntax, not the masked reference");
+  }
+});
+
+test("okf:04 matching definitions preserve standard references and escaped, code and quoted examples", () => {
+  const vault = fresh();
+  const body = [
+    "[topic]", "[topic][]", "[label][topic]", "![topic]", "![topic][]", "![label][topic]",
+    "[label [[literal]]][topic]", "![label [[literal]]][topic]",
+    "\\[[topic]]", "!\\[[topic]]", "\x60[[topic]] ![[topic]]\x60",
+    "~~~md\n[[topic]]\n![[topic]]\n~~~", "> [[topic]]\n> ![[topic]]", "[topic]: topic.md",
+  ].join("\n\n");
+  note(vault, body);
+  for (const selected of [[], [TOPIC]]) {
+    const result = cli(vault, "lint", ...selected);
+    assert.equal(result.status, 0, JSON.stringify(result));
+    assert.deepEqual(result.data.diagnostics, []);
+  }
+});
+
 test("okf:04 current registry writes refuse symlinked managed ancestors and preserve outside sentinels", () => {
   for (const relative of [".wiki/types", ".wiki/tmp"]) {
     const vault = fresh();
