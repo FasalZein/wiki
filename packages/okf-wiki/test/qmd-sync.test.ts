@@ -8,6 +8,7 @@ import https from "node:https";
 import net from "node:net";
 import tls from "node:tls";
 import { syncBuiltinESMExports } from "node:module";
+import "./qmd-cleanup-guard.js";
 import { syncQmdText, searchQmdLex } from "../src/qmd.ts";
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "okf-qmd-"));
@@ -51,7 +52,7 @@ test("okf:10 real SDK adds exact full Markdown without embeddings and retrieves 
 
 function receipt(root: string) { return path.join(root, ".wiki/search/coverage.json"); }
 async function paths(root: string, query: string) {
-  const found = await searchQmdLex(root, query);
+  const found = await searchQmdLex(root, query, 100);
   assert.equal(found.state, "successful", JSON.stringify(found));
   return found.matches.map(m => m.path);
 }
@@ -190,4 +191,91 @@ test("okf:10 native database failures, duplicate captures, and symlinks fail clo
   fs.symlinkSync(external, path.join(symlink, ".wiki"));
   assert.equal((await syncQmdText(symlink, inventory([one]))).state, "unavailable");
   assert.deepEqual(fs.readdirSync(external), []);
+});
+
+
+test("okf:10 valid build/dist/vendor project and folder identities survive SDK exclusions, rename, and rebuild", async () => {
+  const root = fresh();
+  const names = ["app", "build", "dist", "vendor"];
+  const concepts = names.flatMap(project => names.map(folder => ({
+    path: "projects/" + project + "/" + folder + "/quasar.md", markdown: "# Quasar\nShared photon\n",
+  })));
+  concepts.push({ path: "personal/build/" + "long-".repeat(48) + "star.md", markdown: "# Long\nPhoton\n" });
+  const result = await syncQmdText(root, inventory(concepts));
+  assert.equal(result.state, "successful", JSON.stringify(result));
+  assert.deepEqual((await paths(root, "photon")).sort(), concepts.map(c => c.path).sort());
+  const renamed = concepts.map((c, i) => i === 0 ? { ...c, path: "projects/build/vendor/renamed.md" } : c).slice(0, -1);
+  const next = await syncQmdText(root, inventory(renamed));
+  assert.equal(next.state, "successful", JSON.stringify(next));
+  assert.deepEqual((await paths(root, "photon")).sort(), renamed.map(c => c.path).sort());
+  fs.rmSync(path.join(root, ".wiki/search"), { recursive: true });
+  assert.equal((await syncQmdText(root, inventory(renamed))).state, "successful");
+  assert.deepEqual((await paths(root, "photon")).sort(), renamed.map(c => c.path).sort());
+});
+
+test("okf:10 SDK progress failure plus permission-denied cleanup preserves both diagnostics and retained-lock recovery", async () => {
+  const root = fresh();
+  const good = inventory([note("first", "# First\nQuasar\n")]);
+  assert.equal((await syncQmdText(root, good)).state, "successful");
+  const directory = path.join(root, ".wiki/search");
+  let result;
+  try {
+    result = await syncQmdText(root, inventory([note("first", "# First\nChanged\n")]), { onProgress() {
+      fs.chmodSync(directory, 0o500);
+      throw new Error("original SDK progress failure");
+    } });
+  } finally { fs.chmodSync(directory, 0o700); }
+  assert.equal(result.state, "unavailable", JSON.stringify(result));
+  const record = JSON.stringify(result);
+  assert.match(record, /original SDK progress failure/);
+  assert.match(record, /EACCES/);
+  assert.match(record, /confirm no index writer is active/);
+  assert.equal(fs.existsSync(receipt(root)), false);
+  assert.equal(fs.existsSync(path.join(directory, "writer.lock")), true);
+  // Recovery is explicit and only after the failed call has released all resources.
+  fs.unlinkSync(path.join(directory, "writer.lock"));
+  assert.equal((await syncQmdText(root, good)).state, "successful");
+});
+
+test("okf:10 native close failures stay structured after real lexical reads and prevent successful sync receipts", async () => {
+  const root = fresh();
+  const good = inventory([note("first", "# First\nQuasar\n")]);
+  assert.equal((await syncQmdText(root, good)).state, "successful");
+  process.env.OKF_QMD_FAIL_CLOSE = "yes";
+  let found;
+  try { found = await searchQmdLex(root, "quasar"); }
+  finally { delete process.env.OKF_QMD_FAIL_CLOSE; }
+  assert.equal(found.state, "unavailable", JSON.stringify(found));
+  assert.match(JSON.stringify(found), /injected native SQLITE_IOERR/);
+  assert.equal(fs.existsSync(path.join(root, ".wiki/search/writer.lock")), false);
+  process.env.OKF_QMD_FAIL_CLOSE = "yes";
+  let sync;
+  try { sync = await syncQmdText(root, good); }
+  finally { delete process.env.OKF_QMD_FAIL_CLOSE; }
+  assert.equal(sync.state, "unavailable", JSON.stringify(sync));
+  assert.match(JSON.stringify(sync), /injected native SQLITE_IOERR/);
+  assert.equal(fs.existsSync(receipt(root)), false);
+  assert.equal(fs.existsSync(path.join(root, ".wiki/search/writer.lock")), false);
+});
+
+
+test("okf:10 checked staged mapping rejects forged, duplicate, or unmapped canonical identities", async () => {
+  const root = fresh();
+  const good = inventory([note("first", "# First\nQuasar\n")]);
+  assert.equal((await syncQmdText(root, good)).state, "successful");
+  const file = path.join(root, ".wiki/search/identities.json");
+  const mapping = fs.readFileSync(file, "utf8");
+  const raw = JSON.parse(mapping);
+  assert.match(raw.paths[0].id, /^[a-f0-9]{64}\.md$/);
+  raw.paths[0].path = "projects/dist/vendor/forged.md";
+  fs.writeFileSync(file, JSON.stringify(raw));
+  assert.equal((await searchQmdLex(root, "quasar")).state, "unavailable");
+  const duplicate = JSON.parse(mapping);
+  duplicate.paths.push(duplicate.paths[0]);
+  fs.writeFileSync(file, JSON.stringify(duplicate));
+  assert.equal((await searchQmdLex(root, "quasar")).state, "unavailable");
+  fs.writeFileSync(file, JSON.stringify({ version: 1, paths: [] }));
+  assert.equal((await searchQmdLex(root, "quasar")).state, "unavailable");
+  fs.writeFileSync(file, mapping);
+  assert.deepEqual(await paths(root, "quasar"), ["personal/notes/first.md"]);
 });
