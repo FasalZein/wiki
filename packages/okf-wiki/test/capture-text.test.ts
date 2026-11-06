@@ -11,6 +11,7 @@ import { parseNoteText } from "../src/frontmatter.ts";
 import { parseMarkdown, visitAuthored } from "../src/markdown.ts";
 import { loadRegistry } from "../src/registry.ts";
 import { initVault } from "../src/vault.ts";
+import { inspectVault } from "../src/lint.ts";
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "okf-capture-text-"));
 after(() => fs.rmSync(temp, { recursive: true, force: true }));
@@ -278,4 +279,62 @@ test("okf:14 unwritten FIFO refuses before reading without blocking or vault wri
     // Also executes after the old-code timeout assertion fails; never read the FIFO during cleanup.
     fs.rmSync(path.dirname(request.input), { recursive: true, force: true });
   }
+});
+
+
+test("okf:14 prospective inventory validates exact planned assets without temporary publication", () => {
+  const request = fresh(), candidate = prepareTextCapture(request.root, request), before = snapshot(request.root);
+  const result = inspectVault(request.root, undefined, { path: candidate.path, markdown: candidate.sourceMarkdown, assets: candidate.assets });
+  assert.deepEqual(result.diagnostics, []);
+  assert.ok(result.indexes.get("personal/references/index.md")?.includes("document.md"));
+  assert.deepEqual(snapshot(request.root), before);
+});
+for (const assetPath of ["../outside", "personal/assets/../outside", "projects/other/assets/document/original.txt", "personal/notes/document.txt"]) test("okf:14 prospective assets reject unsafe or out-of-scope path " + assetPath, () => {
+  const request = fresh(), candidate = prepareTextCapture(request.root, request), before = snapshot(request.root);
+  const assets = [{ path: assetPath, bytes: candidate.assets[0].bytes }, candidate.assets[1]];
+  const result = inspectVault(request.root, undefined, { path: candidate.path, markdown: candidate.sourceMarkdown, assets });
+  assert.ok(result.diagnostics.some(d => d.rule === "source.asset"));
+  assert.equal(result.indexes.size, 0); assert.deepEqual(snapshot(request.root), before);
+});
+
+test("okf:14 prospective inventory rejects asset digest mismatch and unplanned body links", () => {
+  const request = fresh(), candidate = prepareTextCapture(request.root, request), before = snapshot(request.root);
+  const markdown = candidate.sourceMarkdown.replace(/original_sha256: "[^"]+"/, 'original_sha256: "sha256:' + "0".repeat(64) + '"') + "[missing](../assets/document/not-planned.txt)\n";
+  const result = inspectVault(request.root, undefined, { path: candidate.path, markdown, assets: candidate.assets });
+  assert.ok(result.diagnostics.some(d => d.rule === "source.digest"));
+  assert.ok(result.diagnostics.some(d => d.rule === "link.missing"));
+  assert.equal(result.indexes.size, 0); assert.deepEqual(snapshot(request.root), before);
+});
+
+test("okf:14 planned capture assets do not hide an unrelated source with missing retained files", () => {
+  const request = fresh(), candidate = prepareTextCapture(request.root, request);
+  fs.mkdirSync(path.join(request.root, "personal/references"), { recursive: true });
+  fs.writeFileSync(path.join(request.root, "personal/references/old.md"), candidate.sourceMarkdown.replace('title: "Captured document"', 'title: "Old source"'));
+  const before = snapshot(request.root);
+  const result = inspectVault(request.root, undefined, { path: candidate.path, markdown: candidate.sourceMarkdown, assets: candidate.assets });
+  assert.ok(result.diagnostics.some(d => d.path === "personal/references/old.md" && d.rule === "source.path"));
+  assert.equal(result.indexes.size, 0); assert.deepEqual(snapshot(request.root), before);
+});
+
+test("okf:14 prospective assets refuse symlinked ancestors and duplicate planned paths", () => {
+  const request = fresh(), candidate = prepareTextCapture(request.root, request);
+  fs.mkdirSync(path.join(request.root, "personal"));
+  fs.symlinkSync(path.dirname(request.input), path.join(request.root, "personal/assets"));
+  const before = snapshot(request.root);
+  const result = inspectVault(request.root, undefined, { path: candidate.path, markdown: candidate.sourceMarkdown, assets: [candidate.assets[0], candidate.assets[0]] });
+  assert.ok(result.diagnostics.some(d => d.rule === "source.asset" && d.message.includes("symlink")));
+  assert.equal(result.indexes.size, 0); assert.deepEqual(snapshot(request.root), before);
+});
+
+
+test("okf:14 prospective assets reject duplicate and already-existing destinations", () => {
+  const request = fresh(), candidate = prepareTextCapture(request.root, request);
+  const duplicate = inspectVault(request.root, undefined, { path: candidate.path, markdown: candidate.sourceMarkdown, assets: [candidate.assets[0], candidate.assets[0], candidate.assets[1]] });
+  assert.ok(duplicate.diagnostics.some(d => d.rule === "source.asset")); assert.equal(duplicate.indexes.size, 0);
+  fs.mkdirSync(path.dirname(path.join(request.root, candidate.assets[0].path)), { recursive: true });
+  fs.writeFileSync(path.join(request.root, candidate.assets[0].path), "Existing retained bytes\n");
+  const before = snapshot(request.root);
+  const existing = inspectVault(request.root, undefined, { path: candidate.path, markdown: candidate.sourceMarkdown, assets: candidate.assets });
+  assert.ok(existing.diagnostics.some(d => d.path === candidate.assets[0].path && d.rule === "source.asset"));
+  assert.equal(existing.indexes.size, 0); assert.deepEqual(snapshot(request.root), before);
 });
