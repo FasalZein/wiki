@@ -156,7 +156,7 @@ test("okf:03 lint is read-only across success, failure, path selection, registry
   let before = snapshot(vault);
   const success = cli(vault, "lint");
   assert.equal(success.status, 0);
-  assert.deepEqual(success.data.checks, ["registry", "frontmatter", "layout", "body", "lifecycle", "scoped-titles"]);
+  assert.deepEqual(success.data.checks, ["registry", "frontmatter", "layout", "body", "lifecycle", "scoped-titles", "links"]);
   assert.equal(cli(vault, "lint", relative).status, 0);
   assert.deepEqual(snapshot(vault), before);
   note(vault, relative, "", "Status: stable\n");
@@ -171,7 +171,7 @@ test("okf:03 lint is read-only across success, failure, path selection, registry
   assert.deepEqual(snapshot(vault), before);
   const help = spawnSync(process.execPath, [BIN, "--help"], { encoding: "utf8", cwd: temp });
   assert.equal(help.status, 0);
-  assert.match(help.stdout, /links and indexes not checked/);
+  assert.match(help.stdout, /generated-index freshness not checked/);
 });
 
 

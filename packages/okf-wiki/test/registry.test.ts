@@ -269,7 +269,7 @@ test("okf:02 human CLI exposes requirements and the honest lint boundary", () =>
   assert.match(list.stdout, /scopes=all/);
   const lint = human("lint");
   assert.equal(lint.status, 0);
-  assert.match(lint.stdout, /links and indexes not checked/);
+  assert.match(lint.stdout, /generated-index freshness not checked/);
   const relative = note(vault, "---\ntype: unknown\n---\n");
   const bad = human("lint");
   assert.equal(bad.status, 1);

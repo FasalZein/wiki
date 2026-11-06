@@ -4,8 +4,9 @@ import { createHash } from "node:crypto";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import type { AnySchema, ErrorObject, ValidateFunction } from "ajv";
-import { createExclusive, WikiError } from "./vault.ts";
+import { containedEntry, createExclusive, WikiError } from "./vault.ts";
 import { isMapping } from "./frontmatter.ts";
+import { inspectContainedPath } from "./paths.ts";
 import { missingHeadings, parseMarkdown } from "./markdown.ts";
 
 export interface Diagnostic { path: string; rule: string; message: string; fix: string }
@@ -58,9 +59,8 @@ export function openVault(dir: string): string {
   const root = path.resolve(dir);
   if (!fs.existsSync(root)) throw new WikiError("not_found", "Missing vault: " + root);
   for (const relative of ["", ".wiki", ".wiki/config.json", ".wiki/types", ".wiki/tmp", "log.md"]) {
-    const item = fs.lstatSync(path.join(root, relative), { throwIfNoEntry: false });
+    const item = containedEntry(root, relative).stat;
     if (!item) throw new WikiError("damaged", "Missing vault entry: " + relative);
-    if (item.isSymbolicLink()) throw new WikiError("usage", "Refusing symlink: " + relative);
     const directory = ["", ".wiki", ".wiki/types", ".wiki/tmp"].includes(relative);
     if (directory ? !item.isDirectory() : !item.isFile()) throw new WikiError("damaged", "Wrong vault entry kind: " + relative);
   }
@@ -94,8 +94,10 @@ export function loadRegistry(root: string): { types: RegisteredType[]; diagnosti
   for (const file of fs.readdirSync(path.join(root, ".wiki/types")).sort()) {
     const relative = ".wiki/types/" + file;
     const fail = (rule: string, text: string, fix = "Repair the registry record and rerun whole-vault lint") => diagnostics.push(issue(relative, rule, text, fix));
-    const stat = fs.lstatSync(path.join(root, relative));
-    if (!stat.isFile() || stat.isSymbolicLink() || !file.endsWith(".json")) { fail("registry.file", "Expected a regular JSON registry file"); continue; }
+    const inspected = inspectContainedPath(root, relative);
+    if (!inspected.ok) { fail("registry.file", inspected.problem.message); continue; }
+    const stat = inspected.stat;
+    if (!stat?.isFile() || !file.endsWith(".json")) { fail("registry.file", "Expected a regular JSON registry file"); continue; }
     let data: unknown;
     try { data = JSON.parse(fs.readFileSync(path.join(root, relative), "utf8")); }
     catch { fail("registry.json", "Malformed JSON registry record"); continue; }
@@ -194,20 +196,22 @@ export class RegistryWriteError extends WikiError {
 export function addType(root: string, name: string, folder: string): string {
   if (!safeName(name) || !safeName(folder)) throw new WikiError("usage", "Use safe, non-reserved lowercase hyphenated type and folder names");
   const relative = ".wiki/types/" + name + ".json";
-  if (fs.lstatSync(path.join(root, relative), { throwIfNoEntry: false })) throw new WikiError("conflict", "Existing registry destination: " + relative);
+  // Preserve exclusive-create conflicts for an existing leaf, including a symlink.
+  const directory = containedEntry(root, ".wiki/types").full;
+  if (fs.lstatSync(path.join(directory, name + ".json"), { throwIfNoEntry: false })) throw new WikiError("conflict", "Existing registry destination: " + relative);
   const registry = loadRegistry(root);
   if (registry.diagnostics.length) throw new WikiError("damaged", "Repair registry before adding a type: " + registry.diagnostics[0]?.message);
   if (registry.types.some(t => t.record.folder === folder)) throw new WikiError("usage", "Folder conflicts with an existing type: " + folder);
   const scaffold: TypeRecord = { name, folder, frontmatterSchema: { ...COMMON_SCHEMA,
     properties: { ...COMMON_SCHEMA.properties, type: { const: name } }, additionalProperties: false }, requiredHeadings: [], template: "" };
   const bytes = JSON.stringify(scaffold, null, 2) + "\n";
-  try { createExclusive(root, path.join(root, relative), bytes); }
+  try { createExclusive(root, relative, bytes); }
   catch (error) {
     if (isMapping(error) && error.code === "EEXIST") throw new WikiError("conflict", "Existing registry destination: " + relative);
     throw error;
   }
-  const log = path.join(root, "log.md");
   try {
+    const log = containedEntry(root, "log.md").full;
     const previous = fs.readFileSync(log, "utf8");
     const heading = "## " + new Date().toISOString().slice(0, 10) + "\n\n";
     const entry = "**type-added** [" + name + "](" + relative + ")\n\n";

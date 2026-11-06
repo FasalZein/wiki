@@ -11,7 +11,7 @@ WIKI_VAULT=/explicit/disposable/vault node packages/okf-wiki/bin/okf-wiki.js ini
 ```
 
 Implemented commands are `init`, `type list`, `type add`, and structural `lint`
-(excluding links and generated indexes). The init directory argument is an explicit vault selection. `--vault` takes precedence over `WIKI_VAULT`; an init directory also
+(including relative links, excluding generated-index freshness). The init directory argument is an explicit vault selection. `--vault` takes precedence over `WIKI_VAULT`; an init directory also
 takes precedence over the environment. Conflicting flag and positional
 directories fail with exit 2. There is no default vault. Relative vault locations
 resolve from the current working directory. Parent filesystem aliases resolve
@@ -97,7 +97,7 @@ flat properties must be declared by the type schema. Validation never coerces
 values or supplies defaults. Diagnostics sort by path, rule, and message and
 include `path`, `rule`, `message`, and `fix`. Lint failures exit 1 with error code
 `lint`; successful lint reports
-`checks: ["registry", "frontmatter", "layout", "body", "lifecycle", "scoped-titles"]`.
+`checks: ["registry", "frontmatter", "layout", "body", "lifecycle", "scoped-titles", "links"]`.
 
 Lint checks canonical scope/folder/slug placement, exact type scope restrictions,
 registered headings, decision Consequences hierarchy, and duplicate scoped titles
@@ -111,7 +111,18 @@ structure comes from a CommonMark AST; code examples, HTML source blocks, and bl
 or count as repeated Status:/Type: metadata. Templates use the same heading check.
 Lifecycle references require deprecated status and an existing canonical topic.
 
-**Current boundary:** links and generated-index freshness are not checked.
+Inline and reference-style links and images resolve relative to the containing
+document. Contained parent links are allowed; canonical CLI and metadata paths
+never allow dot segments or encoded unsafe components. Targets must be existing topics,
+generated indexes, or retained assets. HTTP/HTTPS and mailto destinations receive
+syntax checks only, never network requests. Fragments are preserved and do not
+receive heading or block checks. Wikilinks, root-prefixed links, unsafe schemes,
+escapes, and symlinked targets or ancestors fail with actionable diagnostics.
+Source `original` and `extracted` metadata use canonical retained asset paths;
+`resource` is a locator, not a canonical-path field. Custom strings are not
+guessed to be paths. Code, quoted source, and escaped literal examples are ignored.
+
+**Current boundary:** generated-index freshness is not checked.
 A successful result is not yet full-product lint. A path selection validates the
 entire registry and checks duplicate titles throughout the selected scope(s),
 without reporting unrelated notes' other validation errors. Whole-vault lint
