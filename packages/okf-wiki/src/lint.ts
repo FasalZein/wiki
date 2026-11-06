@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { createHash } from "node:crypto";
 import { caseFold } from "unicode-case-folding";
 import { linkDiagnostics } from "./links.ts";
 import { canonicalPathProblem, inspectContainedPath } from "./paths.ts";
@@ -19,7 +20,10 @@ function scopeOf(relative: string): string | undefined {
   if (parts[0] === "projects" && safeName(parts[1] ?? "")) return "projects/" + parts[1];
   return undefined;
 }
-export interface ProspectiveNote { path: string; markdown: string; replace?: true }
+export interface ProspectiveAsset { path: string; bytes: Buffer }
+export type ProspectiveNote = { path: string; markdown: string } & (
+  { replace: true; assets?: never } | { replace?: never; assets?: readonly ProspectiveAsset[] }
+);
 interface InventoryNote {
   path: string; scope: string | undefined; data: Record<string, unknown>; canonical: boolean;
   body: string; tree: ReturnType<typeof parseMarkdown>;
@@ -45,21 +49,23 @@ function prospectiveDirectories(relative: string, types: Parameters<typeof maint
   }
 }
 
-function retainedAssetProblem(root: string, value: string): string | undefined {
+function retainedAssetProblem(root: string, value: string, planned: ReadonlyMap<string, Buffer>): string | undefined {
   const invalid = canonicalPathProblem(value);
   const inspected = invalid ? { ok: false as const, problem: invalid } : inspectContainedPath(root, value);
   if (!inspected.ok) return inspected.problem.message;
-  if (!inspected.stat?.isFile() || !isCaptureAsset(value)) return "Expected an existing retained asset at a canonical capture path: " + value;
+  if ((!inspected.stat?.isFile() && !planned.has(value)) || !isCaptureAsset(value)) return "Expected an existing retained asset at a canonical capture path: " + value;
   return undefined;
 }
 
-function sourceDiagnostics(root: string, note: InventoryNote): Diagnostic[] {
+function sourceDiagnostics(root: string, note: InventoryNote, planned: ReadonlyMap<string, Buffer>): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
   if (note.data.type !== "source") return diagnostics;
   for (const field of ["original", "extracted"]) {
     const value = note.data[field];
     if (typeof value !== "string") continue; // The registered schema reports missing or non-string values.
-    const problem = retainedAssetProblem(root, value);
+    const problem = retainedAssetProblem(root, value, planned);
+    const bytes = planned.get(value);
+    if (bytes && note.data[field + "_sha256"] !== "sha256:" + createHash("sha256").update(bytes).digest("hex")) diagnostics.push({ path: note.path, rule: "source.digest", message: field + ": digest does not match planned retained bytes", fix: "Use the digest of the exact retained asset bytes" });
     if (problem !== undefined) diagnostics.push({ path: note.path, rule: "source.path", message: field + ": " + problem, fix: "Use a canonical vault-relative retained asset path without dot segments or symlinks" });
   }
   return diagnostics;
@@ -78,15 +84,18 @@ function duplicateTitleDiagnostics(notes: InventoryNote[]): Diagnostic[] {
   })));
 }
 
-function crossNoteDiagnostics(root: string, notes: InventoryNote[], indexes: Set<string>, selected: string | undefined, prospective?: ProspectiveNote): Diagnostic[] {
+function crossNoteDiagnostics(root: string, notes: InventoryNote[], indexes: Set<string>, selected: string | undefined, prospective: ProspectiveNote | undefined, assets: ReadonlyMap<string, Buffer>): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
   const topics = new Set(notes.filter(n => n.canonical).map(n => n.path));
   const plannedTargets = new Set(indexes);
   if (prospective) plannedTargets.add(prospective.path);
+  const noAssets = new Map<string, Buffer>();
   for (const note of notes) {
     // Whole-vault callers repair planned indexes or report freshness; selected lint requires existing link targets.
-    diagnostics.push(...linkDiagnostics(root, note.path, note.body, note.tree, relative => topics.has(relative) || indexes.has(relative) || isCaptureAsset(relative), selected === undefined ? plannedTargets : undefined));
-    diagnostics.push(...sourceDiagnostics(root, note));
+    const planned = note.path === prospective?.path ? assets : noAssets;
+    const targets = planned.size ? new Set([...plannedTargets, ...planned.keys()]) : plannedTargets;
+    diagnostics.push(...linkDiagnostics(root, note.path, note.body, note.tree, relative => topics.has(relative) || indexes.has(relative) || isCaptureAsset(relative), selected === undefined ? targets : undefined));
+    diagnostics.push(...sourceDiagnostics(root, note, planned));
     if (typeof note.data.superseded_by === "string" && !topics.has(note.data.superseded_by)) diagnostics.push({ path: note.path, rule: "lifecycle.target", message: "superseded_by must name an existing canonical topic: " + note.data.superseded_by, fix: "Use a vault-relative topic path with .md and no dot segments" });
   }
   return [...diagnostics, ...duplicateTitleDiagnostics(notes)];
@@ -110,6 +119,14 @@ function selectedDiagnostics(notes: InventoryNote[], diagnostics: Diagnostic[], 
 export function inspectVault(root: string, selected?: string, prospective?: ProspectiveNote) {
   const { types, diagnostics } = loadRegistry(root);
   const notes: InventoryNote[] = [];
+  const assets = new Map<string, Buffer>();
+  for (const asset of prospective?.assets ?? []) {
+    const inspected = inspectContainedPath(root, asset.path);
+    const scope = scopeOf(prospective?.path ?? "");
+    if (!inspected.ok || inspected.stat || !isCaptureAsset(asset.path) || !scope || !asset.path.startsWith(scope + "/assets/") || assets.has(asset.path)) {
+      diagnostics.push({ path: asset.path, rule: "source.asset", message: !inspected.ok ? inspected.problem.message : "Expected a unique new canonical retained asset in the candidate scope", fix: "Plan distinct scope-owned asset paths without existing targets or unsafe ancestors" });
+    } else assets.set(asset.path, asset.bytes);
+  }
   const directories: NavigationDirectory[] = [{ path: "", type: "" }];
   const indexes = new Set<string>(["index.md"]);
   function fail(file: string, rule: string, message: string, fix: string) { diagnostics.push({ path: file, rule, message, fix }); }
@@ -183,7 +200,7 @@ export function inspectVault(root: string, selected?: string, prospective?: Pros
     prospectiveDirectories(prospective.path, types, directories, indexes);
     inspectNote(prospective.path, prospective.markdown);
   }
-  diagnostics.push(...crossNoteDiagnostics(root, notes, indexes, selected, prospective));
+  diagnostics.push(...crossNoteDiagnostics(root, notes, indexes, selected, prospective, assets));
   return { indexes: diagnostics.length ? new Map<string, string>() : renderIndexes(directories, navigationTopics(notes)),
     diagnostics: selectedDiagnostics(notes, diagnostics, selected) };
 }
