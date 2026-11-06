@@ -85,6 +85,32 @@ test("okf:02 real init/list/add/custom-schema/lint flow accepts an eighth data-d
   diagnostic(vault, "frontmatter.schema", relative, /category/);
 });
 
+test("okf:02 literal fenced shell placeholders remain inert template body data", () => {
+  const vault = fresh();
+  const procedure = record(vault, "procedure");
+  procedure.template = ['## Steps', '', '~~~sh', 'echo "$' + '{USER}"', '{{ literal }}', '<% literal %>', '~~~', ''].join("\n");
+  save(vault, "procedure", procedure);
+  const before = fs.readFileSync(path.join(vault, ".wiki/types/procedure.json"), "utf8");
+  const results = [["lint"], ["type", "list"]].map(args => cli(vault, ...args));
+  assert.deepEqual(results.map(result => result.status), [0, 0], JSON.stringify(results));
+  assert.equal(fs.readFileSync(path.join(vault, ".wiki/types/procedure.json"), "utf8"), before);
+});
+
+test("okf:02 Markdown thematic breaks and fenced frontmatter examples are literal template bodies", () => {
+  const vault = fresh();
+  for (const template of [
+    "Introductory prose\n\n---\n\nMore prose\n",
+    "---\n\nA leading thematic break, not a frontmatter block.\n",
+    "~~~yaml\n---\ntitle: Example\n---\n~~~\n",
+  ]) {
+    const architecture = record(vault, "architecture"); architecture.template = template;
+    save(vault, "architecture", architecture);
+    const results = [["lint"], ["type", "list"]].map(args => cli(vault, ...args));
+    assert.deepEqual(results.map(result => result.status), [0, 0], JSON.stringify(results));
+    assert.equal(record(vault, "architecture").template, template);
+  }
+});
+
 test("okf:02 registry errors name independent causes without rewriting input", () => {
   const cases: { rule: string; change: (r: ReturnType<typeof record>) => void; message: RegExp }[] = [
     { rule: "registry.schema", change: r => { r.frontmatterSchema = { type: "not-a-schema-type" }; }, message: /schema.*invalid|invalid.*schema/i },
@@ -98,7 +124,11 @@ test("okf:02 registry errors name independent causes without rewriting input", (
     { rule: "registry.folder", change: r => { r.folder = "decisions"; }, message: /conflict/i },
     { rule: "registry.record", change: r => { r.scopes = ["projects/*"]; }, message: /pattern/ },
     { rule: "registry.name", change: r => { r.name = "different"; }, message: /filename.*name/i },
-    { rule: "registry.template", change: r => { r.template = "{{ execute() }}"; }, message: /executable|interpolated/i },
+    // Engine configuration is prohibited; placeholder-looking body strings are not executable.
+    { rule: "registry.record", change: r => { r.templateEngine = "javascript"; }, message: /additional properties/i },
+    { rule: "registry.template", change: r => { r.template = "---\ntitle: Not a body\n---\nText\n"; }, message: /leading frontmatter/i },
+    { rule: "registry.template", change: r => { r.template = "\uFEFF---\r\ntitle: Not a body\r\n---\r\nText\r\n"; }, message: /leading frontmatter/i },
+    { rule: "registry.template", change: r => { r.template = "---js\nprocess.exit(99)\n---\n"; }, message: /leading frontmatter/i },
     { rule: "registry.template", change: r => { r.requiredHeadings = [{ level: 2, text: "Required" }]; }, message: /missing.*heading/i },
   ];
   for (const c of cases) {

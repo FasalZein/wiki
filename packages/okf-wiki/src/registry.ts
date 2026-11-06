@@ -100,8 +100,9 @@ export function loadRegistry(root: string): { types: RegisteredType[]; diagnosti
     if (file !== data.name + ".json") { fail("registry.name", "Filename must match registry name " + data.name); continue; }
     if (!safeName(data.folder)) { fail("registry.folder", "Unsafe or reserved folder: " + data.folder); continue; }
     if (data.scopes?.some(scope => scope.startsWith("projects/") && !safeName(scope.slice(9)))) { fail("registry.scopes", "Invalid exact scope restriction"); continue; }
-    // Templates are body text, never an engine. Refuse common executable/interpolation forms explicitly.
-    if (/\{\{|<%|\$\{|^---(?:\w|[ \t]*\r?$)/m.test(data.template)) { fail("registry.template", "Executable/interpolated templates or embedded frontmatter are not allowed"); continue; }
+    // Templates are inert Markdown bodies. Only a complete leading frontmatter block
+    // crosses that boundary; shell examples, placeholder syntax, and thematic breaks do not.
+    if (/^\uFEFF?---(?:[A-Za-z][\w-]*)?[ \t]*\r?\n(?:[\s\S]*?\r?\n)?---[ \t]*(?:\r?\n|$)/.test(data.template)) { fail("registry.template", "Template body must not contain a leading frontmatter block"); continue; }
     if (data.requiredHeadings.some(h => !data.template.split(/\r?\n/).includes("#".repeat(h.level) + " " + h.text))) { fail("registry.template", "Template is missing a required heading"); continue; }
     try {
       if (isMapping(data.frontmatterSchema) && data.frontmatterSchema.$schema !== undefined && data.frontmatterSchema.$schema !== COMMON_SCHEMA.$schema) throw new Error("Expected JSON Schema draft 2020-12");

@@ -75,8 +75,11 @@ The registry, not CLI source, defines accepted type names. Each schema may use
 fragment-local JSON pointers and anchors, including `$defs`. Remote/relative-file
 references and external schema identifiers are refused without network access.
 Registry records reject unknown configuration keys. Templates are literal Markdown
-body text, never executed or interpolated; executable/interpolation markers and
-embedded frontmatter are refused. Required headings must appear in the template.
+body text, never executed or interpolated. Placeholder-looking syntax, fenced code
+examples, and Markdown thematic breaks remain literal text. Complete leading
+frontmatter blocks, including language-tagged blocks, are refused because templates
+supply bodies only. Template engine configuration is not an accepted registry field.
+Required headings must appear in the template.
 Folders must be safe, non-reserved names and cannot overlap in allowed scopes.
 Exact `scopes` restrictions are optional; absent means all supported scopes.
 
