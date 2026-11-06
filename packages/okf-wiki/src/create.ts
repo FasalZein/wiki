@@ -62,13 +62,13 @@ function publishTopicFile(root: string, relative: string, markdown: string): voi
     throw error;
   }
 }
-function completeTopicPublication(root: string, relative: string, title: string, digest: string, indexes: Map<string, string>): void {
+export function completeTopicPublication(root: string, relative: string, title: string, digest: string, indexes: Map<string, string>, action: "created" | "updated" = "created"): void {
   try {
     for (const [file, bytes] of indexes) fs.writeFileSync(containedEntry(root, file).full, bytes);
     const log = containedEntry(root, "log.md").full;
     const previous = fs.readFileSync(log, "utf8");
     const heading = "## " + new Date().toISOString().slice(0, 10) + "\n\n";
-    const entry = "**created** [" + markdownText(title) + "](" + relative + ")\n\n";
+    const entry = "**" + action + "** [" + markdownText(title) + "](" + relative + ")\n\n";
     fs.writeFileSync(log, heading + entry + (previous.startsWith(heading) ? previous.slice(heading.length) : previous));
   } catch { throw new CreatePartialError([relative], digest); }
 }

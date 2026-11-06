@@ -19,7 +19,7 @@ function scopeOf(relative: string): string | undefined {
   if (parts[0] === "projects" && safeName(parts[1] ?? "")) return "projects/" + parts[1];
   return undefined;
 }
-export interface ProspectiveNote { path: string; markdown: string }
+export interface ProspectiveNote { path: string; markdown: string; replace?: true }
 interface InventoryNote {
   path: string; scope: string | undefined; data: Record<string, unknown>; canonical: boolean;
   body: string; tree: ReturnType<typeof parseMarkdown>;
@@ -134,6 +134,8 @@ export function inspectVault(root: string, selected?: string, prospective?: Pros
       if (!generated) fail(relative, "path.layout", "Unexpected index outside a maintained directory", "Place generated indexes only at vault, scope, or registered-folder roots");
       return;
     }
+    // A replacement is one identity: do not retain old content or its diagnostics.
+    if (prospective?.replace && relative === prospective.path) return;
     const bytes = fs.readFileSync(full);
     let markdown: string;
     try { markdown = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes); }
