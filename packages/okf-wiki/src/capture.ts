@@ -41,7 +41,8 @@ export function prepareTextCapture(vault: string, request: TextCaptureRequest): 
   const extension = path.extname(request.input).toLowerCase();
   if (![".txt", ".text", ".md", ".markdown"].includes(extension)) throw new WikiError("unsupported", "Unsupported text capture extension: " + (extension || "<none>") + "; use .txt, .text, .md, or .markdown");
   const input = path.resolve(request.input);
-  const fd = fs.openSync(input, "r");
+  // POSIX FIFOs must not wait for a writer before descriptor-based validation.
+  const fd = fs.openSync(input, fs.constants.O_RDONLY | (fs.constants.O_NONBLOCK ?? 0));
   let original: Buffer;
   try {
     if (!fs.fstatSync(fd).isFile()) throw new WikiError("unsupported", "Text capture input must be a regular file");

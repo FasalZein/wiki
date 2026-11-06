@@ -239,3 +239,43 @@ test("okf:14 many delimiter runs do not impose an implicit argument-count limit"
   assert.deepEqual(result.assets[1].bytes, bytes);
   assert.equal(parseMarkdown(parseNoteText(result.sourceMarkdown).body).children.filter(node => node.type === "code").length, 1);
 });
+
+
+test("okf:14 unwritten FIFO refuses before reading without blocking or vault writes", {
+  skip: process.platform === "win32" ? "POSIX FIFO fixture requires mkfifo; Windows has no POSIX FIFO input" : false,
+}, () => {
+  const request = fresh();
+  try {
+    fs.unlinkSync(request.input);
+    const made = spawnSync("mkfifo", [request.input], { encoding: "utf8", timeout: 5000, killSignal: "SIGKILL" });
+    assert.equal(made.error, undefined);
+    assert.equal(made.status, 0, made.stderr);
+    assert.ok(fs.lstatSync(request.input).isFIFO());
+    const before = snapshot(request.root);
+    const module = new URL("../src/capture.ts", import.meta.url).href;
+    const program = [
+      'import { prepareTextCapture } from ' + JSON.stringify(module) + ';',
+      'console.log("before-capture");',
+      'try {',
+      '  prepareTextCapture(' + JSON.stringify(request.root) + ', ' + JSON.stringify(request) + ');',
+      '  console.log("unexpected-success");',
+      '} catch (error) { console.log(JSON.stringify({ code: error.code, message: error.message })); }',
+    ].join("\n");
+    // A harness bound, not a product timeout. SIGKILL also terminates the old blocked open.
+    const result = spawnSync(process.execPath, ["--input-type=module", "--eval", program], {
+      encoding: "utf8", timeout: 5000, killSignal: "SIGKILL", cwd: temp,
+      env: { ...process.env, HOME: temp, WIKI_VAULT: "" },
+    });
+    assert.equal(result.error, undefined, JSON.stringify({ error: result.error?.message, status: result.status, signal: result.signal, stdout: result.stdout }));
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.signal, null);
+    assert.equal(result.stderr, "");
+    assert.deepEqual(result.stdout.trim().split("\n"), ["before-capture", JSON.stringify({ code: "unsupported", message: "Text capture input must be a regular file" })]);
+    assert.throws(() => process.kill(result.pid, 0), { code: "ESRCH" });
+    assert.ok(fs.lstatSync(request.input).isFIFO());
+    assert.deepEqual(snapshot(request.root), before);
+  } finally {
+    // Also executes after the old-code timeout assertion fails; never read the FIFO during cleanup.
+    fs.rmSync(path.dirname(request.input), { recursive: true, force: true });
+  }
+});
