@@ -60,6 +60,30 @@ test("okf:06 exact rendered heading selects its source subtree through equal or 
   assert.equal(show(vault, "--section", "Last section").markdown, last);
 });
 
+for (const style of ["ATX", "setext"]) for (const human of [false, true]) {
+  test("okf:06 indented " + style + " sections preserve physical line boundaries in " + (human ? "human" : "JSON") + " output", () => {
+    for (const newline of ["\r\n", "\n", "\r"]) {
+      const selected = (style === "ATX" ? ["  ## Selected", "Body", " ### Nested", "Nested body", ""] : ["  Selected", "  --------", "Body", ""]).join(newline) + newline;
+      const next = (style === "ATX" ? ["   ## Next", "Other"] : ["   Next", "   ----", "Other"]).join(newline);
+      const markdown = FRONT + "# Root" + newline + selected + next;
+      const vault = fresh(markdown);
+      const result = cli(vault, ["show", TOPIC, "--section", "Selected"], human);
+      assert.equal(result.status, 0, result.stderr + result.stdout);
+      assert.equal(result.stderr, "");
+      if (human) assert.equal(result.stdout, selected);
+      else assert.deepEqual(JSON.parse(result.stdout), { ok: true, path: TOPIC, section: "Selected", markdown: selected, digest: digest(markdown) });
+      // A selected final heading starts at body offset zero and retains its indentation at EOF.
+      const final = style === "ATX" ? "   ## Last" : "   Last" + newline + "   ----";
+      fs.writeFileSync(path.join(vault, TOPIC), FRONT + final);
+      const eof = cli(vault, ["show", TOPIC, "--section", "Last"], human);
+      assert.equal(eof.status, 0, eof.stderr + eof.stdout);
+      assert.equal(eof.stderr, "");
+      if (human) assert.equal(eof.stdout, final);
+      else assert.deepEqual(JSON.parse(eof.stdout), { ok: true, path: TOPIC, section: "Last", markdown: final, digest: digest(FRONT + final) });
+    }
+  });
+}
+
 function rejected(vault: string, args: string[], status: number, code: string, message: RegExp) {
   const result = cli(vault, args);
   assert.equal(result.status, status, result.stdout + result.stderr);

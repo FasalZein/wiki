@@ -40,8 +40,12 @@ export function readNote(root: string, relative: string, section?: string) {
   if (matches.length !== 1) throw new WikiError("usage", "Duplicate matching headings in " + relative + ": " + section);
   const next = headings.slice(headings.indexOf(heading) + 1).find(node => node.depth <= heading.depth);
   // AST offsets are UTF-16 source offsets, so slice the unmodified body, not reconstructed Markdown.
-  const start = heading.position?.start.offset;
-  const end = next ? next.position?.start.offset : body.length;
+  let start = heading.position?.start.offset;
+  let end = next ? next.position?.start.offset : body.length;
   if (start === undefined || end === undefined) throw new Error("CommonMark heading has no source offset");
+  // AST heading starts omit legal indentation. Include it only for the selected heading.
+  // CommonMark source lines can end with LF, CRLF, or bare CR; EOF is not a line boundary to rewind.
+  while (start > 0 && body[start - 1] !== "\n" && body[start - 1] !== "\r") start--;
+  if (next) while (end > 0 && body[end - 1] !== "\n" && body[end - 1] !== "\r") end--;
   return { path: relative, section, markdown: body.slice(start, end), digest };
 }
