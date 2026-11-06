@@ -4,7 +4,7 @@ import { visitAuthored } from "./markdown.ts";
 import { inspectContainedPath } from "./paths.ts";
 import type { Diagnostic } from "./registry.ts";
 
-export function linkDiagnostics(root: string, file: string, body: string, tree: Root, allowed: (relative: string) => boolean): Diagnostic[] {
+export function linkDiagnostics(root: string, file: string, body: string, tree: Root, allowed: (relative: string) => boolean, plannedIndexes: ReadonlySet<string> = new Set()): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
   const fail = (rule: string, message: string) => diagnostics.push({ path: file, rule, message, fix: "Use standard document-relative Markdown links to existing vault notes, generated indexes, or retained assets; remove unsafe syntax" });
   const definitions = new Map<string, string>();
@@ -39,6 +39,7 @@ export function linkDiagnostics(root: string, file: string, body: string, tree: 
     if (relative === ".." || relative.startsWith("../")) { fail("link.unsafe", "Destination escapes the vault: " + url); return; }
     const inspected = inspectContainedPath(root, relative);
     if (!inspected.ok) { fail(inspected.problem.rule === "path.symlink" ? "link.symlink" : "link.unsafe", inspected.problem.message + " (" + url + ")"); return; }
+    if (!inspected.stat && plannedIndexes.has(relative)) return; // Generation repairs only planned index targets, never missing notes or assets.
     if (!inspected.stat) { fail("link.missing", "Missing local target: " + url + " (resolved " + relative + ")"); return; }
     if (!inspected.stat.isFile() || !allowed(relative)) fail("link.target", "Target is not a note, generated index, or retained asset: " + url);
   }

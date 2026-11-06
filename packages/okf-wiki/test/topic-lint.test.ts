@@ -17,6 +17,11 @@ function cli(vault: string, ...args: string[]) {
   assert.equal(result.stderr, "");
   return { status: result.status, data: JSON.parse(result.stdout) };
 }
+function indexedLint(vault: string) {
+  const generated = cli(vault, "index");
+  assert.equal(generated.status, 0, JSON.stringify(generated));
+  return cli(vault, "lint");
+}
 function fresh() {
   const vault = path.join(temp, String(++counter));
   assert.equal(cli(vault, "init").status, 0);
@@ -43,7 +48,7 @@ test("okf:03 canonical placement requires scope, registered folder, safe project
   }
   note(vault);
   note(vault, "projects/wiki/notes/topic.md");
-  assert.equal(cli(vault, "lint").status, 0);
+  assert.equal(indexedLint(vault).status, 0);
 });
 
 
@@ -56,7 +61,7 @@ test("okf:03 required headings are authored Markdown, including decision parent 
   }
   for (const body of ["## Steps\n", "Steps\n-----\n", "## **Steps** ##\n"]) {
     note(vault, relative, "", body, "procedure");
-    assert.equal(cli(vault, "lint").status, 0, body);
+    assert.equal(indexedLint(vault).status, 0, body);
   }
   fs.unlinkSync(path.join(vault, relative));
   const decision = "personal/decisions/choice.md";
@@ -66,7 +71,7 @@ test("okf:03 required headings are authored Markdown, including decision parent 
     rejects(vault, decision, "body.heading");
   }
   note(vault, decision, "status: stable\n", prefix + "## Decision Outcome\n\n### Consequences\n", "decision");
-  assert.equal(cli(vault, "lint").status, 0);
+  assert.equal(indexedLint(vault).status, 0);
 });
 
 test("okf:03 metadata repetition is rejected but prose and literal examples remain authored bytes", () => {
@@ -76,7 +81,7 @@ test("okf:03 metadata repetition is rejected but prose and literal examples rema
     rejects(vault, relative, "body.metadata");
   }
   note(vault, undefined, "", "The Status: value is optional. Type: is a label in this sentence.\n\n~~~md\nStatus: draft\nType: note\n## Steps\necho ${USER}\n~~~\n\n> Status: draft\n> Type: note\n\n\x60Status: stable\x60\n\n    Type: note\n\n<pre>\nStatus: stable\n</pre>\n");
-  assert.equal(cli(vault, "lint").status, 0);
+  assert.equal(indexedLint(vault).status, 0);
 });
 
 
@@ -91,7 +96,7 @@ test("okf:03 duplicate titles use trimmed case normalization within scope, inclu
   }
   assert.equal(cli(vault, "lint", other).status, 0, "another scope has no duplicate");
   fs.unlinkSync(path.join(vault, second));
-  assert.equal(cli(vault, "lint").status, 0, "same title in another scope is valid");
+  assert.equal(indexedLint(vault).status, 0, "same title in another scope is valid");
 });
 
 test("okf:03 lifecycle dependencies cannot be removed by custom schemas and targets must be canonical topics", () => {
@@ -112,7 +117,7 @@ test("okf:03 lifecycle dependencies cannot be removed by custom schemas and targ
   }
   for (const fields of ["", "status: draft\n", "status: stable\n", "status: deprecated\n", "status: deprecated\nsuperseded_by: " + target + "\n"]) {
     note(vault, relative, fields);
-    assert.equal(cli(vault, "lint").status, 0, fields);
+    assert.equal(indexedLint(vault).status, 0, fields);
   }
 });
 
@@ -120,7 +125,7 @@ test("okf:03 whole-vault lint applies registry edits to existing notes and templ
   const vault = fresh();
   assert.equal(cli(vault, "type", "add", "glossary", "--folder", "glossary").status, 0);
   const relative = note(vault, "personal/glossary/terms.md", "", "## Terms\n", "glossary");
-  assert.equal(cli(vault, "lint").status, 0);
+  assert.equal(indexedLint(vault).status, 0);
   const registry = path.join(vault, ".wiki/types/glossary.json");
   const record = JSON.parse(fs.readFileSync(registry, "utf8"));
   record.frontmatterSchema.required.push("category");
@@ -133,7 +138,7 @@ test("okf:03 whole-vault lint applies registry edits to existing notes and templ
   fs.writeFileSync(registry, JSON.stringify(record));
   rejects(vault, relative, "frontmatter.schema");
   note(vault, relative, "category: engineering\n", "## Terms\n", "glossary");
-  assert.equal(cli(vault, "lint").status, 0);
+  assert.equal(indexedLint(vault).status, 0);
   record.folder = "terminology";
   fs.writeFileSync(registry, JSON.stringify(record));
   rejects(vault, relative, "path.layout");
@@ -153,10 +158,11 @@ test("okf:03 lint is read-only across success, failure, path selection, registry
       return [name, stat.mode, stat.mtimeMs, stat.isDirectory() ? snapshot(full) : fs.readFileSync(full).toString("base64")];
     });
   }
+  assert.equal(cli(vault, "index").status, 0);
   let before = snapshot(vault);
   const success = cli(vault, "lint");
   assert.equal(success.status, 0);
-  assert.deepEqual(success.data.checks, ["registry", "frontmatter", "layout", "body", "lifecycle", "scoped-titles", "links"]);
+  assert.deepEqual(success.data.checks, ["registry", "frontmatter", "layout", "body", "lifecycle", "scoped-titles", "links", "generated-index"]);
   assert.equal(cli(vault, "lint", relative).status, 0);
   assert.deepEqual(snapshot(vault), before);
   note(vault, relative, "", "Status: stable\n");
@@ -171,7 +177,7 @@ test("okf:03 lint is read-only across success, failure, path selection, registry
   assert.deepEqual(snapshot(vault), before);
   const help = spawnSync(process.execPath, [BIN, "--help"], { encoding: "utf8", cwd: temp });
   assert.equal(help.status, 0);
-  assert.match(help.stdout, /generated-index freshness not checked/);
+  assert.match(help.stdout, /Whole-vault lint checks .*generated-index freshness/);
 });
 
 
@@ -187,7 +193,7 @@ for (const mode of ["whole-vault", "selected-file", "selected-directory"]) test(
     fs.mkdirSync(path.dirname(path.join(vault, relative)), { recursive: true });
     fs.writeFileSync(path.join(vault, relative), "Literal capture without frontmatter.\nStatus: source text\n");
   }
-  assert.equal(cli(vault, "lint").status, 0);
+  assert.equal(indexedLint(vault).status, 0);
   assert.equal(cli(vault, "lint", "personal").status, 0);
   assert.equal(cli(vault, "lint", "projects/wiki").status, 0);
 });
@@ -206,8 +212,9 @@ for (const [left, right] of [["Straße", "STRASSE"], ["ΟΣ", "οσ"]]) for (con
     assert.deepEqual([first, second, other].map(file => fs.readFileSync(path.join(vault, file), "utf8")), before, "folding never rewrites authored titles");
     assert.equal(cli(vault, "lint", other).status, 0);
     fs.unlinkSync(path.join(vault, second));
+    assert.equal(cli(vault, "index").status, 0);
     assert.equal(cli(vault, "lint", ...selected).status, 0, "case-fold equivalents in different scopes are allowed");
-    assert.equal(cli(vault, "lint").status, 0);
+    assert.equal(indexedLint(vault).status, 0);
   });
 }
 
@@ -215,6 +222,6 @@ for (const [left, right] of [["Straße", "STRASSE"], ["ΟΣ", "οσ"]]) for (con
 test("okf:03 default case folding preserves accents and does not use Turkic locale tailoring", () => {
   const vault = fresh();
   for (const [slug, title] of [["accented", "café"], ["plain", "cafe"], ["dotted", "İ"], ["undotted", "i"]]) note(vault, "personal/notes/" + slug + ".md", "", "", "note", title);
-  assert.equal(cli(vault, "lint").status, 0);
+  assert.equal(indexedLint(vault).status, 0);
   assert.equal(cli(vault, "lint", "personal/notes/dotted.md").status, 0);
 });

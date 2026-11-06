@@ -17,6 +17,11 @@ function cli(vault: string, ...args: string[]) {
   assert.equal(result.stderr, "");
   return { status: result.status, data: JSON.parse(result.stdout) };
 }
+function indexedLint(vault: string) {
+  const generated = cli(vault, "index");
+  assert.equal(generated.status, 0, JSON.stringify(generated));
+  return cli(vault, "lint");
+}
 function fresh() {
   const vault = path.join(temp, String(++counter));
   assert.equal(cli(vault, "init").status, 0);
@@ -63,6 +68,7 @@ test("okf:04 direct, reference, collapsed, shortcut, image, parent, fragment, in
   ].join("\n\n");
   note(vault, body);
   const before = fs.readFileSync(path.join(vault, TOPIC), "utf8");
+  assert.equal(cli(vault, "index").status, 0);
   for (const selected of [[], [TOPIC], ["personal"]]) assert.equal(cli(vault, "lint", ...selected).status, 0);
   assert.equal(fs.readFileSync(path.join(vault, TOPIC), "utf8"), before, "fragments and authored bytes are unchanged");
 });
@@ -92,7 +98,7 @@ test("okf:04 escaped, fenced, inline, quoted and literal captures are not author
     "> [[quoted]]\n> [bad](missing.md)",
     "<pre>\n[[literal]]\n[bad](missing.md)\n</pre>",
   ].join("\n\n"));
-  assert.equal(cli(vault, "lint").status, 0);
+  assert.equal(indexedLint(vault).status, 0);
   for (const body of ["[[authored]]", "![[image]]", "[[note|label]]", "\\\\[[not-escaped]]"]) {
     note(vault, body);
     rejects(vault, "link.wikilink", TOPIC);
@@ -155,7 +161,7 @@ test("okf:04 canonical lifecycle metadata differs from contained parent links an
     assert.deepEqual(result.data.diagnostics.map((d: { rule: string }) => d.rule), ["lifecycle.target"]);
   }
   note(vault, "[relative](../architecture/replacement.md)", TOPIC, "status: deprecated\nsuperseded_by: " + target + '\ncustom_locator: "../not-a-supported-path-field"\n');
-  assert.equal(cli(vault, "lint").status, 0);
+  assert.equal(indexedLint(vault).status, 0);
 });
 
 test("okf:04 retained source metadata requires canonical asset paths, unlike body destinations and resource locators", () => {
@@ -173,7 +179,7 @@ test("okf:04 retained source metadata requires canonical asset paths, unlike bod
     assert.deepEqual(result.data.diagnostics.map((d: { rule: string }) => d.rule), ["source.path"]);
   }
   source(original);
-  assert.equal(cli(vault, "lint").status, 0);
+  assert.equal(indexedLint(vault).status, 0);
   const outside = path.join(temp, "source-sentinel-" + counter);
   fs.writeFileSync(outside, "outside retained bytes");
   fs.unlinkSync(path.join(vault, original));
@@ -195,7 +201,7 @@ test("okf:04 formatted wikilink labels remain forbidden but inline-code examples
     rejects(vault, "link.wikilink", TOPIC);
   }
   note(vault, "[[\x60example\x60]]\n\n[\x60[example]\x60]\n");
-  assert.equal(cli(vault, "lint").status, 0);
+  assert.equal(indexedLint(vault).status, 0);
 });
 
 for (const prefix of ["", "!"]) for (const selected of [undefined, TOPIC]) test("okf:04 matching reference definitions cannot hide authored " + prefix + "[[topic]] in " + (selected ? "selected" : "whole") + " lint", () => {
@@ -220,6 +226,7 @@ test("okf:04 matching definitions preserve standard references and escaped, code
     "~~~md\n[[topic]]\n![[topic]]\n~~~", "> [[topic]]\n> ![[topic]]", "[topic]: topic.md",
   ].join("\n\n");
   note(vault, body);
+  assert.equal(cli(vault, "index").status, 0);
   for (const selected of [[], [TOPIC]]) {
     const result = cli(vault, "lint", ...selected);
     assert.equal(result.status, 0, JSON.stringify(result));

@@ -6,6 +6,7 @@ import { canonicalPathProblem, inspectContainedPath } from "./paths.ts";
 import { parseNoteText } from "./frontmatter.ts";
 import { metadataLines, missingHeadings, parseMarkdown } from "./markdown.ts";
 import { declaresProperty, loadRegistry, safeName, schemaDiagnostics, sortDiagnostics, type Diagnostic } from "./registry.ts";
+import { maintainedDirectory, renderIndexes, indexFreshnessDiagnostics, type NavigationDirectory, type NavigationTopic } from "./navigation.ts";
 
 const SKIP = new Set([".wiki", ".git", ".obsidian", "node_modules"]);
 function isCaptureAsset(relative: string): boolean {
@@ -18,10 +19,11 @@ function scopeOf(relative: string): string | undefined {
   if (parts[0] === "projects" && safeName(parts[1] ?? "")) return "projects/" + parts[1];
   return undefined;
 }
-export function lintVault(root: string, selected?: string): Diagnostic[] {
+export function inspectVault(root: string, selected?: string) {
   const { types, diagnostics } = loadRegistry(root);
   const notes: { path: string; scope: string | undefined; data: Record<string, unknown>; canonical: boolean; body: string; tree: ReturnType<typeof parseMarkdown> }[] = [];
-  const indexes = new Set<string>();
+  const directories: NavigationDirectory[] = [{ path: "", type: "" }];
+  const indexes = new Set<string>(["index.md"]);
   function fail(file: string, rule: string, message: string, fix: string) { diagnostics.push({ path: file, rule, message, fix }); }
   function visit(relative: string) {
     if (isCaptureAsset(relative)) return;
@@ -30,14 +32,16 @@ export function lintVault(root: string, selected?: string): Diagnostic[] {
     const { full, stat } = inspected;
     if (!stat) { fail(relative, "path.missing", "Missing requested path", "Select an existing note path"); return; }
     if (stat.isDirectory()) {
+      const directory = maintainedDirectory(relative, types);
+      if (directory) { directories.push(directory); indexes.add(relative + "/index.md"); }
       for (const name of fs.readdirSync(full).sort()) if (!SKIP.has(name)) visit(relative ? relative + "/" + name : name);
       return;
     }
     if (!relative.endsWith(".md") || relative === "log.md") return;
+    if (!stat.isFile()) { fail(relative, "path.kind", "Expected a regular Markdown file", "Use a regular vault-owned Markdown file"); return; }
     if (path.basename(relative) === "index.md") {
-      const directory = path.posix.dirname(relative), scope = scopeOf(directory);
-      const folder = scope && directory.startsWith(scope + "/") ? directory.slice(scope.length + 1) : undefined;
-      const generated = relative === "index.md" || relative === "projects/index.md" || scope !== undefined && (directory === scope || types.some(t => t.record.folder === folder && (!t.record.scopes || t.record.scopes.includes(scope))));
+      const directory = path.posix.dirname(relative);
+      const generated = maintainedDirectory(directory === "." ? "" : directory, types) !== undefined;
       if (generated) indexes.add(relative);
       if (!generated) fail(relative, "path.layout", "Unexpected index outside a maintained directory", "Place generated indexes only at vault, scope, or registered-folder roots");
       return;
@@ -79,12 +83,12 @@ export function lintVault(root: string, selected?: string): Diagnostic[] {
     }
   }
   // Registry diagnostics are always applicable, even for an invalid selected path.
-  if (selected !== undefined && diagnostics.some(d => d.path === selected && d.rule.startsWith("path."))) return sortDiagnostics(diagnostics);
+  if (selected !== undefined && diagnostics.some(d => d.path === selected && d.rule.startsWith("path."))) return { diagnostics: sortDiagnostics(diagnostics), indexes: new Map<string, string>() };
   for (const name of fs.readdirSync(root).sort()) if (!SKIP.has(name)) visit(name);
   const topics = new Set(notes.filter(n => n.canonical).map(n => n.path));
   const titles = new Map<string, typeof notes>();
   for (const note of notes) {
-    diagnostics.push(...linkDiagnostics(root, note.path, note.body, note.tree, relative => topics.has(relative) || indexes.has(relative) || isCaptureAsset(relative)));
+    diagnostics.push(...linkDiagnostics(root, note.path, note.body, note.tree, relative => topics.has(relative) || indexes.has(relative) || isCaptureAsset(relative), indexes));
     if (note.data.type === "source") for (const field of ["original", "extracted"]) {
       const value = note.data[field];
       if (typeof value !== "string") continue; // The registered schema reports missing or non-string values.
@@ -102,5 +106,16 @@ export function lintVault(root: string, selected?: string): Diagnostic[] {
   const inSelection = (file: string) => selected === undefined || file === selected || file.startsWith(selected + "/");
   const scopes = new Set(notes.filter(n => inSelection(n.path)).map(n => n.scope));
   if (selected !== undefined) scopes.add(scopeOf(selected));
-  return sortDiagnostics(diagnostics.filter(d => d.path.startsWith(".wiki/types/") || inSelection(d.path) || d.rule === "title.duplicate" && scopes.has(scopeOf(d.path))));
+  const navigation: NavigationTopic[] = [];
+  if (!diagnostics.length) for (const note of notes) {
+    const { type, title, description } = note.data;
+    if (note.canonical && typeof type === "string" && typeof title === "string" && typeof description === "string") navigation.push({ path: note.path, type, title, description });
+  }
+  return { indexes: diagnostics.length ? new Map<string, string>() : renderIndexes(directories, navigation),
+    diagnostics: sortDiagnostics(diagnostics.filter(d => d.path.startsWith(".wiki/types/") || inSelection(d.path) || d.rule === "title.duplicate" && scopes.has(scopeOf(d.path)))) };
+}
+
+export function lintVault(root: string, selected?: string): Diagnostic[] {
+  const inventory = inspectVault(root, selected);
+  return sortDiagnostics([...inventory.diagnostics, ...(selected === undefined && !inventory.diagnostics.length ? indexFreshnessDiagnostics(root, inventory.indexes) : [])]);
 }

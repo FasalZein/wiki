@@ -17,6 +17,11 @@ function cli(vault: string, ...args: string[]) {
   assert.equal(result.stderr, "");
   return { status: result.status, data: JSON.parse(result.stdout) };
 }
+function indexedLint(vault: string) {
+  const generated = cli(vault, "index");
+  assert.equal(generated.status, 0, JSON.stringify(generated));
+  return cli(vault, "lint");
+}
 function fresh() {
   const vault = path.join(temp, String(++counter));
   assert.equal(cli(vault, "init").status, 0);
@@ -71,7 +76,7 @@ test("okf:02 real init/list/add/custom-schema/lint flow accepts an eighth data-d
   scaffold.frontmatterSchema.required.push("category");
   save(vault, "glossary", scaffold);
   const relative = note(vault);
-  const lint = cli(vault, "lint");
+  const lint = indexedLint(vault);
   assert.equal(lint.status, 0, JSON.stringify(lint.data));
   const eighth = cli(vault, "type", "list").data.types.find((t: { name: string }) => t.name === "glossary");
   assert.deepEqual(eighth.scopes, ["projects/wiki"]);
@@ -224,7 +229,7 @@ test("okf:02 list and validation retain required fields reached through a local 
   const listing = cli(vault, "type", "list");
   assert.equal(listing.status, 0);
   assert.ok(listing.data.types.find((t: { name: string }) => t.name === "glossary").requiredFields.includes("category"));
-  assert.equal(cli(vault, "lint").status, 0);
+  assert.equal(indexedLint(vault).status, 0);
 });
 
 test("okf:02 source profile keeps required locator and retrieval time with a weakened registry", () => {
@@ -269,7 +274,7 @@ test("okf:02 human CLI exposes requirements and the honest lint boundary", () =>
   assert.match(list.stdout, /scopes=all/);
   const lint = human("lint");
   assert.equal(lint.status, 0);
-  assert.match(lint.stdout, /generated-index freshness not checked/);
+  assert.match(lint.stdout, /generated-index freshness checked/);
   const relative = note(vault, "---\ntype: unknown\n---\n");
   const bad = human("lint");
   assert.equal(bad.status, 1);
@@ -301,7 +306,7 @@ test("okf:02 scaffolding rejects unsafe input without effects and logs only succ
   assert.equal(cli(vault, "type", "add", "custom", "--folder", "custom").status, 0);
   const log = fs.readFileSync(path.join(vault, "log.md"), "utf8");
   assert.match(log, /\*\*type-added\*\* \[custom\]\(\.wiki\/types\/custom.json\)/);
-  assert.equal(cli(vault, "lint").status, 0);
+  assert.equal(indexedLint(vault).status, 0);
   assert.equal(fs.readFileSync(path.join(vault, "log.md"), "utf8"), log);
   assert.equal(fs.existsSync(path.join(vault, ".git/hooks")), false);
 });
