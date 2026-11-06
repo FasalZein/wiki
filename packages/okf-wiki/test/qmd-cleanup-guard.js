@@ -1,5 +1,5 @@
 // Inject only the nondeterministic native close-failure boundary, after real SDK I/O.
-import Database from "../node_modules/better-sqlite3/lib/index.js";
+import Database from "better-sqlite3";
 const close = Database.prototype.close;
 Database.prototype.close = function () {
   const result = close.call(this);
