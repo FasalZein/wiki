@@ -49,13 +49,16 @@ export function createExclusive(root: string, relative: string, data: string): v
   }
 }
 
+function hasConfigurationIdentity(config: unknown): config is { profile: unknown; version: unknown } {
+  return typeof config === "object" && config !== null && !Array.isArray(config) && "profile" in config && "version" in config;
+}
 function existingVault(root: string): void {
   const configPath = path.join(root, ".wiki/config.json");
   const raw = fs.readFileSync(configPath, "utf8");
   let config: unknown;
   try { config = JSON.parse(raw); }
   catch { throw new WikiError("damaged", "Invalid JSON configuration: " + configPath); }
-  if (typeof config !== "object" || config === null || Array.isArray(config) || !("profile" in config) || !("version" in config)) {
+  if (!hasConfigurationIdentity(config)) {
     throw new WikiError("damaged", "Configuration requires profile and version: " + configPath);
   }
   if (config.profile !== CONFIG.profile || config.version !== CONFIG.version) {
@@ -78,7 +81,22 @@ function entry(root: string, relative: string): fs.Stats | undefined {
   return containedEntry(root, relative).stat;
 }
 
-export function initVault(dir: string): { root: string } {
+function initializationLayoutProblems(root: string): string[] {
+  const incomplete: string[] = [];
+  for (const [relative, kind] of LAYOUT) {
+    const item = entry(root, relative);
+    if (!item || (kind === "file" ? !item.isFile() : !item.isDirectory())) incomplete.push(relative + " (missing or not a " + kind + ")");
+  }
+  return incomplete;
+}
+function validateExistingInitialization(root: string, wiki: fs.Stats): void {
+  if (!wiki.isDirectory()) throw new WikiError("damaged", "Incomplete initialization: .wiki is not a directory at " + root);
+  const config = entry(root, ".wiki/config.json");
+  if (config?.isFile()) existingVault(root);
+  const incomplete = initializationLayoutProblems(root);
+  if (incomplete.length) throw new WikiError("damaged", "Incomplete initialization at " + root + ": " + incomplete.join(", ") + "; inspect retained files; no automatic repair or conversion performed");
+}
+function initializationTarget(dir: string): { root: string; existing: boolean } {
   let root = path.resolve(dir);
   const stat = entry(root, "");
   if (stat) {
@@ -87,19 +105,16 @@ export function initVault(dir: string): { root: string } {
     root = fs.realpathSync(root);
     const wiki = entry(root, ".wiki");
     if (wiki) {
-      if (!wiki.isDirectory()) throw new WikiError("damaged", "Incomplete initialization: .wiki is not a directory at " + root);
-      const config = entry(root, ".wiki/config.json");
-      if (config?.isFile()) existingVault(root);
-      const incomplete: string[] = [];
-      for (const [relative, kind] of LAYOUT) {
-        const item = entry(root, relative);
-        if (!item || (kind === "file" ? !item.isFile() : !item.isDirectory())) incomplete.push(relative + " (missing or not a " + kind + ")");
-      }
-      if (incomplete.length) throw new WikiError("damaged", "Incomplete initialization at " + root + ": " + incomplete.join(", ") + "; inspect retained files; no automatic repair or conversion performed");
-      return { root };
+      validateExistingInitialization(root, wiki);
+      return { root, existing: true };
     }
     if (fs.readdirSync(root).length) throw new WikiError("unsupported", "Refusing nonempty foreign vault at " + root + "; no conversion performed");
   }
+  return { root, existing: false };
+}
+export function initVault(dir: string): { root: string } {
+  const { root, existing } = initializationTarget(dir);
+  if (existing) return { root };
   fs.mkdirSync(root, { recursive: true });
   fs.mkdirSync(path.join(root, ".wiki"));
   for (const name of ["types", "tmp", "locks"]) fs.mkdirSync(path.join(root, ".wiki", name));
