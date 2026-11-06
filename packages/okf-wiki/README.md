@@ -11,7 +11,7 @@ WIKI_VAULT=/explicit/disposable/vault node packages/okf-wiki/bin/okf-wiki.js ini
 ```
 
 Implemented commands are `init`, `type list`, `type add`, `index`, `index --check`,
-and `lint` (including relative links and whole-vault generated-index freshness). The init directory argument is an explicit vault selection. `--vault` takes precedence over `WIKI_VAULT`; an init directory also
+`show` (including section selection), and `lint` (including relative links and whole-vault generated-index freshness). The init directory argument is an explicit vault selection. `--vault` takes precedence over `WIKI_VAULT`; an init directory also
 takes precedence over the environment. Conflicting flag and positional
 directories fail with exit 2. There is no default vault. Relative vault locations
 resolve from the current working directory. Parent filesystem aliases resolve
@@ -157,12 +157,51 @@ with path, message, and regeneration instructions. Both checks are read-only.
 Regeneration changes only generated indexes, not authored notes, `log.md`, or Git
 state; it creates no commit or operation-log entry.
 
+## Current note reads
+
+```sh
+node packages/okf-wiki/bin/okf-wiki.js --vault /explicit/disposable/vault show personal/notes/topic.md --json
+node packages/okf-wiki/bin/okf-wiki.js --vault /explicit/disposable/vault show personal/notes/topic.md --section "Next steps" --json
+```
+
+Full show returns the current UTF-8 Markdown, including frontmatter, BOM if
+present, original line endings, whitespace, and any missing final newline.
+JSON returns `{ok:true,path,markdown,digest}`; the digest is
+`sha256:<64 lowercase hex digits>` over the captured whole-file bytes.
+Human mode writes only the requested Markdown, without an added newline;
+use JSON to obtain the path and digest.
+
+`--section` matches exact, case-sensitive rendered heading text, including
+formatting contents, decoded entities, inline code, link labels, and image alt
+text. Document-level CommonMark ATX and setext headings define sections;
+fenced/indented code and headings inside quotes or lists do not. A section
+includes its original heading and all source content through, but not including,
+the next equal-or-higher heading. This includes nested headings and intervening
+blank lines. JSON adds `section` with the requested heading text and keeps
+the digest of the entire note, not the selected text.
+
+Missing notes or sections exit 4 (`not_found`); duplicate matching headings
+exit 2 (`usage`). Unsafe/noncanonical paths, symlinks, and non-file targets
+also exit 2. Invalid UTF-8 exits 6 (`damaged`), never a replacement-character
+success. Section selection requires safe mapping frontmatter and reports damaged
+data if it cannot parse that boundary. Full show does not lint or reconstruct
+the document, so it can also display authored Markdown that needs repair.
+
+Show reads the requested regular Markdown file once by its literal canonical
+vault-relative path, outside operational and capture directories. It does not
+load registry records, inventory the vault, validate unrelated notes, check
+navigation freshness, write files/logs, or start search/models. A frontmatter or
+whitespace change anywhere in the note changes the digest. File size and mtime
+are not freshness assertions. Containment uses the same trusted-local-filesystem
+boundary as the other commands, not protection against hostile concurrent swaps.
+
 ## Verification
 
 From the repository root:
 
 ```sh
 OKF_TEST_PATTERN="okf:01|okf:02" heavy -- bun run test:okf
+OKF_TEST_PATTERN="okf:06" heavy -- bun run test:okf
 heavy -- bun run typecheck:okf
 ```
 

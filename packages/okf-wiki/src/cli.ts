@@ -3,17 +3,18 @@ import { parseArgs } from "node:util";
 import * as path from "node:path";
 import { initVault, WikiError, type ErrorCode } from "./vault.ts";
 import { addType, listTypes, loadRegistry, openVault, RegistryWriteError, sortDiagnostics } from "./registry.ts";
+import { readNote } from "./read.ts";
 import { inspectVault, lintVault } from "./lint.ts";
 import { indexDestinationDiagnostics, indexFreshnessDiagnostics } from "./navigation.ts";
 
 const EXIT: Record<ErrorCode, number> = { usage: 2, conflict: 3, not_found: 4, unsupported: 5, damaged: 6 };
-const USAGE = "okf-wiki (Node source CLI)\nUsage: okf-wiki init <dir> [--json]\n       okf-wiki --vault <dir> init [--json]\n       okf-wiki --vault <dir> type list [--json]\n       okf-wiki --vault <dir> type add <name> --folder <folder> [--json]\n       okf-wiki --vault <dir> lint [path] [--json]\n       okf-wiki --vault <dir> index [--check] [--json]\nWhole-vault lint checks registry, frontmatter, layout, body, lifecycle, scoped titles, links, and generated-index freshness. Selected-path lint does not check generated-index freshness.\nVault: explicit directory, --vault, or WIKI_VAULT. No default vault.\n";
+const USAGE = "okf-wiki (Node source CLI)\nUsage: okf-wiki init <dir> [--json]\n       okf-wiki --vault <dir> init [--json]\n       okf-wiki --vault <dir> type list [--json]\n       okf-wiki --vault <dir> type add <name> --folder <folder> [--json]\n       okf-wiki --vault <dir> lint [path] [--json]\n       okf-wiki --vault <dir> index [--check] [--json]\n       okf-wiki --vault <dir> show <path> [--section <heading>] [--json]\nWhole-vault lint checks registry, frontmatter, layout, body, lifecycle, scoped titles, links, and generated-index freshness. Selected-path lint does not check generated-index freshness.\nVault: explicit directory, --vault, or WIKI_VAULT. No default vault.\n";
 let json = process.argv.slice(2).includes("--json");
 function output(value: object, human: string) { process.stdout.write(json ? JSON.stringify(value) + "\n" : human); }
 try {
   const { values, positionals } = parseArgs({
     allowPositionals: true,
-    options: { vault: { type: "string" }, folder: { type: "string" }, json: { type: "boolean" }, check: { type: "boolean" }, help: { type: "boolean", short: "h" } },
+    options: { vault: { type: "string" }, folder: { type: "string" }, section: { type: "string" }, json: { type: "boolean" }, check: { type: "boolean" }, help: { type: "boolean", short: "h" } },
   });
   json = values.json ?? false;
   if (values.help) {
@@ -25,7 +26,9 @@ try {
     const add = command === "type" && arg === "add" && extra.length === 1 && values.folder !== undefined;
     const index = command === "index" && arg === undefined && extra.length === 0;
     if (values.check !== undefined && !index) throw new WikiError("usage", "--check is only valid with index");
-    if (!(index || init && extra.length === 0 || list || add || command === "lint" && extra.length === 0) || values.folder !== undefined && !add) throw new WikiError("usage", USAGE);
+    const show = command === "show" && arg !== undefined && extra.length === 0;
+    if (values.section !== undefined && !show) throw new WikiError("usage", "--section is only valid with show <path>");
+    if (!(show || index || init && extra.length === 0 || list || add || command === "lint" && extra.length === 0) || values.folder !== undefined && !add) throw new WikiError("usage", USAGE);
     if (init && values.vault !== undefined && arg !== undefined && path.resolve(values.vault) !== path.resolve(arg)) {
       throw new WikiError("usage", "Conflicting vault selections: --vault and init <dir> name different directories");
     }
@@ -36,7 +39,10 @@ try {
       output({ ok: true, vault }, "Initialized profile vault: " + vault.root + "\n");
     } else {
       const root = openVault(selected);
-      if (add && extra[0] !== undefined && values.folder !== undefined) {
+      if (show && arg !== undefined) {
+        const note = readNote(root, arg, values.section);
+        output({ ok: true, ...note }, note.markdown);
+      } else if (add && extra[0] !== undefined && values.folder !== undefined) {
         const added = addType(root, extra[0], values.folder);
         output({ ok: true, path: added }, "Created registry scaffold: " + added + "; review and run whole-vault lint before commit\n");
       } else {
