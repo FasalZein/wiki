@@ -5,7 +5,7 @@ import { addType, listTypes, loadRegistry, openVault, RegistryWriteError } from 
 import { lintVault } from "./lint.ts";
 
 const EXIT: Record<ErrorCode, number> = { usage: 2, conflict: 3, not_found: 4, unsupported: 5, damaged: 6 };
-const USAGE = "okf-wiki (Node source CLI)\nUsage: okf-wiki init <dir> [--json]\n       okf-wiki --vault <dir> init [--json]\n       okf-wiki --vault <dir> type list [--json]\n       okf-wiki --vault <dir> type add <name> --folder <folder> [--json]\n       okf-wiki --vault <dir> lint [path] [--json]\nLint currently checks registry and frontmatter only.\nVault: explicit directory, --vault, or WIKI_VAULT. No default vault.\n";
+const USAGE = "okf-wiki (Node source CLI)\nUsage: okf-wiki init <dir> [--json]\n       okf-wiki --vault <dir> init [--json]\n       okf-wiki --vault <dir> type list [--json]\n       okf-wiki --vault <dir> type add <name> --folder <folder> [--json]\n       okf-wiki --vault <dir> lint [path] [--json]\nLint checks registry, frontmatter, layout, body, lifecycle, and scoped titles; links and indexes not checked.\nVault: explicit directory, --vault, or WIKI_VAULT. No default vault.\n";
 let json = process.argv.slice(2).includes("--json");
 function output(value: object, human: string) { process.stdout.write(json ? JSON.stringify(value) + "\n" : human); }
 try {
@@ -40,13 +40,13 @@ try {
         const diagnostics = registry ? registry.diagnostics : lintVault(root, arg);
         if (diagnostics.length) {
           process.exitCode = 1;
-          const error = { code: "lint", message: "Registry/frontmatter validation failed" };
+          const error = { code: "lint", message: "Wiki validation failed" };
           if (json) output({ ok: false, error, diagnostics }, "");
           else process.stderr.write(diagnostics.map(d => d.path + ": " + d.rule + ": " + d.message + "; fix: " + d.fix).join("\n") + "\n");
         } else if (registry) {
           const types = listTypes(registry.types);
           output({ ok: true, types }, types.map(t => t.name + " folder=" + t.folder + " required=" + t.requiredFields.join(",") + " headings=" + t.requiredHeadings.map(h => h.level + ":" + h.text).join(",") + " scopes=" + (t.scopes?.join(",") ?? "all")).join("\n") + "\n");
-        } else output({ ok: true, diagnostics: [], checks: ["registry", "frontmatter"] }, "Registry/frontmatter lint passed (body, layout, links, and indexes not checked)\n");
+        } else output({ ok: true, diagnostics: [], checks: ["registry", "frontmatter", "layout", "body", "lifecycle", "scoped-titles"] }, "Wiki lint passed (registry, frontmatter, layout, body, lifecycle, scoped titles; links and indexes not checked)\n");
       }
     }
   }

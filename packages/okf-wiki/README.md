@@ -10,8 +10,8 @@ node packages/okf-wiki/bin/okf-wiki.js --vault /explicit/disposable/vault init -
 WIKI_VAULT=/explicit/disposable/vault node packages/okf-wiki/bin/okf-wiki.js init --json
 ```
 
-Implemented commands are `init`, `type list`, `type add`, and the registry/frontmatter
-portion of `lint`. The init directory argument is an explicit vault selection. `--vault` takes precedence over `WIKI_VAULT`; an init directory also
+Implemented commands are `init`, `type list`, `type add`, and structural `lint`
+(excluding links and generated indexes). The init directory argument is an explicit vault selection. `--vault` takes precedence over `WIKI_VAULT`; an init directory also
 takes precedence over the environment. Conflicting flag and positional
 directories fail with exit 2. There is no default vault. Relative vault locations
 resolve from the current working directory. Parent filesystem aliases resolve
@@ -50,7 +50,7 @@ the missing or malformed managed paths and does not repair or overwrite them.
 Inspect retained files before choosing a fresh empty destination or recovering
 manually. Do not treat a config-free partial vault as an empty target.
 
-## Registry and frontmatter validation
+## Registry and topic validation
 
 Install the package-local, pinned dependencies without changing the root dependency
 set or lockfile:
@@ -96,13 +96,26 @@ restriction. Source notes still require resource and retrieval metadata. Extra
 flat properties must be declared by the type schema. Validation never coerces
 values or supplies defaults. Diagnostics sort by path, rule, and message and
 include `path`, `rule`, `message`, and `fix`. Lint failures exit 1 with error code
-`lint`; successful lint reports `checks: ["registry", "frontmatter"]`.
+`lint`; successful lint reports
+`checks: ["registry", "frontmatter", "layout", "body", "lifecycle", "scoped-titles"]`.
 
-**Current boundary:** lint checks registry integrity and authored frontmatter,
-including exact type scope restrictions. It does not yet check canonical folder
-placement, body/headings, duplicate titles, lifecycle target references, links,
-or generated indexes. A successful lint result is not yet full-product lint.
-A path selection still validates the entire registry. Lint never rewrites files.
+Lint checks canonical scope/folder/slug placement, exact type scope restrictions,
+registered headings, decision Consequences hierarchy, and duplicate scoped titles
+after trimming and Unicode default full case folding. Folding uses the pinned,
+dependency-free MIT package `unicode-case-folding` (1.1.2), whose generated table
+comes from the Unicode Character Database
+[CaseFolding.txt](https://www.unicode.org/Public/UCD/latest/ucd/CaseFolding.txt);
+[source and license](https://github.com/avivkeller/unicode-case-folding).
+Folding affects comparison keys only, not authored titles or accents. Markdown
+structure comes from a CommonMark AST; code examples, HTML source blocks, and blockquotes do not satisfy headings
+or count as repeated Status:/Type: metadata. Templates use the same heading check.
+Lifecycle references require deprecated status and an existing canonical topic.
+
+**Current boundary:** links and generated-index freshness are not checked.
+A successful result is not yet full-product lint. A path selection validates the
+entire registry and checks duplicate titles throughout the selected scope(s),
+without reporting unrelated notes' other validation errors. Whole-vault lint
+applies registry edits to all existing notes. Lint never rewrites files.
 
 ## Verification
 

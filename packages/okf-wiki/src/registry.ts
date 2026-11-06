@@ -6,6 +6,7 @@ import addFormats from "ajv-formats";
 import type { AnySchema, ErrorObject, ValidateFunction } from "ajv";
 import { createExclusive, WikiError } from "./vault.ts";
 import { isMapping } from "./frontmatter.ts";
+import { missingHeadings, parseMarkdown } from "./markdown.ts";
 
 export interface Diagnostic { path: string; rule: string; message: string; fix: string }
 interface Heading { level: number; text: string }
@@ -32,7 +33,10 @@ export const COMMON_SCHEMA = {
     status: { enum: ["draft", "stable", "deprecated"] },
     superseded_by: { type: "string", minLength: 1 }, id: false, updated: false,
   },
-  allOf: [{ if: { properties: { type: { const: "source" } }, required: ["type"] }, then: { required: ["resource", "retrieved"] } }],
+  allOf: [
+    { if: { properties: { type: { const: "source" } }, required: ["type"] }, then: { required: ["resource", "retrieved"] } },
+    { if: { required: ["superseded_by"] }, then: { required: ["status"], properties: { status: { const: "deprecated" } } } },
+  ],
 };
 const validRecord = ajv.compile<TypeRecord>({
   type: "object", required: ["name", "folder", "frontmatterSchema", "requiredHeadings", "template"], additionalProperties: false,
@@ -103,7 +107,7 @@ export function loadRegistry(root: string): { types: RegisteredType[]; diagnosti
     // Templates are inert Markdown bodies. Only a complete leading frontmatter block
     // crosses that boundary; shell examples, placeholder syntax, and thematic breaks do not.
     if (/^\uFEFF?---(?:[A-Za-z][\w-]*)?[ \t]*\r?\n(?:[\s\S]*?\r?\n)?---[ \t]*(?:\r?\n|$)/.test(data.template)) { fail("registry.template", "Template body must not contain a leading frontmatter block"); continue; }
-    if (data.requiredHeadings.some(h => !data.template.split(/\r?\n/).includes("#".repeat(h.level) + " " + h.text))) { fail("registry.template", "Template is missing a required heading"); continue; }
+    if (missingHeadings(parseMarkdown(data.template), data.requiredHeadings, data.name).length) { fail("registry.template", "Template is missing a required heading"); continue; }
     try {
       if (isMapping(data.frontmatterSchema) && data.frontmatterSchema.$schema !== undefined && data.frontmatterSchema.$schema !== COMMON_SCHEMA.$schema) throw new Error("Expected JSON Schema draft 2020-12");
       checkReferences(data.frontmatterSchema);
