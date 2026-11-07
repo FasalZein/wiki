@@ -121,8 +121,22 @@ for (const [stream, expected] of [["BT /F1 24 Tf 72 720 Td (caf\\351 fixture) Tj
 const latin = (s: string) => Buffer.from(s, "latin1");
 const utf8Bom = Buffer.from([0xef, 0xbb, 0xbf]);
 const meta = '<meta charset="iso-8859-1">';
+const quotedMeta = '<meta data-note="a>b" charset="windows-1252">';
 // The declaration's closing > must be inside the byte prefix, not merely its opening <.
 const charsetCases: [string, string, Buffer, string | RegExp][] = [
+  ["repair quoted greater-than before charset", "text/html", latin('<meta data-note="a>b" charset="windows-1252"><p>café</p>'), "café"],
+  ["repair real tag end beyond prefix", "text/html", Buffer.from('<meta charset="windows-1252" data-note=">' + " ".repeat(1024) + '"><p>café</p>'), "café"],
+  ["repair meta-looking attribute text", "text/html", Buffer.from(`<div title='<meta charset="windows-1252">'></div><p>café</p>`), "café"],
+  ["repair quoted MIME parameter", 'text/plain; note="abc; charset=windows-1252; xyz"; charset=utf-8', Buffer.from("café"), "café"],
+  ["adjacent single-quoted tag attribute", "text/html", latin("<meta data-note='a>b' charset='windows-1252'><p>café</p>"), "café"],
+  ["adjacent quoted tag ends at byte 1024", "text/html", latin(" ".repeat(1024 - quotedMeta.length) + quotedMeta + "<p>café</p>"), "café"],
+  ["adjacent quoted tag ends after byte 1024", "text/html", latin(" ".repeat(1025 - quotedMeta.length) + quotedMeta + "<p>café</p>"), /bytes are not valid utf-8/],
+  ["adjacent double-quoted outer attribute", "text/html", Buffer.from(`<div title="<meta charset='windows-1252'>"></div><p>café</p>`), "café"],
+  ["adjacent charset text inside meta attribute", "text/html", Buffer.from('<meta data-note="a charset=windows-1252 >"><p>café</p>'), "café"],
+  ["adjacent escaped MIME quote", String.raw`text/plain; note="abc\"; charset=windows-1252; xyz"; charset=utf-8`, Buffer.from("café"), "café"],
+  ["adjacent quoted transport charset", 'text/plain; note="a;b"; charset="utf-8"', Buffer.from("café"), "café"],
+  ["adjacent empty transport charset", 'text/plain; charset=""', Buffer.from("café"), "café"],
+  ["adjacent malformed MIME type", "text/plain/extra; charset=utf-8", Buffer.from("café"), /Invalid Content-Type/],
   ["transport", "text/html; charset=iso-8859-1", latin('<meta charset="utf-8"><p>café</p>'), "café"],
   ["WHATWG legacy label", "text/html; charset=iso-8859-1", latin("<p>price \x80</p>"), "price €"],
   ["meta", "text/html", latin(meta + "<p>café</p>"), "café"],
@@ -150,7 +164,8 @@ for (const [label, contentType, bytes, expected] of charsetCases) test("okf:16 c
     if (expected instanceof RegExp) await refused(root, fixture.origin + "/charset", 5, expected);
     else {
       const result = await cli(root, args(fixture.origin + "/charset")); assert.equal(result.status, 0, JSON.stringify(result));
-      assert.equal(fs.readFileSync(path.join(root, result.data.extracted), "utf8"), expected);
+      assert.deepEqual(fs.readFileSync(path.join(root, result.data.extracted)), Buffer.from(expected, "utf8"));
+      assert.equal(result.data.ok, true); assert.equal(result.data.written, true);
       assert.equal(result.data.original_sha256, digest(bytes)); assert.equal(result.data.extracted_sha256, digest(expected));
       assert.deepEqual(fs.readFileSync(path.join(root, result.data.original)), bytes);
     }
