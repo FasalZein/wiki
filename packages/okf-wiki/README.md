@@ -33,7 +33,8 @@ Registry files are editable data, not a fixed type universe. Each record has
 allows all supported scopes. Templates do not execute or interpolate code.
 The source schema includes retained-asset metadata for later capture commands.
 Registry validation, exclusive scaffolding, and topic creation are implemented.
-Local document and web capture are implemented below; search belongs to later slices.
+Local document and web capture are implemented below. Model-free search synchronization
+is available; retrieval and explicit embedding belong to later slices.
 
 Init publishes complete files exclusively, with the configuration last as the
 completion marker. A compatible repeat checks the managed layout and leaves
@@ -568,3 +569,66 @@ all named web cases without the directory-wide wrapper's default fanout:
 heavy --slots 2 -- node --test --test-concurrency=1 --test-name-pattern "okf:16" packages/okf-wiki/test/capture-web.test.ts packages/okf-wiki/test/html.test.ts
 heavy -- bun run typecheck:okf
 ~~~
+
+
+## Model-free search synchronization (#24)
+
+Run the source CLI against an explicit disposable or owned profile vault:
+
+    node packages/okf-wiki/bin/okf-wiki.js --vault <dir> search sync
+    node packages/okf-wiki/bin/okf-wiki.js --vault <dir> search sync --json
+
+This command validates a complete registry-aware inventory, retaining the exact
+full Markdown read for validation. It reads file contents on every sync, even
+when size and mtime match. It passes only valid canonical concepts to the public
+QMD SDK. Generated indexes, the root log, assets, and operational trees are not
+concepts. Invalid, unknown, or unreadable concepts produce explicit diagnostics
+and incomplete text coverage; they never enter retrieval. A damaged registry
+prevents a validated roster, so no concepts are indexed until it is repaired.
+
+JSON includes ok, coverageBasis: "captured-inventory", textCoverage,
+embeddingCoverage, and diagnostics. Each public coverage state is
+complete, incomplete, or unavailable. Complete text coverage includes
+canonical paths and full-file SHA-256 digests. Pending embeddings are reported as
+embeddingCoverage: {state: "incomplete", contentHashes: N}, not as complete
+coverage. A model-free text update does not fill embeddings. An empty current
+captured inventory can have vacuously complete embedding coverage.
+
+Coverage attests captured bytes compared with the actual indexed Markdown, not
+files frozen until command return. A noncooperating editor can change files after
+the capture. Later find-result path/digest revalidation belongs to #26. A prior
+coverage receipt or lexical hit is not a current-inventory proof.
+
+Useful synchronization with explicit incomplete coverage exits 0. Unavailable
+SDK/native/index operations exit 7 with error.code: "unavailable". A busy
+index writer exits 3 with error.code: "conflict". Neither exposes an old receipt
+as current request coverage. Failed/interrupted sync does not publish a complete
+receipt. SIGINT/SIGTERM cooperatively abort at adapter boundaries and run cleanup
+before output. Structured cleanup diagnostics and retained-lock recovery guidance
+are preserved. Never remove an index lock until confirming no index writer is active.
+
+Fresh init ignores the entire derived .wiki/search/ directory, including database
+sidecars, snapshots, coverage, identities, and the writer marker. Older database
+location rules remain protected. Existing .gitignore files are never overwritten
+or auto-migrated by repeat init or search sync. For an existing profile with older
+rules, review its authored .gitignore and manually add /.wiki/search/ before staging
+vault changes. Repeat init does not certify or repair those authored rules.
+
+QMD writes only vault-local rebuildable .wiki/search/ state. The separate
+writer.lock never takes the content mutation lock. Ordinary init/show do not
+load QMD or depend on an available search/native dependency, and work while the
+index lock exists. Delete derived search state only when no index writer is
+active; another sync rebuilds it from Markdown.
+
+This command does not load models, change global search/config/cache state, invoke
+an installed CLI, or download weights. Search sync --embed and find are not
+implemented here and are rejected rather than stubbed. #25 owns local-model
+preflight, explicit waited embedding, and typed fast/deep retrieval. QMD's global
+tokenizer reads QMD_EMBED_MODEL separately from per-store config; #25 must bind
+both safely before model use. The unchanged opt-in native proof is documented in
+test/qmd-model-proof.md; it does not implement that product configuration.
+
+Real CLI-process e2e cases live in test/qmd-cli.test.ts in the okf:10 group.
+They use disposable vaults and actual SDK indexing/retrieval. Only dependency,
+I/O-failure, captured-read replacement, and signal-event boundaries are injected.
+There is still no boot script; B20/#34 owns the final boot check.

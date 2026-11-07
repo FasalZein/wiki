@@ -26,7 +26,7 @@ export type ProspectiveNote = { path: string; markdown: string } & (
 );
 interface InventoryNote {
   path: string; scope: string | undefined; data: Record<string, unknown>; canonical: boolean;
-  body: string; tree: ReturnType<typeof parseMarkdown>;
+  markdown: string; body: string; tree: ReturnType<typeof parseMarkdown>;
 }
 
 function selectedPathDiagnostics(root: string, selected: string): Diagnostic[] {
@@ -118,6 +118,7 @@ function selectedDiagnostics(notes: InventoryNote[], diagnostics: Diagnostic[], 
 }
 export function inspectVault(root: string, selected?: string, prospective?: ProspectiveNote) {
   const { types, diagnostics } = loadRegistry(root);
+  const registryValid = diagnostics.length === 0;
   const notes: InventoryNote[] = [];
   const assets = new Map<string, Buffer>();
   for (const asset of prospective?.assets ?? []) {
@@ -131,6 +132,10 @@ export function inspectVault(root: string, selected?: string, prospective?: Pros
   const indexes = new Set<string>(["index.md"]);
   function fail(file: string, rule: string, message: string, fix: string) { diagnostics.push({ path: file, rule, message, fix }); }
   function visit(relative: string) {
+    try { inspectEntry(relative); }
+    catch (error) { fail(relative, "path.unreadable", error instanceof Error ? error.message : String(error), "Restore readable regular vault-owned files and synchronize again"); }
+  }
+  function inspectEntry(relative: string) {
     if (isCaptureAsset(relative)) return;
     const inspected = inspectContainedPath(root, relative);
     if (!inspected.ok) { fail(relative, inspected.problem.rule, inspected.problem.message, "Use a canonical path and regular vault-owned ancestors"); return; }
@@ -183,7 +188,7 @@ export function inspectVault(root: string, selected?: string, prospective?: Pros
     const scope = scopeOf(relative);
     const offset = segments[0] === "personal" ? 1 : 2;
     const layout = scope !== undefined && segments.length === offset + 2 && segments[offset] === type.record.folder && safeName((segments[offset + 1] ?? "").slice(0, -3));
-    notes.push({ path: relative, scope, data, body, tree, canonical: layout && scope !== undefined && (!type.record.scopes || type.record.scopes.includes(scope)) });
+    notes.push({ path: relative, scope, data, markdown, body, tree, canonical: layout && scope !== undefined && (!type.record.scopes || type.record.scopes.includes(scope)) });
     if (!layout) {
       fail(relative, "path.layout", "Expected scope/" + type.record.folder + "/<slug>.md", "Use personal or projects/<safe-project>, the registered folder, and one safe slug");
     }
@@ -193,16 +198,21 @@ export function inspectVault(root: string, selected?: string, prospective?: Pros
     const selectionProblems = selectedPathDiagnostics(root, selected);
     diagnostics.push(...selectionProblems);
     // Registry diagnostics are always applicable, even for an invalid selected path.
-    if (selectionProblems.length) return { diagnostics: sortDiagnostics(diagnostics), indexes: new Map<string, string>() };
+    if (selectionProblems.length) return { diagnostics: sortDiagnostics(diagnostics), indexes: new Map<string, string>(), concepts: [] };
   }
-  for (const name of fs.readdirSync(root).sort().filter(name => !SKIP.has(name))) visit(name);
+  try { for (const name of fs.readdirSync(root).sort().filter(name => !SKIP.has(name))) visit(name); }
+  catch (error) { fail("", "path.unreadable", error instanceof Error ? error.message : String(error), "Restore readable vault directories and synchronize again"); }
   if (prospective) {
     prospectiveDirectories(prospective.path, types, directories, indexes);
     inspectNote(prospective.path, prospective.markdown);
   }
   diagnostics.push(...crossNoteDiagnostics(root, notes, indexes, selected, prospective, assets));
+  // Retain the exact bytes decoded and validated above. Never reread a validated path
+  // for indexing: a noncooperating editor can replace it between those operations.
+  const concepts = notes.filter(note => registryValid && note.canonical && !diagnostics.some(d => d.path === "" || d.path === note.path || note.path.startsWith(d.path + "/")))
+    .map(({ path, markdown }) => ({ path, markdown }));
   return { indexes: diagnostics.length ? new Map<string, string>() : renderIndexes(directories, navigationTopics(notes)),
-    diagnostics: selectedDiagnostics(notes, diagnostics, selected) };
+    concepts, diagnostics: selectedDiagnostics(notes, diagnostics, selected) };
 }
 
 export function lintVault(root: string, selected?: string): Diagnostic[] {
