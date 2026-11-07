@@ -3,7 +3,7 @@ import * as path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { inspectContainedPath } from "./paths.ts";
 
-export type ErrorCode = "usage" | "conflict" | "not_found" | "unsupported" | "damaged";
+export type ErrorCode = "usage" | "conflict" | "not_found" | "unsupported" | "damaged" | "unavailable";
 export class WikiError extends Error {
   readonly code: ErrorCode;
   constructor(code: ErrorCode, message: string) {
