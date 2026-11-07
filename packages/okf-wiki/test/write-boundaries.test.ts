@@ -41,6 +41,26 @@ function restore(vault: string) {
 const NEW = ["new", "note", "--personal", "--title", "Topic", "--description", "A topic"];
 const ADD = ["type", "add", "glossary", "--folder", "glossary"];
 
+test("okf:07 lock acquisition permission errors preserve the original failure and perform no publication", () => {
+  const vault = fresh();
+  const beforeIndex = fs.readFileSync(path.join(vault, "index.md"));
+  fs.chmodSync(path.join(vault, ".wiki/locks"), 0o500);
+  try {
+    const result = cli(vault, NEW);
+    assert.equal(result.status, 1);
+    assert.equal(result.data.ok, false);
+    assert.equal(result.data.error.code, "internal");
+    assert.match(result.data.error.message, /EACCES.*mutation\.lock/);
+    assert.equal(result.data.written, undefined);
+    assert.equal(result.data.cleanup, undefined);
+    assert.equal(fs.existsSync(path.join(vault, "personal/notes/topic.md")), false);
+    assert.equal(fs.readFileSync(path.join(vault, "log.md"), "utf8"), "");
+    assert.deepEqual(fs.readFileSync(path.join(vault, "index.md")), beforeIndex);
+    assert.deepEqual(fs.readdirSync(path.join(vault, ".wiki/tmp")), []);
+    assert.deepEqual(fs.readdirSync(path.join(vault, ".wiki/locks")), []);
+  } finally { restore(vault); }
+});
+
 for (const [command, args, relative] of [["new", NEW, "personal/notes/topic.md"], ["type add", ADD, ".wiki/types/glossary.json"]] as const) test("okf:07 F1 published " + command + " survives failed temporary-name cleanup with truthful metadata", () => {
   const vault = fresh();
   try {

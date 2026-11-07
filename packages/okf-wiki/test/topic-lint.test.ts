@@ -5,6 +5,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { inspectVault } from "../src/lint.ts";
 
 const BIN = fileURLToPath(new URL("../bin/okf-wiki.js", import.meta.url));
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "okf-topic-"));
@@ -38,6 +39,21 @@ function rejects(vault: string, relative: string, rule: string, ...args: string[
   assert.ok(result.data.diagnostics.some((d: { path: string; rule: string; fix: string }) => d.path === relative && d.rule === rule && d.fix.length > 0), JSON.stringify(result));
   return result;
 }
+
+test("okf:03 selected inventory hides unrelated diagnostics but never renders a partial index", () => {
+  const vault = fresh();
+  const selected = note(vault, "personal/notes/selected.md", "", "", "note", "Selected");
+  const other = note(vault, "projects/wiki/notes/other.md", "status: deprecated\nsuperseded_by: missing.md\n", "", "note", "Other");
+  const inventory = inspectVault(vault, selected);
+  assert.deepEqual(inventory.diagnostics, []);
+  assert.equal(inventory.indexes.size, 0, "an invalid unselected topic blocks all planned navigation");
+  assert.deepEqual(inspectVault(vault).diagnostics.map(d => [d.path, d.rule]), [[other, "lifecycle.target"]]);
+  fs.unlinkSync(path.join(vault, other));
+  const repaired = inspectVault(vault, selected);
+  assert.deepEqual(repaired.diagnostics, []);
+  assert.match(repaired.indexes.get("personal/notes/index.md")!, /Selected/);
+  assert.ok(repaired.indexes.has("index.md"));
+});
 
 test("okf:03 canonical placement requires scope, registered folder, safe project and exact slug depth", () => {
   const vault = fresh();
