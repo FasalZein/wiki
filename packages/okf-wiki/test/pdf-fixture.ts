@@ -19,4 +19,3 @@ export function buildPdf(stream: string): Buffer {
   for (let index = 1; index <= 5; index += 1) xref += `${String(offsets[index]).padStart(10, "0")} 00000 n \n`;
   return Buffer.from(`${body}${xref}trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${startxref}\n%%EOF\n`, "binary");
 }
-
