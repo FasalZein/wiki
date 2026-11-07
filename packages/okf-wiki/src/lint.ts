@@ -57,16 +57,22 @@ function retainedAssetProblem(root: string, value: string, planned: ReadonlyMap<
   return undefined;
 }
 
+function sourceAssetDiagnostics(root: string, note: InventoryNote, field: string, planned: ReadonlyMap<string, Buffer>): Diagnostic[] {
+  const diagnostics: Diagnostic[] = [];
+  const value = note.data[field];
+  if (typeof value !== "string") return diagnostics; // The registered schema reports missing or non-string values.
+  const problem = retainedAssetProblem(root, value, planned);
+  const bytes = planned.get(value);
+  if (bytes && note.data[field + "_sha256"] !== "sha256:" + createHash("sha256").update(bytes).digest("hex")) diagnostics.push({ path: note.path, rule: "source.digest", message: field + ": digest does not match planned retained bytes", fix: "Use the digest of the exact retained asset bytes" });
+  if (problem !== undefined) diagnostics.push({ path: note.path, rule: "source.path", message: field + ": " + problem, fix: "Use a canonical vault-relative retained asset path without dot segments or symlinks" });
+  return diagnostics;
+}
+
 function sourceDiagnostics(root: string, note: InventoryNote, planned: ReadonlyMap<string, Buffer>): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
   if (note.data.type !== "source") return diagnostics;
   for (const field of ["original", "extracted"]) {
-    const value = note.data[field];
-    if (typeof value !== "string") continue; // The registered schema reports missing or non-string values.
-    const problem = retainedAssetProblem(root, value, planned);
-    const bytes = planned.get(value);
-    if (bytes && note.data[field + "_sha256"] !== "sha256:" + createHash("sha256").update(bytes).digest("hex")) diagnostics.push({ path: note.path, rule: "source.digest", message: field + ": digest does not match planned retained bytes", fix: "Use the digest of the exact retained asset bytes" });
-    if (problem !== undefined) diagnostics.push({ path: note.path, rule: "source.path", message: field + ": " + problem, fix: "Use a canonical vault-relative retained asset path without dot segments or symlinks" });
+    diagnostics.push(...sourceAssetDiagnostics(root, note, field, planned));
   }
   return diagnostics;
 }
@@ -84,6 +90,12 @@ function duplicateTitleDiagnostics(notes: InventoryNote[]): Diagnostic[] {
   })));
 }
 
+function lifecycleDiagnostics(note: InventoryNote, topics: ReadonlySet<string>): Diagnostic[] {
+  const diagnostics: Diagnostic[] = [];
+  if (typeof note.data.superseded_by === "string" && !topics.has(note.data.superseded_by)) diagnostics.push({ path: note.path, rule: "lifecycle.target", message: "superseded_by must name an existing canonical topic: " + note.data.superseded_by, fix: "Use a vault-relative topic path with .md and no dot segments" });
+  return diagnostics;
+}
+
 function crossNoteDiagnostics(root: string, notes: InventoryNote[], indexes: Set<string>, selected: string | undefined, prospective: ProspectiveNote | undefined, assets: ReadonlyMap<string, Buffer>): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
   const topics = new Set(notes.filter(n => n.canonical).map(n => n.path));
@@ -96,7 +108,7 @@ function crossNoteDiagnostics(root: string, notes: InventoryNote[], indexes: Set
     const targets = planned.size ? new Set([...plannedTargets, ...planned.keys()]) : plannedTargets;
     diagnostics.push(...linkDiagnostics(root, note.path, note.body, note.tree, relative => topics.has(relative) || indexes.has(relative) || isCaptureAsset(relative), selected === undefined ? targets : undefined));
     diagnostics.push(...sourceDiagnostics(root, note, planned));
-    if (typeof note.data.superseded_by === "string" && !topics.has(note.data.superseded_by)) diagnostics.push({ path: note.path, rule: "lifecycle.target", message: "superseded_by must name an existing canonical topic: " + note.data.superseded_by, fix: "Use a vault-relative topic path with .md and no dot segments" });
+    diagnostics.push(...lifecycleDiagnostics(note, topics));
   }
   return [...diagnostics, ...duplicateTitleDiagnostics(notes)];
 }
@@ -116,17 +128,32 @@ function selectedDiagnostics(notes: InventoryNote[], diagnostics: Diagnostic[], 
   if (selected !== undefined) scopes.add(scopeOf(selected));
   return sortDiagnostics(diagnostics.filter(d => d.path.startsWith(".wiki/types/") || inSelection(d.path) || d.rule === "title.duplicate" && scopes.has(scopeOf(d.path))));
 }
+function isScopeOwnedAsset(relative: string, scope: string | undefined): boolean {
+  return isCaptureAsset(relative) && !!scope && relative.startsWith(scope + "/assets/");
+}
+
+function plannedAssetProblem(root: string, relative: string, scope: string | undefined, assets: ReadonlyMap<string, Buffer>): string | undefined {
+  const inspected = inspectContainedPath(root, relative);
+  if (!inspected.ok) return inspected.problem.message;
+  if (inspected.stat || !isScopeOwnedAsset(relative, scope) || assets.has(relative)) return "Expected a unique new canonical retained asset in the candidate scope";
+  return undefined;
+}
+
+function planCaptureAssets(root: string, prospective: ProspectiveNote | undefined, diagnostics: Diagnostic[]): Map<string, Buffer> {
+  const assets = new Map<string, Buffer>();
+  const scope = scopeOf(prospective?.path ?? "");
+  for (const asset of prospective?.assets ?? []) {
+    const problem = plannedAssetProblem(root, asset.path, scope, assets);
+    if (problem !== undefined) diagnostics.push({ path: asset.path, rule: "source.asset", message: problem, fix: "Plan distinct scope-owned asset paths without existing targets or unsafe ancestors" });
+    else assets.set(asset.path, asset.bytes);
+  }
+  return assets;
+}
+
 export function inspectVault(root: string, selected?: string, prospective?: ProspectiveNote) {
   const { types, diagnostics } = loadRegistry(root);
   const notes: InventoryNote[] = [];
-  const assets = new Map<string, Buffer>();
-  for (const asset of prospective?.assets ?? []) {
-    const inspected = inspectContainedPath(root, asset.path);
-    const scope = scopeOf(prospective?.path ?? "");
-    if (!inspected.ok || inspected.stat || !isCaptureAsset(asset.path) || !scope || !asset.path.startsWith(scope + "/assets/") || assets.has(asset.path)) {
-      diagnostics.push({ path: asset.path, rule: "source.asset", message: !inspected.ok ? inspected.problem.message : "Expected a unique new canonical retained asset in the candidate scope", fix: "Plan distinct scope-owned asset paths without existing targets or unsafe ancestors" });
-    } else assets.set(asset.path, asset.bytes);
-  }
+  const assets = planCaptureAssets(root, prospective, diagnostics);
   const directories: NavigationDirectory[] = [{ path: "", type: "" }];
   const indexes = new Set<string>(["index.md"]);
   function fail(file: string, rule: string, message: string, fix: string) { diagnostics.push({ path: file, rule, message, fix }); }

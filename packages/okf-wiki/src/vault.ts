@@ -38,6 +38,15 @@ export class ExclusiveTemporaryError extends WikiError {
   }
 }
 
+function exclusivePublicationFailure(error: unknown, relative: string): unknown {
+  if (error instanceof Error && "code" in error && error.code === "EEXIST") {
+    const conflict = new WikiError("conflict", "Existing destination: " + relative + "; " + error.message);
+    conflict.cause = error;
+    return conflict;
+  }
+  return error;
+}
+
 // Adapted from wiki-core's exclusive complete-file publication. No donor runtime imports.
 export function createExclusive(root: string, relative: string, data: string | Buffer): void {
   const target = containedEntry(root, relative).full;
@@ -51,10 +60,7 @@ export function createExclusive(root: string, relative: string, data: string | B
     fs.linkSync(tmp, target);
     published = true;
   } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "EEXIST") {
-      const conflict = new WikiError("conflict", "Existing destination: " + relative + "; " + error.message);
-      conflict.cause = error; primary = conflict;
-    } else primary = error;
+    primary = exclusivePublicationFailure(error, relative);
     throw primary;
   } finally {
     try { fs.rmSync(tmp, { force: true }); }

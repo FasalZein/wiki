@@ -2,13 +2,18 @@ import { runTool } from "./extract-process.ts";
 import { WikiError } from "./vault.ts";
 
 const PDFTOTEXT_ARGS = ["-enc", "UTF-8", "-eol", "unix", "-nopgbrk", "-", "-"];
-export async function extractPdf(bytes: Buffer, signal: AbortSignal): Promise<{ text: string; bytes: Buffer; version: string }> {
-  const info = await runTool("pdftotext", ["-v"], Buffer.alloc(0), signal);
+function pdftotextVersion(info: Awaited<ReturnType<typeof runTool>>): string {
   let versionText: string;
   try { versionText = new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat([info.stdout, Buffer.from("\n"), info.stderr])); }
   catch { throw new WikiError("unavailable", "pdftotext did not report a usable version as UTF-8; check the program on PATH"); }
   const version = /pdftotext version\s+(\S+)/.exec(versionText)?.[1];
   if (info.code !== 0 || !version) throw new WikiError("unavailable", "pdftotext did not report a usable version; check the program on PATH");
+  return version;
+}
+
+export async function extractPdf(bytes: Buffer, signal: AbortSignal): Promise<{ text: string; bytes: Buffer; version: string }> {
+  const info = await runTool("pdftotext", ["-v"], Buffer.alloc(0), signal);
+  const version = pdftotextVersion(info);
   const output = await runTool("pdftotext", PDFTOTEXT_ARGS, bytes, signal);
   if (output.code !== 0) {
     const detail = output.stderr.toString("utf8").trim();
