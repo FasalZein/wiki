@@ -238,7 +238,7 @@ YAML strings, including a UTC created timestamp. Optional tags repeat --tags;
 status must be draft, stable, or deprecated. No status implies stable.
 The command does not invent custom required fields or source provenance. A type
 whose requirements cannot be supplied through this interface is refused; source
-capture is a separate later command.
+capture uses the separate capture command below.
 
 Automatic slugs use NFKD decomposition, remove combining marks, lowercase ASCII,
 and replace runs of non-ASCII-word characters with hyphens. Empty or reserved
@@ -364,3 +364,78 @@ A failed temporary-file cleanup before publication reports temporaryCleanup with
 the retained path and keeps the primary error (including stale conflict digests).
 Inspect that temporary file before explicit cleanup. Separate file writes are not
 a multi-file transaction and no rollback overwrites external changes.
+
+
+## Explicit UTF-8 document capture (#28)
+
+~~~sh
+node packages/okf-wiki/bin/okf-wiki.js --vault /explicit/disposable/vault capture /explicit/document.md --project wiki --title "Selected document" --description "An external observation" --json
+node packages/okf-wiki/bin/okf-wiki.js --vault /explicit/disposable/vault capture /explicit/document.txt --personal --title "Other observation" --description "A separate capture" --slug other-observation
+~~~
+
+Capture requires one explicit scope, title, and description. Optional slugs use the
+same deterministic derivation and safe-name rules as new. Existing note paths,
+asset directories, and normalized scoped titles conflict without overwrite,
+automatic deduplication, or suffixes. Distinct explicit captures may retain
+identical bytes. There is no default source scope or automatic registry repair.
+The registered source type controls the folder, scope restrictions, frontmatter
+schema, and authored headings. A missing or invalid registration must be repaired
+explicitly before capture. Unrelated invalid topics also block publication.
+
+This command currently supports local .txt, .text, .md, and .markdown files,
+case-insensitively. PDF and HTTP/HTTPS capture are not implemented yet. It opens
+input read-only and nonblocking where supported, validates the opened descriptor
+as a regular file, reads it once, and decodes strict UTF-8. An unwritten POSIX FIFO
+is refused without waiting for a writer. Input symlinks may select a regular
+external file; managed vault destinations must not have symlinked ancestors.
+Malformed UTF-8 and unsupported extensions exit 5 before publication or a success
+log entry. Invalid requests/schema exit 2, and existing destinations or busy
+cooperating writers exit 3. The source input is not modified.
+
+Original and full extracted UTF-8 bytes are retained separately under
+<scope>/assets/<slug>/original.<extension> and extracted.txt. Both preserve BOM,
+Unicode, original newline forms, and a missing final newline without normalization.
+The source note uses the registered folder, initially references. Its full
+extracted text is fenced with a delimiter that no input run can close; captured
+headings, links, metadata, and instructions remain untrusted literal content.
+Only the wrapper heading and document-relative asset links are authored Markdown.
+An added final newline for the literal rendering does not change retained assets.
+No automatic resource-size limit is imposed: input, extraction, rendered Markdown,
+and parsing structures reside in memory. There is no model summarization, request
+claim, attestation, recursive import, or global asset cache.
+
+Extraction finishes before taking the mutation lock. Under the lock, the command
+reloads the registry and validates the complete prospective vault, including exact
+planned asset paths and bytes. It does not temporarily publish assets to make
+validation pass. Existing creation and replacement validation remain unchanged.
+It reserves the capture asset directory and exclusively publishes complete files
+from same-filesystem temporary files, then generates navigation and one captured
+log entry. Normal completion passes whole-vault lint and index --check.
+
+Success JSON includes path, title, description, the full source-note digest,
+resource (the selected absolute file URL), retrieved, original, original_sha256,
+extracted, extracted_sha256, extractor, extractor_version, and media_type. The
+UTF-8 extractor is okf-wiki:utf8 version 1. It also returns written: true, paths,
+per-path digests, and an assets list with canonical paths/digests, never file
+buffers. Digests use the sha256: prefix. Human output names the source path and
+prints the same scalar provenance and digests. Retained reads never refetch input.
+
+Separate files are not one transaction. After any authoritative publication,
+a later failure returns ok: false with written: true, only this operation's
+actually published asset/note paths and per-path digests, and explicit inspection
+and repair steps. It retains published assets even if no source note was published. An exclusively
+reserved capture directory is reported as retainedDirectory, even when creating
+the first file fails; inspect it before explicit cleanup or a new attempt. An empty
+reserved directory does not produce written: true or invented file digests.
+It does not claim an external collision file as its own or roll back later edits.
+Unpublished temporary-cleanup failures retain the primary error and report
+temporaryCleanup. Lock cleanup is reported separately as cleanup. Completed
+publication followed by failed lock release reports outcome: completed rather
+than emitting an earlier success. Both human and JSON output wait for required
+lock cleanup. Inspect retained temporary files before explicit cleanup; run index
+to repair navigation when a source note exists, and inspect log.md before manually
+adding any missing historical entry. Never invent a log timestamp or retry a
+partially published capture automatically.
+
+Real-process capture proof lives in test/capture-cli.test.ts (okf:14); preparation,
+FIFO, byte-fidelity, and planned-asset checks live in test/capture-text.test.ts.

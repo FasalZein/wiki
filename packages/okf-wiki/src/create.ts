@@ -18,9 +18,9 @@ export class CreatePartialError extends WikiError {
   readonly written = true;
   readonly paths: string[];
   readonly digest: string;
-  constructor(paths: string[], digest: string) {
+  constructor(paths: string[], digest: string, cause?: unknown) {
     super("damaged", "Topic published but navigation or log failed; run index to repair navigation and inspect log.md before adding any missing historical entry manually");
-    this.paths = paths; this.digest = digest;
+    this.paths = paths; this.digest = digest; this.cause = cause;
   }
 }
 function registeredCreateType(root: string, name: string) {
@@ -62,7 +62,7 @@ function publishTopicFile(root: string, relative: string, markdown: string): voi
     throw error;
   }
 }
-export function completeTopicPublication(root: string, relative: string, title: string, digest: string, indexes: Map<string, string>, action: "created" | "updated" = "created"): void {
+export function completeTopicPublication(root: string, relative: string, title: string, digest: string, indexes: Map<string, string>, action: "created" | "updated" | "captured" = "created"): void {
   try {
     for (const [file, bytes] of indexes) fs.writeFileSync(containedEntry(root, file).full, bytes);
     const log = containedEntry(root, "log.md").full;
@@ -70,7 +70,7 @@ export function completeTopicPublication(root: string, relative: string, title: 
     const heading = "## " + new Date().toISOString().slice(0, 10) + "\n\n";
     const entry = "**" + action + "** [" + markdownText(title) + "](" + relative + ")\n\n";
     fs.writeFileSync(log, heading + entry + (previous.startsWith(heading) ? previous.slice(heading.length) : previous));
-  } catch { throw new CreatePartialError([relative], digest); }
+  } catch (error) { throw new CreatePartialError([relative], digest, error); }
 }
 /** Caller holds the cooperative mutation lock through validation and all publication effects. */
 export function createTopic(root: string, request: CreateRequest) {

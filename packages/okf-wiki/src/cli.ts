@@ -2,17 +2,18 @@ import * as fs from "node:fs";
 import { createHash } from "node:crypto";
 import { parseArgs } from "node:util";
 import * as path from "node:path";
-import { initVault, WikiError, ExclusiveCleanupError, type ErrorCode } from "./vault.ts";
+import { initVault, WikiError, ExclusiveCleanupError, ExclusiveTemporaryError, type ErrorCode } from "./vault.ts";
 import { addType, listTypes, loadRegistry, openVault, RegistryWriteError, safeName, sortDiagnostics } from "./registry.ts";
 import { readNote } from "./read.ts";
 import { readUpdateCandidate, updateTopic, UpdateConflictError, UpdateTemporaryError } from "./update.ts";
 import { createTopic, CreatePartialError, CreateValidationError, type CreateRequest } from "./create.ts";
 import { withMutationLock, MutationReleaseError } from "./mutation.ts";
 import { inspectVault, lintVault } from "./lint.ts";
+import { prepareTextCapture, publishTextCapture, CaptureValidationError, CapturePublicationError, type TextCaptureRequest } from "./capture.ts";
 import { indexDestinationDiagnostics, indexFreshnessDiagnostics } from "./navigation.ts";
 
 const EXIT: Record<ErrorCode, number> = { usage: 2, conflict: 3, not_found: 4, unsupported: 5, damaged: 6 };
-const USAGE = "okf-wiki (Node source CLI)\nUsage: okf-wiki init <dir> [--json]\n       okf-wiki --vault <dir> init [--json]\n       okf-wiki --vault <dir> type list [--json]\n       okf-wiki --vault <dir> type add <name> --folder <folder> [--json]\n       okf-wiki --vault <dir> lint [path] [--json]\n       okf-wiki --vault <dir> index [--check] [--json]\n       okf-wiki --vault <dir> new <type> (--project <p>|--personal) --title <t> --description <d> [--slug <s>] [--body-file <f>] [--tags <tag> ...] [--status <status>] [--json]\n       okf-wiki --vault <dir> update <canonical-path> --expect sha256:<64 lowercase hex digits> --file <complete-candidate-markdown> [--dry-run] [--json]\n       okf-wiki --vault <dir> show <path> [--section <heading>] [--json]\nWhole-vault lint checks registry, frontmatter, layout, body, lifecycle, scoped titles, links, and generated-index freshness. Selected-path lint does not check generated-index freshness.\nVault: explicit directory, --vault, or WIKI_VAULT. No default vault.\n";
+const USAGE = "okf-wiki (Node source CLI)\nUsage: okf-wiki init <dir> [--json]\n       okf-wiki --vault <dir> init [--json]\n       okf-wiki --vault <dir> type list [--json]\n       okf-wiki --vault <dir> type add <name> --folder <folder> [--json]\n       okf-wiki --vault <dir> lint [path] [--json]\n       okf-wiki --vault <dir> index [--check] [--json]\n       okf-wiki --vault <dir> new <type> (--project <p>|--personal) --title <t> --description <d> [--slug <s>] [--body-file <f>] [--tags <tag> ...] [--status <status>] [--json]\n       okf-wiki --vault <dir> capture <file> (--project <p>|--personal) --title <t> --description <d> [--slug <s>] [--json]\n       okf-wiki --vault <dir> update <canonical-path> --expect sha256:<64 lowercase hex digits> --file <complete-candidate-markdown> [--dry-run] [--json]\n       okf-wiki --vault <dir> show <path> [--section <heading>] [--json]\nWhole-vault lint checks registry, frontmatter, layout, body, lifecycle, scoped titles, links, and generated-index freshness. Selected-path lint does not check generated-index freshness.\nVault: explicit directory, --vault, or WIKI_VAULT. No default vault.\n";
 let json = process.argv.slice(2).includes("--json");
 type PublishedResult = { written: true; paths: string[] } & ({ digest: string } | { digests: Record<string, string> });
 let publishedResult: PublishedResult | undefined;
@@ -32,20 +33,27 @@ try {
     const init = command === "init";
     const create = command === "new" && arg !== undefined && extra.length === 0;
     const update = command === "update" && arg !== undefined && extra.length === 0;
+    const capture = command === "capture" && arg !== undefined && extra.length === 0;
     if (!update && [values.expect, values.file, values["dry-run"]].some(v => v !== undefined)) throw new WikiError("usage", "Update options require update <path>");
     if (update && (values.expect === undefined || !/^sha256:[0-9a-f]{64}$/.test(values.expect) || values.file === undefined)) throw new WikiError("usage", "Update requires --expect sha256:<64 lowercase hex digits> and --file <complete-candidate-markdown>");
     const candidate = update && values.file !== undefined ? readUpdateCandidate(values.file) : undefined;
     let request: CreateRequest | undefined;
-    if (!create && [values.project, values.personal, values.title, values.description, values.slug, values["body-file"], values.tags, values.status].some(v => v !== undefined)) throw new WikiError("usage", "Create options require new <type>");
-    if (create && arg !== undefined) {
-      if ((values.project !== undefined) === (values.personal === true) || values.personal === false || values.title === undefined || values.description === undefined) throw new WikiError("usage", "Create requires exactly one explicit --project or --personal scope, --title and --description");
+    let captureRequest: TextCaptureRequest | undefined;
+    if (!create && !capture && [values.project, values.personal, values.title, values.description, values.slug, values["body-file"], values.tags, values.status].some(v => v !== undefined)) throw new WikiError("usage", "Create/capture options require new <type> or capture <file>");
+    if (capture && [values["body-file"], values.tags, values.status].some(v => v !== undefined)) throw new WikiError("usage", "--body-file, --tags, and --status are only valid with new <type>");
+    if ((create || capture) && arg !== undefined) {
+      if ((values.project !== undefined) === (values.personal === true) || values.personal === false || values.title === undefined || values.description === undefined) throw new WikiError("usage", (capture ? "Capture" : "Create") + " requires exactly one explicit --project or --personal scope, --title and --description");
       if (values.project !== undefined && !safeName(values.project)) throw new WikiError("usage", "Use a safe non-reserved project name");
       let body: string | undefined;
       if (values["body-file"] !== undefined) {
         try { body = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(fs.readFileSync(values["body-file"])); }
         catch { throw new WikiError("usage", "Cannot read body file as valid UTF-8"); }
       }
-      request = { type: arg, scope: values.project === undefined ? "personal" : "projects/" + values.project, title: values.title, description: values.description, slug: values.slug, body, tags: values.tags, status: values.status };
+      const scope = values.project === undefined ? "personal" : "projects/" + values.project;
+      if (capture) {
+        const slug = values.slug ?? values.title.normalize("NFKD").replace(/\p{Mark}/gu, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+        captureRequest = { input: arg, scope, title: values.title, description: values.description, slug };
+      } else request = { type: arg, scope, title: values.title, description: values.description, slug: values.slug, body, tags: values.tags, status: values.status };
     }
     const list = command === "type" && arg === "list" && extra.length === 0;
     const add = command === "type" && arg === "add" && extra.length === 1 && values.folder !== undefined;
@@ -53,7 +61,7 @@ try {
     if (values.check !== undefined && !index) throw new WikiError("usage", "--check is only valid with index");
     const show = command === "show" && arg !== undefined && extra.length === 0;
     if (values.section !== undefined && !show) throw new WikiError("usage", "--section is only valid with show <path>");
-    if (!(update || create || show || index || init && extra.length === 0 || list || add || command === "lint" && extra.length === 0) || values.folder !== undefined && !add) throw new WikiError("usage", USAGE);
+    if (!(update || create || capture || show || index || init && extra.length === 0 || list || add || command === "lint" && extra.length === 0) || values.folder !== undefined && !add) throw new WikiError("usage", USAGE);
     if (init && values.vault !== undefined && arg !== undefined && path.resolve(values.vault) !== path.resolve(arg)) {
       throw new WikiError("usage", "Conflicting vault selections: --vault and init <dir> name different directories");
     }
@@ -64,8 +72,14 @@ try {
       output({ ok: true, vault }, "Initialized profile vault: " + vault.root + "\n");
     } else {
       const root = openVault(selected);
+      // Extraction, including the only input read, finishes before acquiring the mutation lock.
+      const preparedCapture = captureRequest ? prepareTextCapture(root, captureRequest) : undefined;
       const execute = () => {
-        if (update && arg !== undefined && values.expect !== undefined && candidate) {
+        if (preparedCapture) {
+          const result = publishTextCapture(root, preparedCapture);
+          publishedResult = { written: true, paths: result.paths, digests: result.digests };
+          output({ ok: true, ...result }, "Captured source: " + result.path + "\n" + Object.entries(result).filter(([, value]) => typeof value === "string").map(([key, value]) => key + ": " + value).join("\n") + "\n");
+        } else if (update && arg !== undefined && values.expect !== undefined && candidate) {
           const result = updateTopic(root, arg, values.expect, candidate, values["dry-run"] === true);
           if (result.outcome === "updated") publishedResult = { written: true, paths: [result.path], digest: result.digest };
           output({ ok: true, ...result }, (result.outcome === "updated" ? "Updated topic: " : result.outcome === "dry-run" ? "Dry-run topic: " : "Unchanged topic: ") + result.path + "\n" + result.digest + "\n" + JSON.stringify(result.summary) + "\n" + JSON.stringify(result.diff) + "\nNavigation: " + result.navigation + "; log: " + result.log + "\n");
@@ -110,7 +124,7 @@ try {
           } else output({ ok: true, diagnostics: [], checks: ["registry", "frontmatter", "layout", "body", "lifecycle", "scoped-titles", "links", ...(arg === undefined ? ["generated-index"] : [])] }, "Wiki lint passed (registry, frontmatter, layout, body, lifecycle, scoped titles, links; generated-index freshness " + (arg === undefined ? "checked" : "not checked for selected paths") + ")\n");
         }
       };
-      if (update && !values["dry-run"] || create || add || index && !values.check) withMutationLock(root, execute);
+      if (update && !values["dry-run"] || create || capture || add || index && !values.check) withMutationLock(root, execute);
       else execute();
     }
   }
@@ -120,8 +134,8 @@ try {
   const pending = outputBuffer.pending;
   delete outputBuffer.pending;
   const actionFailure = release?.outcome.kind === "failed" ? release.outcome.error : error;
-  const temporaryCleanup = actionFailure instanceof UpdateTemporaryError ? { path: actionFailure.temporaryPath, retained: true, message: actionFailure.message } : undefined;
-  const failure = actionFailure instanceof UpdateTemporaryError && actionFailure.primary !== undefined ? actionFailure.primary : actionFailure;
+  const temporaryCleanup = actionFailure instanceof UpdateTemporaryError || actionFailure instanceof ExclusiveTemporaryError ? { path: actionFailure.temporaryPath, retained: true, message: actionFailure.message + (actionFailure.cause instanceof Error ? ": " + actionFailure.cause.message : "") } : undefined;
+  const failure = (actionFailure instanceof UpdateTemporaryError || actionFailure instanceof ExclusiveTemporaryError) && actionFailure.primary !== undefined ? actionFailure.primary : actionFailure;
   if (release?.outcome.kind === "completed" && pending && "ok" in pending.value && pending.value.ok === false) {
     output({ ...pending.value, cleanup }, pending.human, pending.stderr + release.message + "\n");
   } else {
@@ -130,15 +144,19 @@ try {
     const code = known ? failure.code : argumentError ? "usage" : "internal";
     const message = failure instanceof Error ? failure.message : String(failure);
     process.exitCode = known ? EXIT[failure.code] : argumentError ? 2 : 1;
-    const partial = failure instanceof RegistryWriteError || failure instanceof CreatePartialError || failure instanceof ExclusiveCleanupError ? { written: failure.written, paths: failure.paths, digest: failure.digest } : publishedResult ?? {};
-    output({ ok: false, error: { code, message }, ...partial, ...(cleanup ? { cleanup } : {}), ...(release?.outcome.kind === "completed" && publishedResult ? { outcome: "completed" } : {}), ...(failure instanceof ExclusiveCleanupError ? { temporaryPath: failure.temporaryPath } : {}), ...(failure instanceof CreateValidationError ? { diagnostics: failure.diagnostics } : {}), ...(failure instanceof UpdateConflictError ? { path: failure.path, expected: failure.expected, current: failure.current } : {}), ...(temporaryCleanup ? { temporaryCleanup } : {}) }, "");
+    const partial = failure instanceof CapturePublicationError ? { retainedDirectory: failure.retainedDirectory, ...(failure.paths.length ? { written: true, paths: failure.paths, digests: failure.digests } : {}) } : failure instanceof RegistryWriteError || failure instanceof CreatePartialError || failure instanceof ExclusiveCleanupError ? { written: failure.written, paths: failure.paths, digest: failure.digest } : publishedResult ?? {};
+    output({ ok: false, error: { code, message }, ...partial, ...(cleanup ? { cleanup } : {}), ...(release?.outcome.kind === "completed" && publishedResult ? { outcome: "completed" } : {}), ...(failure instanceof ExclusiveCleanupError ? { temporaryPath: failure.temporaryPath } : {}), ...(failure instanceof CreateValidationError || failure instanceof CaptureValidationError ? { diagnostics: failure.diagnostics } : {}), ...(failure instanceof CapturePublicationError && failure.temporaryCleanup ? { temporaryCleanup: failure.temporaryCleanup } : {}), ...(failure instanceof UpdateConflictError ? { path: failure.path, expected: failure.expected, current: failure.current } : {}), ...(temporaryCleanup ? { temporaryCleanup } : {}) }, "");
     if (!json) {
       process.stderr.write(code + ": " + message + "\n");
       if (temporaryCleanup) process.stderr.write("Temporary cleanup: " + temporaryCleanup.message + "\n");
       if (cleanup) process.stderr.write("Lock cleanup: " + cleanup.message + "; retained " + cleanup.path + "\n");
       if (publishedResult) process.stderr.write("Written: " + publishedResult.paths.join(", ") + "\n" + ("digest" in publishedResult ? publishedResult.digest : JSON.stringify(publishedResult.digests)) + "\n");
       if (failure instanceof RegistryWriteError || failure instanceof CreatePartialError || failure instanceof ExclusiveCleanupError) process.stderr.write("Written: " + failure.paths.join(", ") + "\n" + failure.digest + "\n");
-      if (failure instanceof CreateValidationError) process.stderr.write(failure.diagnostics.map(d => d.path + ": " + d.rule + ": " + d.message + "; fix: " + d.fix).join("\n") + "\n");
+      if (failure instanceof CapturePublicationError) {
+        if (failure.paths.length) process.stderr.write("Written: " + failure.paths.join(", ") + "\n" + JSON.stringify(failure.digests) + "\n");
+        if (failure.temporaryCleanup) process.stderr.write("Temporary cleanup: " + failure.temporaryCleanup.message + "\n");
+      }
+      if (failure instanceof CreateValidationError || failure instanceof CaptureValidationError) process.stderr.write(failure.diagnostics.map(d => d.path + ": " + d.rule + ": " + d.message + "; fix: " + d.fix).join("\n") + "\n");
     }
   }
 }

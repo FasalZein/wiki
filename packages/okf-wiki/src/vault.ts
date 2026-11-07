@@ -21,7 +21,7 @@ export class ExclusiveCleanupError extends WikiError {
   readonly paths: string[];
   readonly digest: string;
   readonly temporaryPath: string;
-  constructor(relative: string, data: string, temporaryPath: string, cause: unknown) {
+  constructor(relative: string, data: string | Buffer, temporaryPath: string, cause: unknown) {
     super("damaged", "File published at " + relative + " but temporary-name cleanup failed at " + temporaryPath + "; inspect retained names, run index for navigation, and inspect log.md before any manual historical entry; do not retry publication");
     this.paths = [relative];
     this.digest = "sha256:" + createHash("sha256").update(data).digest("hex");
@@ -30,21 +30,37 @@ export class ExclusiveCleanupError extends WikiError {
   }
 }
 
+export class ExclusiveTemporaryError extends WikiError {
+  readonly temporaryPath: string; readonly primary: unknown;
+  constructor(temporaryPath: string, primary: unknown, cause: unknown) {
+    super("damaged", "Unpublished exclusive-file cleanup failed at " + temporaryPath + "; inspect the retained temporary file before explicit cleanup");
+    this.temporaryPath = temporaryPath; this.primary = primary; this.cause = cause;
+  }
+}
+
 // Adapted from wiki-core's exclusive complete-file publication. No donor runtime imports.
-export function createExclusive(root: string, relative: string, data: string): void {
+export function createExclusive(root: string, relative: string, data: string | Buffer): void {
   const target = containedEntry(root, relative).full;
   const temporaryPath = ".wiki/tmp/" + randomUUID();
   const tmp = containedEntry(root, temporaryPath).full;
-  fs.writeFileSync(tmp, data, { flag: "wx" });
-  let published = false;
+  const fd = fs.openSync(tmp, "wx");
+  let published = false, primary: unknown;
   try {
+    try { fs.writeFileSync(fd, data); }
+    finally { fs.closeSync(fd); }
     fs.linkSync(tmp, target);
     published = true;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "EEXIST") {
+      const conflict = new WikiError("conflict", "Existing destination: " + relative + "; " + error.message);
+      conflict.cause = error; primary = conflict;
+    } else primary = error;
+    throw primary;
   } finally {
     try { fs.rmSync(tmp, { force: true }); }
     catch (error) {
       if (published) throw new ExclusiveCleanupError(relative, data, temporaryPath, error);
-      // Keep the primary publication failure (for example EEXIST), not a later cleanup error.
+      throw new ExclusiveTemporaryError(temporaryPath, primary, error);
     }
   }
 }
