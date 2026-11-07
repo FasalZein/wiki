@@ -1,5 +1,7 @@
 // Only nondeterministic boundaries are injected. QMD indexing/results remain real.
 import fs from "node:fs";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
 import http from "node:http";
 import https from "node:https";
 import net from "node:net";
@@ -32,6 +34,15 @@ fs.readFileSync = (file, ...args) => {
 };
 fs.writeFileSync = (file, ...args) => {
   const result = write(file, ...args);
+  if (mode === "inspect-active-lock-ignore" && String(file).endsWith("/.wiki/search/writer.lock")) {
+    const root = path.resolve(process.argv[process.argv.indexOf("--vault") + 1]);
+    const checked = spawnSync("git", ["-c", "core.excludesFile=/dev/null", "check-ignore", "--no-index", ".wiki/search/writer.lock"], {
+      cwd: root, encoding: "utf8", timeout: 15000,
+      env: { ...process.env, GIT_DIR: path.join(root, ".git"), GIT_WORK_TREE: root, GIT_INDEX_FILE: path.join(root, ".git/index"), GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_COUNT: "0", GIT_CONFIG_PARAMETERS: "" },
+    });
+    if (checked.error) throw checked.error;
+    write(path.join(root, ".wiki/tmp/active-lock-ignore.json"), JSON.stringify({ exists: fs.existsSync(file), status: checked.status, stdout: checked.stdout, stderr: checked.stderr }));
+  }
   if (mode === "interrupt-staging" && !fired && String(file).includes("/.wiki/search/snapshots/")) {
     fired = true;
     if (!process.emit("SIGTERM")) throw new Error("CLI has no cooperative SIGTERM listener");

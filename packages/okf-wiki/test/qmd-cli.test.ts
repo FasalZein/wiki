@@ -163,3 +163,37 @@ test("okf:10 CLI unusable derived directory is unavailable, not an invented writ
   const result = cli(vault, ["search", "sync"]); assert.equal(result.status, 7); assert.equal(result.data.error.code, "unavailable");
   assert.equal(result.data.textCoverage.state, "unavailable"); assert.equal(cli(vault, ["show", relative]).status, 0);
 });
+
+
+test("okf:10 fresh init and real sync ignore actual derived search state without hiding authored files or rewriting existing ignores", () => {
+  const vault = fresh(), relative = note(vault);
+  const env = { ...process.env, GIT_DIR: path.join(vault, ".git"), GIT_WORK_TREE: vault, GIT_INDEX_FILE: path.join(vault, ".git/index"), GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_COUNT: "0", GIT_CONFIG_PARAMETERS: "" };
+  function git(args: string[], input?: string) {
+    const result = spawnSync("git", ["-c", "core.excludesFile=/dev/null", "-c", "init.templateDir=", ...args], { cwd: vault, env, input, encoding: "utf8", timeout: 15000 });
+    assert.equal(result.error, undefined); assert.equal(result.stderr, ""); return result;
+  }
+  assert.equal(git(["init", "--quiet"]).status, 0);
+  const result = cli(vault, ["search", "sync"], "inspect-active-lock-ignore"); assert.equal(result.status, 0, JSON.stringify(result));
+  const search = path.join(vault, ".wiki/search");
+  const snapshots = fs.readdirSync(path.join(search, "snapshots")); assert.equal(snapshots.length, 1);
+  const actual = [".wiki/search/qmd.sqlite", ".wiki/search/coverage.json", ".wiki/search/identities.json", ".wiki/search/snapshots/" + snapshots[0]];
+  for (const file of actual) assert.equal(fs.statSync(path.join(vault, file)).isFile(), true);
+  const derived = [".wiki/search/", ...actual, ".wiki/search/qmd.sqlite-wal", ".wiki/search/writer.lock"];
+  const ignored = git(["check-ignore", "--no-index", "--stdin"], derived.join("\n") + "\n");
+  assert.equal(ignored.status, 0, "Actual derived search paths must be ignored: " + ignored.stdout);
+  assert.deepEqual(ignored.stdout.trim().split("\n"), derived);
+  const active = JSON.parse(read(vault, ".wiki/tmp/active-lock-ignore.json"));
+  assert.equal(active.exists, true); assert.equal(active.status, 0); assert.equal(active.stdout.trim(), ".wiki/search/writer.lock"); assert.equal(active.stderr, "");
+  const oldControls = [".wiki/tmp/test", ".wiki/locks/mutation.lock", ".wiki/qmd.sqlite", ".wiki/qmd.sqlite-wal"];
+  assert.deepEqual(git(["check-ignore", "--no-index", "--stdin"], oldControls.join("\n") + "\n").stdout.trim().split("\n"), oldControls);
+  const authored = [relative, ".wiki/types/note.json", ".wiki/config.json", ".gitignore"];
+  const visible = git(["check-ignore", "--no-index", "--stdin"], authored.join("\n") + "\n"); assert.equal(visible.status, 1); assert.equal(visible.stdout, "");
+  assert.equal(git(["add", "--", ...authored]).status, 0);
+  assert.deepEqual(git(["ls-files"]).stdout.trim().split("\n").sort(), authored.sort());
+  // Existing authored files, including older generated rules, are never auto-migrated.
+  const existing = "# Owner-authored ignore rules\n/private/\n/.wiki/tmp/\n/.wiki/locks/\n/.wiki/qmd.sqlite\n/.wiki/qmd.sqlite-*\n";
+  fs.writeFileSync(path.join(vault, ".gitignore"), existing);
+  succeeds(vault, ["init"]); assert.equal(read(vault, ".gitignore"), existing);
+  succeeds(vault, ["search", "sync"]); assert.equal(read(vault, ".gitignore"), existing);
+  const notMigrated = git(["check-ignore", "--no-index", ".wiki/search/qmd.sqlite"]); assert.equal(notMigrated.status, 1); assert.equal(notMigrated.stdout, "");
+});

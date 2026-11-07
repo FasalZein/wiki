@@ -607,6 +607,13 @@ receipt. SIGINT/SIGTERM cooperatively abort at adapter boundaries and run cleanu
 before output. Structured cleanup diagnostics and retained-lock recovery guidance
 are preserved. Never remove an index lock until confirming no index writer is active.
 
+Fresh init ignores the entire derived .wiki/search/ directory, including database
+sidecars, snapshots, coverage, identities, and the writer marker. Older database
+location rules remain protected. Existing .gitignore files are never overwritten
+or auto-migrated by repeat init or search sync. For an existing profile with older
+rules, review its authored .gitignore and manually add /.wiki/search/ before staging
+vault changes. Repeat init does not certify or repair those authored rules.
+
 QMD writes only vault-local rebuildable .wiki/search/ state. The separate
 writer.lock never takes the content mutation lock. Ordinary init/show do not
 load QMD or depend on an available search/native dependency, and work while the
