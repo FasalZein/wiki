@@ -11,7 +11,7 @@ WIKI_VAULT=/explicit/disposable/vault node packages/okf-wiki/bin/okf-wiki.js ini
 ```
 
 Implemented commands are `init`, `type list`, `type add`, `index`, `index --check`,
-`new`, `capture` (local UTF-8 documents and PDFs), `update` (including no-effect dry-run), `show` (including section selection), and `lint` (including relative links and whole-vault generated-index freshness). The init directory argument is an explicit vault selection. `--vault` takes precedence over `WIKI_VAULT`; an init directory also
+`new`, `capture` (local UTF-8 documents, PDFs, and explicit HTTP/HTTPS resources), `update` (including no-effect dry-run), `show` (including section selection), and `lint` (including relative links and whole-vault generated-index freshness). The init directory argument is an explicit vault selection. `--vault` takes precedence over `WIKI_VAULT`; an init directory also
 takes precedence over the environment. Conflicting flag and positional
 directories fail with exit 2. There is no default vault. Relative vault locations
 resolve from the current working directory. Parent filesystem aliases resolve
@@ -33,7 +33,7 @@ Registry files are editable data, not a fixed type universe. Each record has
 allows all supported scopes. Templates do not execute or interpolate code.
 The source schema includes retained-asset metadata for later capture commands.
 Registry validation, exclusive scaffolding, and topic creation are implemented.
-Local document capture is implemented below; web capture and search belong to later slices.
+Local document and web capture are implemented below; search belongs to later slices.
 
 Init publishes complete files exclusively, with the configuration last as the
 completion marker. A compatible repeat checks the managed layout and leaves
@@ -382,9 +382,9 @@ The registered source type controls the folder, scope restrictions, frontmatter
 schema, and authored headings. A missing or invalid registration must be repaired
 explicitly before capture. Unrelated invalid topics also block publication.
 
-This command currently supports local .txt, .text, .md, and .markdown files,
-case-insensitively, plus .pdf through the external pdftotext program. HTTP/HTTPS
-capture is not implemented yet. For text documents it opens
+This command supports local .txt, .text, .md, and .markdown files,
+case-insensitively, plus .pdf through the external pdftotext program and explicit
+HTTP/HTTPS resources as described below. For local text documents it opens
 input read-only and nonblocking where supported, validates the opened descriptor
 as a regular file, reads it once, and decodes strict UTF-8. An unwritten POSIX FIFO
 is refused without waiting for a writer. Input symlinks may select a regular
@@ -416,7 +416,7 @@ from same-filesystem temporary files, then generates navigation and one captured
 log entry. Normal completion passes whole-vault lint and index --check.
 
 Success JSON includes path, title, description, the full source-note digest,
-resource (the selected absolute file URL), retrieved, original, original_sha256,
+resource (the selected absolute file URL or requested web URL), retrieved, original, original_sha256,
 extracted, extracted_sha256, extractor, extractor_version, and media_type. The
 UTF-8 extractor is okf-wiki:utf8 version 1. It also returns written: true, paths,
 per-path digests, and an assets list with canonical paths/digests, never file
@@ -488,5 +488,83 @@ For a bounded affected run equivalent to the okf:15 wrapper selection:
 
 ~~~sh
 heavy --slots 2 -- node --test --test-concurrency=1 --test-name-pattern "okf:15" packages/okf-wiki/test/capture-pdf.test.ts
+heavy -- bun run typecheck:okf
+~~~
+
+## Explicit web capture (#30)
+
+~~~sh
+node packages/okf-wiki/bin/okf-wiki.js --vault /explicit/disposable/vault capture 'http://127.0.0.1:8080/selected-resource' --personal --title "Selected resource" --description "An external observation" --json
+~~~
+
+Select exactly one HTTP/HTTPS resource. Supported response media types are
+text/plain, text/html, application/xhtml+xml, and application/pdf. The command
+fetches only that resource and its HTTP/HTTPS redirects. It never crawls links,
+fetches images, stylesheets, scripts, or iframes, executes page scripts, discovers
+credentials, or adds session cookies or ambient authorization headers. URL
+credentials and non-HTTP(S) URLs or redirect destinations are refused. Redirects
+use the Fetch Standard limit of 20, not a retry loop. No authentication/session
+feature, hosted inference, model summary, installer, or fallback parser is added.
+
+The original asset retains the exact response-body Buffer supplied by Node Fetch;
+HTTP transfer/content coding is handled by Fetch, not retained as wire framing.
+The extracted asset retains the complete UTF-8 extraction, with its own digest.
+Original extensions are .txt, .html, .xhtml, or .pdf according to response media
+type, not the URL suffix. Metadata records resource (the normalized requested
+URL), final_resource when redirected to a different URL, retrieval time at the
+final response headers, media_type, both digests, and actual extractor/version.
+Reads use only these retained files, even after the server is unavailable.
+PDF responses feed that same captured Buffer to the existing pdftotext extractor;
+there is no second request or reopening of the URL as a file.
+
+Plain text uses strict TextDecoder decoding and records text-decoder with the
+running Node version. For text and HTML, a BOM takes precedence over the transport
+charset. HTML then uses a supported transport charset, otherwise a meta charset
+whose entire declaration ends within the first 1024 bytes, otherwise UTF-8.
+Commented declarations do not count. Unsupported HTML transport labels fall back
+to meta/UTF-8; unsupported meta labels and unsupported plain-text transport labels
+fail. Invalid encoded bytes fail rather than inserting replacement characters.
+This preserves the existing extractor's charset rules, not a browser DOM or XML
+encoding implementation. Plain-text BOM decoding follows TextDecoder behavior;
+local UTF-8 document capture keeps its existing byte-preserving BOM behavior.
+
+HTML/XHTML extraction runs exactly
+`pandoc -f html-smart -t json --sandbox`, with decoded UTF-8 HTML on stdin.
+Pandoc must already be on PATH, and its real --version is recorded. The JSON AST
+renderer preserves supported title, paragraph, heading, inline, code, list,
+quote, table caption/cell, nested table, and figure text. It does not preserve
+visual layout, styling, link targets, table geometry, or non-title metadata.
+Every HTML source records the static-text/script/subresource/layout/metadata
+limitation. Known RawBlock/RawInline regions add explicit limitations metadata;
+they are never executed. Unknown node types or malformed text-bearing structures
+fail instead of silently dropping regions or inventing content. There is no
+browser rendering, JavaScript execution, OCR, or linked-resource extraction.
+
+HTTP/network/body failures return unavailable (exit 7). Missing/unstartable tools
+or unusable version responses also return exit 7. Unsupported media, URL schemes,
+charsets, undecodable text, failed extraction, invalid JSON, and unknown/malformed
+AST text forms return unsupported (exit 5). All preparation failures occur before
+the mutation lock, asset/source publication, or a success log entry. Successful
+preparation uses the same planned-assets, current-registry validation, exclusive
+publisher, and truthful partial-publication contract documented above.
+
+SIGINT/SIGTERM abort in-flight request/body reads and send SIGTERM to a direct
+extractor/version child. Final output waits for direct-child and stdio closure.
+The cooperative-child and synchronous-publication limits from PDF capture apply:
+no forced escalation, descendant supervisor, automatic cleanup/rollback, or new
+application timeout. Node/runtime protocol limits still apply. There is no
+automatic resource-size limit. Response bodies, decoded text, tool output,
+rendered source, and parsing structures remain in memory; callers must select
+resources appropriate for available memory.
+
+Real CLI/local HTTP cases are test/capture-web.test.ts; focused malformed/unknown
+AST checks are test/html.test.ts, all named okf:16. Normal extraction uses real
+Pandoc and pdftotext on synthetic content. Failure and signal interleavings use
+faithful disposable process doubles; cancellation is coordinated at observed
+request/body/tool events, not polling delays. The bounded command below selects
+all named web cases without the directory-wide wrapper's default fanout:
+
+~~~sh
+heavy --slots 2 -- node --test --test-concurrency=1 --test-name-pattern "okf:16" packages/okf-wiki/test/capture-web.test.ts packages/okf-wiki/test/html.test.ts
 heavy -- bun run typecheck:okf
 ~~~

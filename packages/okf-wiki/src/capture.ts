@@ -2,7 +2,9 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
-import { extractPdf, assertCaptureActive } from "./pdf.ts";
+import { extractPdf } from "./pdf.ts";
+import { assertCaptureActive } from "./extract-process.ts";
+import { fetchResource, extractWeb } from "./web.ts";
 import { loadRegistry, openVault, safeName, schemaDiagnostics, type Diagnostic } from "./registry.ts";
 import { containedEntry, createExclusive, ExclusiveCleanupError, ExclusiveTemporaryError, WikiError } from "./vault.ts";
 import { inspectVault } from "./lint.ts";
@@ -31,7 +33,7 @@ const digest = (bytes: Buffer | string) => "sha256:" + createHash("sha256").upda
 /** Read-only preparation. The publisher must recheck under the mutation lock before effects.
  * No implicit size limit: the selected document and rendered source are held in memory.
  */
-function readCapture(vault: string, request: TextCaptureRequest, pdf = false) {
+function planCapture(vault: string, request: TextCaptureRequest) {
   const root = openVault(vault);
   const registry = loadRegistry(root);
   if (registry.diagnostics.length) throw new CaptureValidationError(registry.diagnostics);
@@ -43,6 +45,16 @@ function readCapture(vault: string, request: TextCaptureRequest, pdf = false) {
   const relative = request.scope + "/" + source.record.folder + "/" + request.slug + ".md";
   const assetDirectory = request.scope + "/assets/" + request.slug;
   for (const destination of [relative, assetDirectory]) if (containedEntry(root, destination).stat) throw new WikiError("conflict", "Existing capture destination: " + destination);
+  return { request, source, relative, assetDirectory };
+}
+
+interface CapturedResource {
+  original: Buffer; resource: string; finalResource?: string; retrieved: string;
+  mediaType: string; extension: string;
+}
+
+function readCapture(vault: string, request: TextCaptureRequest, pdf = false): ReturnType<typeof planCapture> & CapturedResource {
+  const planned = planCapture(vault, request);
   const extension = path.extname(request.input).toLowerCase();
   if (!(pdf ? [".pdf"] : [".txt", ".text", ".md", ".markdown"]).includes(extension)) throw new WikiError("unsupported", "Unsupported text capture extension: " + (extension || "<none>") + "; use .txt, .text, .md, or .markdown");
   const input = path.resolve(request.input);
@@ -53,7 +65,9 @@ function readCapture(vault: string, request: TextCaptureRequest, pdf = false) {
     if (!fs.fstatSync(fd).isFile()) throw new WikiError("unsupported", (pdf ? "PDF" : "Text") + " capture input must be a regular file");
     original = fs.readFileSync(fd);
   } finally { fs.closeSync(fd); }
-  return { request, source, relative, assetDirectory, extension, input, original, retrieved: new Date().toISOString() };
+  return { ...planned, extension, original, retrieved: new Date().toISOString(),
+    resource: pathToFileURL(input).href,
+    mediaType: extension === ".pdf" ? "application/pdf" : extension === ".md" || extension === ".markdown" ? "text/markdown" : "text/plain" };
 }
 
 export function prepareTextCapture(vault: string, request: TextCaptureRequest): TextCaptureCandidate {
@@ -64,9 +78,16 @@ export function prepareTextCapture(vault: string, request: TextCaptureRequest): 
   return renderCapture(captured, { text, bytes: Buffer.from(text, "utf8"), extractor: "okf-wiki:utf8", version: "1" });
 }
 
-/** Same captured buffer feeds both retention and extraction; never reopen the input pathname. */
+/** The same captured buffer feeds retention and extraction; never reopen or refetch. */
 export async function prepareCapture(vault: string, request: TextCaptureRequest, signal: AbortSignal): Promise<TextCaptureCandidate> {
   assertCaptureActive(signal);
+  if (/^[a-z][a-z0-9+.-]*:/i.test(request.input)) {
+    const planned = planCapture(vault, request);
+    const fetched = await fetchResource(request.input, signal);
+    const extracted = await extractWeb(fetched.original, fetched.mediaType, fetched.charset, signal);
+    assertCaptureActive(signal);
+    return renderCapture({ ...planned, ...fetched }, extracted);
+  }
   if (path.extname(request.input).toLowerCase() !== ".pdf") return prepareTextCapture(vault, request);
   const captured = readCapture(vault, request, true);
   const extracted = await extractPdf(captured.original, signal);
@@ -74,19 +95,19 @@ export async function prepareCapture(vault: string, request: TextCaptureRequest,
   return renderCapture(captured, { ...extracted, extractor: "pdftotext" });
 }
 
-function renderCapture(captured: ReturnType<typeof readCapture>, extraction: { text: string; bytes: Buffer; extractor: string; version: string }): TextCaptureCandidate {
-  const { request, source, relative, assetDirectory, extension, input, original, retrieved } = captured;
+function renderCapture(captured: ReturnType<typeof readCapture>, extraction: { text: string; bytes: Buffer; extractor: string; version: string; limitations?: string[] }): TextCaptureCandidate {
+  const { request, source, relative, assetDirectory, extension, resource, finalResource, mediaType, original, retrieved } = captured;
   const { text, bytes: extracted } = extraction;
   const assets: TextCaptureCandidate["assets"] = [
     { path: assetDirectory + "/original" + extension, bytes: original, digest: digest(original) },
     { path: assetDirectory + "/extracted.txt", bytes: extracted, digest: digest(extracted) },
   ];
   const data = { type: "source", title: request.title, description: request.description, created: retrieved,
-    resource: pathToFileURL(input).href, retrieved,
+    resource, retrieved, ...(finalResource === undefined ? {} : { final_resource: finalResource }),
     original: assets[0].path, original_sha256: assets[0].digest,
     extracted: assets[1].path, extracted_sha256: assets[1].digest,
-    ...(extension === ".pdf" && text.trim() === "" ? { limitations: ["PDF has no extracted text layer; no OCR performed"] } : {}),
-    extractor: extraction.extractor, extractor_version: extraction.version, media_type: extension === ".pdf" ? "application/pdf" : extension === ".md" || extension === ".markdown" ? "text/markdown" : "text/plain" };
+    ...(extraction.limitations?.length ? { limitations: extraction.limitations } : extension === ".pdf" && text.trim() === "" ? { limitations: ["PDF has no extracted text layer; no OCR performed"] } : {}),
+    extractor: extraction.extractor, extractor_version: extraction.version, media_type: mediaType };
   if (!source.validate(data)) throw new CaptureValidationError(schemaDiagnostics(relative, source.validate.errors));
   // Longer than every run, including indented/trailing-space closing attempts.
   let longestRun = 2;
