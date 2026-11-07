@@ -103,7 +103,7 @@ test("okf:14 CLI uses custom registered source folder/scope and explicit slug", 
 
 for (const [label, bytes, extension, status] of [
   ["invalid UTF-8", Buffer.from([0xff]), ".txt", 5],
-  ["unsupported extension", Buffer.from("text"), ".pdf", 5],
+  ["unsupported extension", Buffer.from("text"), ".rtf", 5],
 ] as const) test("okf:14 CLI extraction refuses " + label + " before even a held mutation lock", () => {
   const { root, input } = fresh(bytes, extension);
   fs.writeFileSync(path.join(root, ".wiki/locks/mutation.lock"), "Held by fixture operator");

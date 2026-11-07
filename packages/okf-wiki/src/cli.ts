@@ -9,10 +9,10 @@ import { readUpdateCandidate, updateTopic, UpdateConflictError, UpdateTemporaryE
 import { createTopic, CreatePartialError, CreateValidationError, type CreateRequest } from "./create.ts";
 import { withMutationLock, MutationReleaseError } from "./mutation.ts";
 import { inspectVault, lintVault } from "./lint.ts";
-import { prepareTextCapture, publishTextCapture, CaptureValidationError, CapturePublicationError, type TextCaptureRequest } from "./capture.ts";
+import { prepareCapture, publishTextCapture, CaptureValidationError, CapturePublicationError, type TextCaptureRequest, type TextCaptureCandidate } from "./capture.ts";
 import { indexDestinationDiagnostics, indexFreshnessDiagnostics } from "./navigation.ts";
 
-const EXIT: Record<ErrorCode, number> = { usage: 2, conflict: 3, not_found: 4, unsupported: 5, damaged: 6 };
+const EXIT: Record<ErrorCode, number> = { usage: 2, conflict: 3, not_found: 4, unsupported: 5, damaged: 6, unavailable: 7 };
 const USAGE = "okf-wiki (Node source CLI)\nUsage: okf-wiki init <dir> [--json]\n       okf-wiki --vault <dir> init [--json]\n       okf-wiki --vault <dir> type list [--json]\n       okf-wiki --vault <dir> type add <name> --folder <folder> [--json]\n       okf-wiki --vault <dir> lint [path] [--json]\n       okf-wiki --vault <dir> index [--check] [--json]\n       okf-wiki --vault <dir> new <type> (--project <p>|--personal) --title <t> --description <d> [--slug <s>] [--body-file <f>] [--tags <tag> ...] [--status <status>] [--json]\n       okf-wiki --vault <dir> capture <file> (--project <p>|--personal) --title <t> --description <d> [--slug <s>] [--json]\n       okf-wiki --vault <dir> update <canonical-path> --expect sha256:<64 lowercase hex digits> --file <complete-candidate-markdown> [--dry-run] [--json]\n       okf-wiki --vault <dir> show <path> [--section <heading>] [--json]\nWhole-vault lint checks registry, frontmatter, layout, body, lifecycle, scoped titles, links, and generated-index freshness. Selected-path lint does not check generated-index freshness.\nVault: explicit directory, --vault, or WIKI_VAULT. No default vault.\n";
 let json = process.argv.slice(2).includes("--json");
 type PublishedResult = { written: true; paths: string[] } & ({ digest: string } | { digests: Record<string, string> });
@@ -73,12 +73,19 @@ try {
     } else {
       const root = openVault(selected);
       // Extraction, including the only input read, finishes before acquiring the mutation lock.
-      const preparedCapture = captureRequest ? prepareTextCapture(root, captureRequest) : undefined;
+      let preparedCapture: TextCaptureCandidate | undefined;
+      if (captureRequest) {
+        const controller = new AbortController();
+        const abort = () => controller.abort();
+        process.on("SIGINT", abort); process.on("SIGTERM", abort);
+        try { preparedCapture = await prepareCapture(root, captureRequest, controller.signal); }
+        finally { process.removeListener("SIGINT", abort); process.removeListener("SIGTERM", abort); }
+      }
       const execute = () => {
         if (preparedCapture) {
           const result = publishTextCapture(root, preparedCapture);
           publishedResult = { written: true, paths: result.paths, digests: result.digests };
-          output({ ok: true, ...result }, "Captured source: " + result.path + "\n" + Object.entries(result).filter(([, value]) => typeof value === "string").map(([key, value]) => key + ": " + value).join("\n") + "\n");
+          output({ ok: true, ...result }, "Captured source: " + result.path + "\n" + Object.entries(result).filter(([key, value]) => typeof value === "string" || key === "limitations").map(([key, value]) => key + ": " + (Array.isArray(value) ? value.join("; ") : value)).join("\n") + "\n");
         } else if (update && arg !== undefined && values.expect !== undefined && candidate) {
           const result = updateTopic(root, arg, values.expect, candidate, values["dry-run"] === true);
           if (result.outcome === "updated") publishedResult = { written: true, paths: [result.path], digest: result.digest };

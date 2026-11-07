@@ -11,7 +11,7 @@ WIKI_VAULT=/explicit/disposable/vault node packages/okf-wiki/bin/okf-wiki.js ini
 ```
 
 Implemented commands are `init`, `type list`, `type add`, `index`, `index --check`,
-`new`, `update` (including no-effect dry-run), `show` (including section selection), and `lint` (including relative links and whole-vault generated-index freshness). The init directory argument is an explicit vault selection. `--vault` takes precedence over `WIKI_VAULT`; an init directory also
+`new`, `capture` (local UTF-8 documents and PDFs), `update` (including no-effect dry-run), `show` (including section selection), and `lint` (including relative links and whole-vault generated-index freshness). The init directory argument is an explicit vault selection. `--vault` takes precedence over `WIKI_VAULT`; an init directory also
 takes precedence over the environment. Conflicting flag and positional
 directories fail with exit 2. There is no default vault. Relative vault locations
 resolve from the current working directory. Parent filesystem aliases resolve
@@ -33,7 +33,7 @@ Registry files are editable data, not a fixed type universe. Each record has
 allows all supported scopes. Templates do not execute or interpolate code.
 The source schema includes retained-asset metadata for later capture commands.
 Registry validation, exclusive scaffolding, and topic creation are implemented.
-Source capture and search belong to later slices.
+Local document capture is implemented below; web capture and search belong to later slices.
 
 Init publishes complete files exclusively, with the configuration last as the
 completion marker. A compatible repeat checks the managed layout and leaves
@@ -383,7 +383,8 @@ schema, and authored headings. A missing or invalid registration must be repaire
 explicitly before capture. Unrelated invalid topics also block publication.
 
 This command currently supports local .txt, .text, .md, and .markdown files,
-case-insensitively. PDF and HTTP/HTTPS capture are not implemented yet. It opens
+case-insensitively, plus .pdf through the external pdftotext program. HTTP/HTTPS
+capture is not implemented yet. For text documents it opens
 input read-only and nonblocking where supported, validates the opened descriptor
 as a regular file, reads it once, and decodes strict UTF-8. An unwritten POSIX FIFO
 is refused without waiting for a writer. Input symlinks may select a regular
@@ -393,8 +394,10 @@ log entry. Invalid requests/schema exit 2, and existing destinations or busy
 cooperating writers exit 3. The source input is not modified.
 
 Original and full extracted UTF-8 bytes are retained separately under
-<scope>/assets/<slug>/original.<extension> and extracted.txt. Both preserve BOM,
+<scope>/assets/<slug>/original.<extension> and extracted.txt. Text documents preserve BOM,
 Unicode, original newline forms, and a missing final newline without normalization.
+PDF originals retain exact binary bytes; extracted assets retain complete UTF-8
+pdftotext output, without trimming or an added rendering newline.
 The source note uses the registered folder, initially references. Its full
 extracted text is fenced with a delimiter that no input run can close; captured
 headings, links, metadata, and instructions remain untrusted literal content.
@@ -437,5 +440,53 @@ to repair navigation when a source note exists, and inspect log.md before manual
 adding any missing historical entry. Never invent a log timestamp or retry a
 partially published capture automatically.
 
-Real-process capture proof lives in test/capture-cli.test.ts (okf:14); preparation,
+Real-process text capture proof lives in test/capture-cli.test.ts (okf:14); preparation,
 FIFO, byte-fidelity, and planned-asset checks live in test/capture-text.test.ts.
+
+## PDF capture (#29)
+
+~~~sh
+node packages/okf-wiki/bin/okf-wiki.js --vault /explicit/disposable/vault capture /explicit/document.pdf --personal --title "Selected PDF" --description "An external observation" --json
+~~~
+
+PDF capture uses the same scope, registry, literal rendering, asset validation,
+exclusive publication, and partial-result contracts as text capture. It reads a
+regular input file once before extraction. Both retention and pdftotext receive
+that captured buffer, not a reopened mutable pathname. The invocation is exactly
+`pdftotext -enc UTF-8 -eol unix -nopgbrk - -`, with PDF bytes on stdin and extracted
+bytes on stdout. Metadata records `media_type: application/pdf`, the actual
+version reported by `pdftotext -v`, retrieval time, and independent asset digests.
+A retained source and its assets remain usable after the selected input is removed.
+
+The program must already be on PATH. Missing or unstartable pdftotext, or an
+unusable version response, returns exit 7 (`unavailable`) with an actionable
+error. Capture never installs a program or uses another parser or OCR fallback.
+A corrupt PDF, nonzero extractor exit, or invalid UTF-8 output returns exit 5
+(`unsupported`), without invented content or retained publication. An empty or
+whitespace-only extracted layer retains its exact output and original PDF and
+adds `limitations: ["PDF has no extracted text layer; no OCR performed"]` to the
+source metadata and command result. Human output also prints this limitation.
+No successful PDF capture implies OCR or confirms the truth of extracted content.
+
+SIGINT and SIGTERM during preparation abort the version probe or extractor by
+sending SIGTERM to the direct child. The command waits for child/stdio close
+before returning exit 7 with a cancellation error, without taking the mutation
+lock, publishing assets/a source note, or appending a success log. The extractor
+is not detached. There is no timeout, retry, forced-kill escalation, process-tree
+supervisor, or automatic resource-size limit. A replacement program that ignores
+SIGTERM or leaves descendants holding stdio can keep cleanup waiting; use the
+real cooperative pdftotext executable. Synchronous input reads and rendering do
+not process signals until Node resumes its event loop. Signals during later
+synchronous publication are not a rollback mechanism; inspect any retained files
+using the partial-publication guidance above. Input, output, and rendered source
+remain in memory, so callers must select resources appropriate for available memory.
+
+Synthetic fixtures and real CLI/extractor checks live in test/capture-pdf.test.ts
+(okf:15). Expected text comes from authored PDF content, not recorded tool output.
+Tool failures and in-flight process boundaries use disposable program doubles.
+For a bounded affected run equivalent to the okf:15 wrapper selection:
+
+~~~sh
+heavy --slots 2 -- node --test --test-concurrency=1 --test-name-pattern "okf:15" packages/okf-wiki/test/capture-pdf.test.ts
+heavy -- bun run typecheck:okf
+~~~
