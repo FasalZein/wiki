@@ -9,11 +9,12 @@ import { readUpdateCandidate, updateTopic, UpdateConflictError, UpdateTemporaryE
 import { createTopic, CreatePartialError, CreateValidationError, type CreateRequest } from "./create.ts";
 import { withMutationLock, MutationReleaseError } from "./mutation.ts";
 import { inspectVault, lintVault } from "./lint.ts";
+import { syncQmdText, type QmdInventory } from "./qmd.ts";
 import { prepareCapture, publishTextCapture, CaptureValidationError, CapturePublicationError, type TextCaptureRequest, type TextCaptureCandidate } from "./capture.ts";
 import { indexDestinationDiagnostics, indexFreshnessDiagnostics } from "./navigation.ts";
 
 const EXIT: Record<ErrorCode, number> = { usage: 2, conflict: 3, not_found: 4, unsupported: 5, damaged: 6, unavailable: 7 };
-const USAGE = "okf-wiki (Node source CLI)\nUsage: okf-wiki init <dir> [--json]\n       okf-wiki --vault <dir> init [--json]\n       okf-wiki --vault <dir> type list [--json]\n       okf-wiki --vault <dir> type add <name> --folder <folder> [--json]\n       okf-wiki --vault <dir> lint [path] [--json]\n       okf-wiki --vault <dir> index [--check] [--json]\n       okf-wiki --vault <dir> new <type> (--project <p>|--personal) --title <t> --description <d> [--slug <s>] [--body-file <f>] [--tags <tag> ...] [--status <status>] [--json]\n       okf-wiki --vault <dir> capture <file-or-url> (--project <p>|--personal) --title <t> --description <d> [--slug <s>] [--json]\n       okf-wiki --vault <dir> update <canonical-path> --expect sha256:<64 lowercase hex digits> --file <complete-candidate-markdown> [--dry-run] [--json]\n       okf-wiki --vault <dir> show <path> [--section <heading>] [--json]\nWhole-vault lint checks registry, frontmatter, layout, body, lifecycle, scoped titles, links, and generated-index freshness. Selected-path lint does not check generated-index freshness.\nVault: explicit directory, --vault, or WIKI_VAULT. No default vault.\n";
+const USAGE = "okf-wiki (Node source CLI)\nUsage: okf-wiki init <dir> [--json]\n       okf-wiki --vault <dir> init [--json]\n       okf-wiki --vault <dir> type list [--json]\n       okf-wiki --vault <dir> type add <name> --folder <folder> [--json]\n       okf-wiki --vault <dir> lint [path] [--json]\n       okf-wiki --vault <dir> index [--check] [--json]\n       okf-wiki --vault <dir> new <type> (--project <p>|--personal) --title <t> --description <d> [--slug <s>] [--body-file <f>] [--tags <tag> ...] [--status <status>] [--json]\n       okf-wiki --vault <dir> capture <file-or-url> (--project <p>|--personal) --title <t> --description <d> [--slug <s>] [--json]\n       okf-wiki --vault <dir> update <canonical-path> --expect sha256:<64 lowercase hex digits> --file <complete-candidate-markdown> [--dry-run] [--json]\n       okf-wiki --vault <dir> search sync [--json]\n       okf-wiki --vault <dir> show <path> [--section <heading>] [--json]\nWhole-vault lint checks registry, frontmatter, layout, body, lifecycle, scoped titles, links, and generated-index freshness. Selected-path lint does not check generated-index freshness.\nVault: explicit directory, --vault, or WIKI_VAULT. No default vault.\n";
 let json = process.argv.slice(2).includes("--json");
 type PublishedResult = { written: true; paths: string[] } & ({ digest: string } | { digests: Record<string, string> });
 let publishedResult: PublishedResult | undefined;
@@ -58,10 +59,11 @@ try {
     const list = command === "type" && arg === "list" && extra.length === 0;
     const add = command === "type" && arg === "add" && extra.length === 1 && values.folder !== undefined;
     const index = command === "index" && arg === undefined && extra.length === 0;
+    const sync = command === "search" && arg === "sync" && extra.length === 0;
     if (values.check !== undefined && !index) throw new WikiError("usage", "--check is only valid with index");
     const show = command === "show" && arg !== undefined && extra.length === 0;
     if (values.section !== undefined && !show) throw new WikiError("usage", "--section is only valid with show <path>");
-    if (!(update || create || capture || show || index || init && extra.length === 0 || list || add || command === "lint" && extra.length === 0) || values.folder !== undefined && !add) throw new WikiError("usage", USAGE);
+    if (!(sync || update || create || capture || show || index || init && extra.length === 0 || list || add || command === "lint" && extra.length === 0) || values.folder !== undefined && !add) throw new WikiError("usage", USAGE);
     if (init && values.vault !== undefined && arg !== undefined && path.resolve(values.vault) !== path.resolve(arg)) {
       throw new WikiError("usage", "Conflicting vault selections: --vault and init <dir> name different directories");
     }
@@ -72,67 +74,93 @@ try {
       output({ ok: true, vault }, "Initialized profile vault: " + vault.root + "\n");
     } else {
       const root = openVault(selected);
-      // Extraction, including the only input read, finishes before acquiring the mutation lock.
-      let preparedCapture: TextCaptureCandidate | undefined;
-      if (captureRequest) {
+      if (sync) {
         const controller = new AbortController();
-        const abort = () => controller.abort();
+        const abort = () => controller.abort(new Error("Search synchronization interrupted"));
         process.on("SIGINT", abort); process.on("SIGTERM", abort);
-        try { preparedCapture = await prepareCapture(root, captureRequest, controller.signal); }
-        finally { process.removeListener("SIGINT", abort); process.removeListener("SIGTERM", abort); }
-      }
-      const execute = () => {
-        if (preparedCapture) {
-          const result = publishTextCapture(root, preparedCapture);
-          publishedResult = { written: true, paths: result.paths, digests: result.digests };
-          output({ ok: true, ...result }, "Captured source: " + result.path + "\n" + Object.entries(result).filter(([key, value]) => typeof value === "string" || key === "limitations").map(([key, value]) => key + ": " + (Array.isArray(value) ? value.join("; ") : value)).join("\n") + "\n");
-        } else if (update && arg !== undefined && values.expect !== undefined && candidate) {
-          const result = updateTopic(root, arg, values.expect, candidate, values["dry-run"] === true);
-          if (result.outcome === "updated") publishedResult = { written: true, paths: [result.path], digest: result.digest };
-          output({ ok: true, ...result }, (result.outcome === "updated" ? "Updated topic: " : result.outcome === "dry-run" ? "Dry-run topic: " : "Unchanged topic: ") + result.path + "\n" + result.digest + "\n" + JSON.stringify(result.summary) + "\n" + JSON.stringify(result.diff) + "\nNavigation: " + result.navigation + "; log: " + result.log + "\n");
-        } else if (request) {
-          const result = createTopic(root, request);
-          publishedResult = { written: true, paths: [result.path], digest: result.digest };
-          output({ ok: true, ...result }, "Created topic: " + result.path + "\nTitle: " + result.title + "\nDescription: " + result.description + "\n" + result.digest + "\n");
-        } else if (show && arg !== undefined) {
-          const note = readNote(root, arg, values.section);
-          output({ ok: true, ...note }, note.markdown);
-        } else if (add && extra[0] !== undefined && values.folder !== undefined) {
-          const added = addType(root, extra[0], values.folder);
-          publishedResult = { written: true, paths: [added.path], digest: added.digest };
-          output({ ok: true, path: added.path }, "Created registry scaffold: " + added.path + "; review and run whole-vault lint before commit\n");
-        } else {
-          const registry = list ? loadRegistry(root) : undefined;
-          const inventory = index ? inspectVault(root) : undefined;
-          const diagnostics = registry ? registry.diagnostics : inventory ? inventory.diagnostics : lintVault(root, arg);
-          if (inventory && !diagnostics.length) {
-            diagnostics.push(...(values.check ? indexFreshnessDiagnostics(root, inventory.indexes) : indexDestinationDiagnostics(root, inventory.indexes.keys())));
-            sortDiagnostics(diagnostics);
+        try {
+          let captured: QmdInventory;
+          try {
+            const inventory = inspectVault(root);
+            captured = { concepts: inventory.concepts, diagnostics: inventory.diagnostics };
+          } catch (error) {
+            // An incomplete scan cannot reuse an earlier successful receipt.
+            captured = { concepts: [], diagnostics: [{ path: "", message: error instanceof Error ? error.message : String(error) }] };
           }
-          if (diagnostics.length) {
-            process.exitCode = 1;
-            const error = { code: "lint", message: "Wiki validation failed" };
-            output({ ok: false, error, diagnostics }, "", diagnostics.map(d => d.path + ": " + d.rule + ": " + d.message + "; fix: " + d.fix).join("\n") + "\n");
-          } else if (inventory) {
-            if (!values.check) {
-              const paths: string[] = [], digests: Record<string, string> = {};
-              for (const [relative, bytes] of inventory.indexes) {
-                fs.writeFileSync(path.join(root, relative), bytes);
-                paths.push(relative);
-                digests[relative] = "sha256:" + createHash("sha256").update(bytes).digest("hex");
-                publishedResult = { written: true, paths, digests };
-              }
-            }
-            const paths = [...inventory.indexes.keys()].sort();
-            output({ ok: true, paths, checks: ["registry", "frontmatter", "layout", "body", "lifecycle", "scoped-titles", "links", "generated-index"] }, values.check ? "Generated indexes are current\n" : "Generated navigation: " + paths.join(", ") + "\n");
-          } else if (registry) {
-            const types = listTypes(registry.types);
-            output({ ok: true, types }, types.map(t => t.name + " folder=" + t.folder + " required=" + t.requiredFields.join(",") + " headings=" + t.requiredHeadings.map(h => h.level + ":" + h.text).join(",") + " scopes=" + (t.scopes?.join(",") ?? "all")).join("\n") + "\n");
-          } else output({ ok: true, diagnostics: [], checks: ["registry", "frontmatter", "layout", "body", "lifecycle", "scoped-titles", "links", ...(arg === undefined ? ["generated-index"] : [])] }, "Wiki lint passed (registry, frontmatter, layout, body, lifecycle, scoped titles, links; generated-index freshness " + (arg === undefined ? "checked" : "not checked for selected paths") + ")\n");
+          const result = await syncQmdText(root, captured, { signal: controller.signal });
+          const diagnostics = result.textCoverage.state === "complete" ? [] : result.textCoverage.diagnostics;
+          const embeddingCoverage = result.embeddingCoverage.state === "pending"
+            ? { state: "incomplete", contentHashes: result.embeddingCoverage.contentHashes } : result.embeddingCoverage;
+          const error = result.state === "unavailable" ? { code: result.code, message: result.code === "conflict" ? "Search index writer is busy" : "Search synchronization unavailable" } : undefined;
+          if (error) process.exitCode = EXIT[error.code];
+          output({ ok: !error, ...(error ? { error } : {}), coverageBasis: "captured-inventory", textCoverage: result.textCoverage, embeddingCoverage, diagnostics },
+            "Text coverage: " + result.textCoverage.state + " (captured inventory, not a current-at-return guarantee)\nEmbedding coverage: " + embeddingCoverage.state +
+            ("contentHashes" in embeddingCoverage ? " (" + embeddingCoverage.contentHashes + " content hashes pending)" : "") + "\n",
+            (error ? error.code + ": " + error.message + "\n" : "") + diagnostics.map(d => d.path + ": " + d.message).join("\n") + (diagnostics.length ? "\n" : ""));
+        } finally { process.removeListener("SIGINT", abort); process.removeListener("SIGTERM", abort); }
+      } else {
+        // Extraction, including the only input read, finishes before acquiring the mutation lock.
+        let preparedCapture: TextCaptureCandidate | undefined;
+        if (captureRequest) {
+          const controller = new AbortController();
+          const abort = () => controller.abort();
+          process.on("SIGINT", abort); process.on("SIGTERM", abort);
+          try { preparedCapture = await prepareCapture(root, captureRequest, controller.signal); }
+          finally { process.removeListener("SIGINT", abort); process.removeListener("SIGTERM", abort); }
         }
-      };
-      if (update && !values["dry-run"] || create || capture || add || index && !values.check) withMutationLock(root, execute);
-      else execute();
+        const execute = () => {
+          if (preparedCapture) {
+            const result = publishTextCapture(root, preparedCapture);
+            publishedResult = { written: true, paths: result.paths, digests: result.digests };
+            output({ ok: true, ...result }, "Captured source: " + result.path + "\n" + Object.entries(result).filter(([key, value]) => typeof value === "string" || key === "limitations").map(([key, value]) => key + ": " + (Array.isArray(value) ? value.join("; ") : value)).join("\n") + "\n");
+          } else if (update && arg !== undefined && values.expect !== undefined && candidate) {
+            const result = updateTopic(root, arg, values.expect, candidate, values["dry-run"] === true);
+            if (result.outcome === "updated") publishedResult = { written: true, paths: [result.path], digest: result.digest };
+            output({ ok: true, ...result }, (result.outcome === "updated" ? "Updated topic: " : result.outcome === "dry-run" ? "Dry-run topic: " : "Unchanged topic: ") + result.path + "\n" + result.digest + "\n" + JSON.stringify(result.summary) + "\n" + JSON.stringify(result.diff) + "\nNavigation: " + result.navigation + "; log: " + result.log + "\n");
+          } else if (request) {
+            const result = createTopic(root, request);
+            publishedResult = { written: true, paths: [result.path], digest: result.digest };
+            output({ ok: true, ...result }, "Created topic: " + result.path + "\nTitle: " + result.title + "\nDescription: " + result.description + "\n" + result.digest + "\n");
+          } else if (show && arg !== undefined) {
+            const note = readNote(root, arg, values.section);
+            output({ ok: true, ...note }, note.markdown);
+          } else if (add && extra[0] !== undefined && values.folder !== undefined) {
+            const added = addType(root, extra[0], values.folder);
+            publishedResult = { written: true, paths: [added.path], digest: added.digest };
+            output({ ok: true, path: added.path }, "Created registry scaffold: " + added.path + "; review and run whole-vault lint before commit\n");
+          } else {
+            const registry = list ? loadRegistry(root) : undefined;
+            const inventory = index ? inspectVault(root) : undefined;
+            const diagnostics = registry ? registry.diagnostics : inventory ? inventory.diagnostics : lintVault(root, arg);
+            if (inventory && !diagnostics.length) {
+              diagnostics.push(...(values.check ? indexFreshnessDiagnostics(root, inventory.indexes) : indexDestinationDiagnostics(root, inventory.indexes.keys())));
+              sortDiagnostics(diagnostics);
+            }
+            if (diagnostics.length) {
+              process.exitCode = 1;
+              const error = { code: "lint", message: "Wiki validation failed" };
+              output({ ok: false, error, diagnostics }, "", diagnostics.map(d => d.path + ": " + d.rule + ": " + d.message + "; fix: " + d.fix).join("\n") + "\n");
+            } else if (inventory) {
+              if (!values.check) {
+                const paths: string[] = [], digests: Record<string, string> = {};
+                for (const [relative, bytes] of inventory.indexes) {
+                  fs.writeFileSync(path.join(root, relative), bytes);
+                  paths.push(relative);
+                  digests[relative] = "sha256:" + createHash("sha256").update(bytes).digest("hex");
+                  publishedResult = { written: true, paths, digests };
+                }
+              }
+              const paths = [...inventory.indexes.keys()].sort();
+              output({ ok: true, paths, checks: ["registry", "frontmatter", "layout", "body", "lifecycle", "scoped-titles", "links", "generated-index"] }, values.check ? "Generated indexes are current\n" : "Generated navigation: " + paths.join(", ") + "\n");
+            } else if (registry) {
+              const types = listTypes(registry.types);
+              output({ ok: true, types }, types.map(t => t.name + " folder=" + t.folder + " required=" + t.requiredFields.join(",") + " headings=" + t.requiredHeadings.map(h => h.level + ":" + h.text).join(",") + " scopes=" + (t.scopes?.join(",") ?? "all")).join("\n") + "\n");
+            } else output({ ok: true, diagnostics: [], checks: ["registry", "frontmatter", "layout", "body", "lifecycle", "scoped-titles", "links", ...(arg === undefined ? ["generated-index"] : [])] }, "Wiki lint passed (registry, frontmatter, layout, body, lifecycle, scoped titles, links; generated-index freshness " + (arg === undefined ? "checked" : "not checked for selected paths") + ")\n");
+          }
+        };
+        if (update && !values["dry-run"] || create || capture || add || index && !values.check) withMutationLock(root, execute);
+        else execute();
+      }
     }
   }
 } catch (error) {

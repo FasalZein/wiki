@@ -22,7 +22,7 @@ export type QmdEmbeddingCoverage =
 export type QmdSyncResult =
   | { state: "successful"; textCoverage: Extract<QmdTextCoverage, { state: "complete" }>; embeddingCoverage: QmdEmbeddingCoverage; update: UpdateResult }
   | { state: "incomplete"; textCoverage: Extract<QmdTextCoverage, { state: "incomplete" }>; embeddingCoverage: QmdEmbeddingCoverage; update: UpdateResult }
-  | { state: "unavailable"; textCoverage: Extract<QmdTextCoverage, { state: "unavailable" }>; embeddingCoverage: { state: "unavailable" } };
+  | { state: "unavailable"; code: "conflict" | "unavailable"; textCoverage: Extract<QmdTextCoverage, { state: "unavailable" }>; embeddingCoverage: { state: "unavailable" } };
 export type QmdSyncOptions = { signal?: AbortSignal; onProgress?: (progress: UpdateProgress) => void };
 export type QmdLexResult =
   | { state: "successful"; matches: { path: string; markdown: string; score: number }[] }
@@ -51,13 +51,18 @@ function checked(root: string, relative: string): string {
   if (!inspected.ok) throw new Error(inspected.problem.message);
   return inspected.full;
 }
+class IndexWriterBusyError extends Error {}
 function acquire(root: string) {
   const directory = checked(root, DIRECTORY);
   fs.mkdirSync(directory, { recursive: true });
   const lock = checked(root, DIRECTORY + "/writer.lock");
   // Separate from the content mutation lock. Never guess whether another writer is stale.
   // The exclusive marker, not an open descriptor, owns this cooperative lock.
-  fs.writeFileSync(lock, "", { flag: "wx" });
+  try { fs.writeFileSync(lock, "", { flag: "wx" }); }
+  catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "EEXIST") throw new IndexWriterBusyError(error.message);
+    throw error;
+  }
   return () => {
     const diagnostics: QmdDiagnostic[] = [];
     try { fs.unlinkSync(lock); } catch (error) { diagnostics.push({ path: lock, message: "Writer lock removal failed: " + message(error) + ". Lock may be retained; confirm no index writer is active, restore directory permissions, then remove only this lock and synchronize again" }); }
@@ -70,8 +75,8 @@ async function cleanup(store: QMDStore | undefined, release: (() => QmdDiagnosti
   if (release) diagnostics.push(...release());
   return diagnostics;
 }
-function unavailable(diagnostics: QmdDiagnostic[]): Extract<QmdSyncResult, { state: "unavailable" }> {
-  return { state: "unavailable", textCoverage: { state: "unavailable", diagnostics }, embeddingCoverage: { state: "unavailable" } };
+function unavailable(diagnostics: QmdDiagnostic[], code: "conflict" | "unavailable" = "unavailable"): Extract<QmdSyncResult, { state: "unavailable" }> {
+  return { state: "unavailable", code, textCoverage: { state: "unavailable", diagnostics }, embeddingCoverage: { state: "unavailable" } };
 }
 async function open(root: string): Promise<QMDStore> {
   const dbPath = checked(root, DIRECTORY + "/qmd.sqlite");
@@ -100,6 +105,7 @@ export async function syncQmdText(root: string, inventory: QmdInventory, options
   let release: (() => QmdDiagnostic[]) | undefined;
   let store: QMDStore | undefined;
   let result: QmdSyncResult | undefined;
+  let code: "conflict" | "unavailable" = "unavailable";
   const failures: QmdDiagnostic[] = [];
   try {
     release = acquire(root);
@@ -165,6 +171,7 @@ export async function syncQmdText(root: string, inventory: QmdInventory, options
       result = { state: "successful", textCoverage: { state: "complete", inventory: indexed }, embeddingCoverage, update };
     }
   } catch (error) {
+    if (error instanceof IndexWriterBusyError) code = "conflict";
     failures.push({ path: DIRECTORY, message: message(error) });
   }
   // Cleanup belongs to the same structured failure boundary, without replacing the primary error.
@@ -180,7 +187,7 @@ export async function syncQmdText(root: string, inventory: QmdInventory, options
   const releaseFailures = release?.() ?? [];
   failures.push(...releaseFailures);
   if (releaseFailures.length) invalidate(); // Failed unlink retains our exclusive marker.
-  return failures.length ? unavailable(failures) : result ?? unavailable([{ path: DIRECTORY, message: "Synchronization did not complete" }]);
+  return failures.length ? unavailable(failures, code) : result ?? unavailable([{ path: DIRECTORY, message: "Synchronization did not complete" }]);
 }
 
 /** Lexical operation only, not a freshness/coverage claim. Synchronize the full
