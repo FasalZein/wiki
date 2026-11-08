@@ -9,6 +9,8 @@ const log = (entry) => fs.appendFileSync(process.env.OKF_QMD_CALL_LOG, JSON.stri
 export async function createStore(options) {
   const store = await real.createStore(options);
   log({ op: "createStore", models: options.config?.models ?? null, tokenizer: process.env.QMD_EMBED_MODEL ?? null });
+  const update = store.update.bind(store);
+  store.update = async (...args) => { log({ op: "update" }); return update(...args); };
   store.expandQuery = async (query, ...rest) => {
     log({ op: "expandQuery", query, rest });
     return [{ type: "lex", query: "telescope" }, { type: "vec", query }];

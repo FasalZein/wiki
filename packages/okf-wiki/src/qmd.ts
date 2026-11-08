@@ -24,7 +24,9 @@ export type QmdSyncResult =
   | { state: "successful"; textCoverage: Extract<QmdTextCoverage, { state: "complete" }>; embeddingCoverage: QmdEmbeddingCoverage; update: UpdateResult }
   | { state: "incomplete"; textCoverage: Extract<QmdTextCoverage, { state: "incomplete" }>; embeddingCoverage: QmdEmbeddingCoverage; update: UpdateResult }
   | { state: "unavailable"; code: "conflict" | "unavailable"; textCoverage: Extract<QmdTextCoverage, { state: "unavailable" }>; embeddingCoverage: { state: "unavailable" } };
-export type QmdSyncOptions = { signal?: AbortSignal; onProgress?: (progress: UpdateProgress) => void };
+/** models: preflighted local files. Text update never runs inference, but QMD counts
+ * pending embeddings against the configured embedding model identity. */
+export type QmdSyncOptions = { signal?: AbortSignal; onProgress?: (progress: UpdateProgress) => void; models?: QmdModels };
 export type QmdLexResult =
   | { state: "successful"; matches: { path: string; markdown: string; score: number }[] }
   | { state: "unavailable"; diagnostics: QmdDiagnostic[] };
@@ -137,7 +139,8 @@ export async function syncQmdText(root: string, inventory: QmdInventory, options
       const full = checked(root, DIRECTORY + "/snapshots/" + id);
       fs.writeFileSync(full, markdown, { flag: "wx" });
     }
-    store = await open(root);
+    if (options.models) bindModels(options.models);
+    store = await open(root, options.models);
     const update = await store.update({ collections: [COLLECTION], onProgress(progress) {
       options.signal?.throwIfAborted();
       const canonical = identities.get(progress.file);

@@ -29,10 +29,10 @@ function cli(vault: string, args: string[], mode = "", json = true, extraEnv: Re
   assert.equal(result.signal, null, result.stderr);
   if (json) assert.equal(result.stderr, "");
   const logged: Call[] = fs.existsSync(log) ? fs.readFileSync(log, "utf8").trim().split("\n").map(line => JSON.parse(line)) : [];
-  // The text synchronization store opens first and must not carry model configuration.
-  const textStore = logged[0]?.op === "createStore" && logged[0].models === null ? 1 : 0;
+  // The text synchronization store (createStore + model-free update) opens first.
+  const textStore = logged[1]?.op === "update" ? 2 : 0;
   const calls = logged.slice(textStore);
-  return { status: result.status, data: json ? JSON.parse(result.stdout) : undefined, stdout: result.stdout, stderr: result.stderr, calls, textStore };
+  return { status: result.status, data: json ? JSON.parse(result.stdout) : undefined, stdout: result.stdout, stderr: result.stderr, calls, textStore, textModels: textStore ? logged[0]?.models : undefined };
 }
 function succeeds(vault: string, args: string[], mode = "") { const result = cli(vault, args, mode); assert.equal(result.status, 0, JSON.stringify(result)); return result; }
 function fresh() { const vault = path.join(temp, String(++counter)); succeeds(vault, ["init"]); return vault; }
@@ -55,7 +55,8 @@ test("okf:11 fast find forwards one typed lex/vec request without expansion or r
   // The fake vector half contributes nothing; this literal question is also a lexical hit.
   const question = "telescope stars";
   const result = cli(vault, ["find", question], "fake-inference");
-  assert.equal(result.status, 0, JSON.stringify(result)); assert.equal(result.textStore, 1, "Find synchronizes text through a model-free store first");
+  assert.equal(result.status, 0, JSON.stringify(result)); assert.equal(result.textStore, 2, "Find synchronizes text first");
+  assert.deepEqual(result.textModels, models, "Pending embeddings are measured against the configured embed model");
   assert.deepEqual(ops(result.calls), ["createStore", "search"], "Exactly one search; no expansion, embedding or retry");
   assert.deepEqual(result.calls[0]?.models, models); assert.equal(result.calls[0]?.tokenizer, models.embed);
   assert.deepEqual(result.calls[1]?.request?.queries, [{ type: "lex", query: question }, { type: "vec", query: question }]);
@@ -122,7 +123,7 @@ test("okf:11 search sync --embed runs explicit embedding synchronously and repor
   const pending = cli(vault, ["search", "sync", "--embed"], "fake-inference");
   assert.equal(pending.status, 7); assert.deepEqual(pending.data.embeddingCoverage, { state: "incomplete", contentHashes: 1 });
   assert.equal(fs.existsSync(path.join(vault, ".wiki/search/writer.lock")), false);
-  const plain = cli(vault, ["search", "sync"], "fake-inference"); assert.equal(plain.status, 0); assert.equal(plain.textStore, 1); assert.deepEqual(ops(plain.calls), [], "Plain sync opens no model-configured store");
+  const plain = cli(vault, ["search", "sync"], "fake-inference"); assert.equal(plain.status, 0); assert.equal(plain.textStore, 2); assert.deepEqual(plain.textModels, models); assert.deepEqual(ops(plain.calls), [], "Plain sync opens no model-configured store");
 });
 
 test("okf:11 find option boundaries are usage errors before index effects", () => {

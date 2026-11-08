@@ -43,6 +43,7 @@ const question = "What instrument observes stars at an observatory?";
 const fast = cli("find", question);
 assert.equal(fast.mode, "fast"); assert.equal(fast.rerank, false); assert.deepEqual(fast.queries, [{ type: "lex", query: question }, { type: "vec", query: question }]);
 assert.equal(fast.matches[0]?.path, star, JSON.stringify(fast.matches));
+assert.deepEqual(fast.embeddingCoverage, { state: "complete" }, "Find after explicit embed reports measured embedding coverage");
 const vectorOnly = cli("find", "astronomy instrument for distant galaxies", "--terms", "zzznolexicalhit");
 assert.equal(vectorOnly.matches[0]?.path, star, "Vector half retrieves without a lexical hit: " + JSON.stringify(vectorOnly.matches));
 const deep = cli("find", "--deep", question);

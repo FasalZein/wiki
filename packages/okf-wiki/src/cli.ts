@@ -88,6 +88,8 @@ try {
           // Preflight explicit local models before any index effect or SDK model use.
           const roles = find ? (values.deep ? DEEP_ROLES : FAST_ROLES) : values.embed ? FAST_ROLES : [];
           const readiness = qmdModelReadiness(root, roles);
+          // Plain sync measures pending embeddings against a configured embed model when one is ready.
+          const measured = roles.length ? readiness : qmdModelReadiness(root, FAST_ROLES);
           if (readiness.state === "unavailable") {
             process.exitCode = EXIT.unavailable;
             const error = { code: "unavailable", message: "Search models are not ready; configure existing local files (no download or hosted inference is attempted)" };
@@ -102,7 +104,7 @@ try {
             // An incomplete scan cannot reuse an earlier successful receipt.
             captured = { concepts: [], diagnostics: [{ path: "", message: error instanceof Error ? error.message : String(error) }] };
           }
-          const result = await syncQmdText(root, captured, { signal: controller.signal });
+          const result = await syncQmdText(root, captured, { signal: controller.signal, ...(measured.state === "ready" ? { models: measured.models } : {}) });
           const diagnostics = result.textCoverage.state === "complete" ? [] : result.textCoverage.diagnostics;
           const embeddingCoverage = result.embeddingCoverage.state === "pending"
             ? { state: "incomplete", contentHashes: result.embeddingCoverage.contentHashes } : result.embeddingCoverage;
