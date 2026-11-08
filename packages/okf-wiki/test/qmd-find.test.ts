@@ -150,7 +150,8 @@ test("okf:11 find option boundaries are usage errors before index effects", () =
 test("okf:11 SIGTERM during explicit embedding, expansion or search is never reported as success and releases the index lock", () => {
   const vault = fresh(); note(vault, "Observatory", "Observatory telescope for stars");
   configure(vault, ["embed", "generate", "rerank"]);
-  for (const [seam, args] of [["embed", ["search", "sync", "--embed"]], ["search", ["find", "telescope"]], ["expand", ["find", "--deep", "telescope"]], ["search", ["find", "--deep", "telescope"]]] as const) {
+  for (const [seam, args] of [["embed", ["search", "sync", "--embed"]], ["search", ["find", "telescope"]], ["expand", ["find", "--deep", "telescope"]], ["search", ["find", "--deep", "telescope stars"]]] as const) {
+    // B12: deep search needs a usable expansion entry; the fake's lex "telescope" equals a bare "telescope" question, which now degrades before search.
     const result = cli(vault, [...args], "fake-inference-interrupt-" + seam);
     assert.equal(result.status, 7, seam + JSON.stringify(result.data)); assert.equal(result.data.ok, false); assert.equal(result.data.error.code, "unavailable");
     assert.ok(result.calls.some(c => c.op === (seam === "expand" ? "expandQuery" : seam)), "The interrupt fired at the inference seam");

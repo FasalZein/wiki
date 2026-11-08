@@ -128,6 +128,24 @@ test("okf:12 a native embedding failure swallowed by QMD is labelled degraded wi
   }
 });
 
+test("okf:12 a deep expansion failure swallowed by QMD falls back to labelled degraded lexical search without claiming rerank", () => {
+  const vault = fresh(), star = note(vault, "Observatory", "Observatory telescope", "Photon detector");
+  // Uncached questions: QMD caches only nonempty expansions, and each question is new.
+  for (const args of [["find", "--deep", "photon"], ["find", "--deep", "Which detector counts photons?", "--terms", "photon"]]) {
+    const result = cli(vault, args, "fake-inference-expand-fail", {}, true, false);
+    assert.equal(result.status, 0, JSON.stringify(result));
+    assert.ok(result.ops.includes("createGrammar"), "QMD's real expansion reached the native generation seam: " + JSON.stringify(result.ops));
+    assert.match(result.stderr, /Structured query expansion failed: Error: Injected native generation context failure/, "QMD logged and swallowed the failure");
+    assert.equal(result.data.mode, "deep"); assert.equal(result.data.rerank, false, "Reranking did not run");
+    assert.equal(result.data.degraded?.retrieval, "lexical", JSON.stringify(result.data)); assert.equal(result.data.degraded.exhaustive, false); assert.equal(result.data.degraded.reason, "expansion-failed");
+    assert.match(JSON.stringify(result.data.degraded.diagnostics), /no usable entries/);
+    assert.deepEqual(result.data.queries, [{ type: "lex", query: "photon" }]); assert.deepEqual(result.data.embeddingCoverage, { state: "unavailable" });
+    assert.deepEqual(result.data.matches.map((m: Match) => [m.path, m.digest]), [[star, current(vault, star)]]);
+  }
+  const human = cli(vault, ["find", "--deep", "zzzunmatched"], "fake-inference-expand-fail", {}, false);
+  assert.equal(human.status, 0); assert.match(human.stdout, /degraded: lexical only \(deep expansion failed; no reranking\)/); assert.match(human.stdout, /not exhaustive/);
+});
+
 /** FIFO under the test temp directory; opening it blocks until the peer opens it (a source event, not polling). */
 function fifos(dir: string) { fs.mkdirSync(dir); for (const name of ["b-captured", "b-go", "a-go"]) assert.equal(spawnSync("mkfifo", [path.join(dir, name)]).status, 0); }
 for (const [query, label] of [["betaword", "term only in the newer revision"], ["photon", "term in both revisions (indexed body differs)"]] as const) test("okf:12 another sync replacing the index between this find's sync and query never reports complete coverage: " + label, async () => {

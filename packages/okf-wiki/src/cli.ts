@@ -133,7 +133,7 @@ try {
               const coverageProblems = [...found.indexMismatch, ...found.omitted];
               if (coverageProblems.length) textCoverage = { state: "incomplete", diagnostics: [...diagnostics, ...coverageProblems] };
               const coverage = found.degraded ? { state: "unavailable" as const } : embeddingCoverage;
-              const label = found.degraded ? " degraded: lexical only (" + (found.degraded.reason === "models-unavailable" ? "search models not ready" : "vector search failed") + "); a miss is not an exhaustive absence claim"
+              const label = found.degraded ? " degraded: lexical only (" + ({ "models-unavailable": "search models not ready", "vector-failed": "vector search failed", "expansion-failed": "deep expansion failed; no reranking" } as const)[found.degraded.reason] + "); a miss is not an exhaustive absence claim"
                 : found.mode === "deep" ? " (explicit expansion and reranking)" : " (one typed lex/vec query, no expansion, no reranking)";
               report(undefined, { mode: found.mode, queries: found.queries, rerank: found.rerank, ...(found.degraded ? { degraded: found.degraded } : {}), matches: found.matches },
                 "Mode: " + found.mode + label + "\n" + coverageText(coverage) +

@@ -23,6 +23,13 @@ export async function createStore(options) {
   const store = await real.createStore(options);
   const llm = store.internal.llm;
   log({ op: "createStore", models: options.config?.models ?? null, tokenizer: process.env.QMD_EMBED_MODEL ?? null, modelCacheDir: llm.modelCacheDir });
+  if (mode === "fake-inference-expand-fail") {
+    // Lower seam: QMD's real LlamaCpp.expandQuery (its catch and question fallback) and
+    // real store expansion filtering/cache run; only native generation setup fails.
+    llm.ensureGenerateModel = async () => {};
+    llm.ensureLlama = async () => ({ createGrammar: async () => { log({ op: "createGrammar" }); throw new Error("Injected native generation context failure"); } });
+    return store;
+  }
   if (mode === "fake-inference-native-fail") {
     // Lower seam: QMD's real structured search and real LlamaCpp.embedBatch run over a
     // real vector table; only native embedding-context allocation fails.

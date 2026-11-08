@@ -302,7 +302,7 @@ export type QmdFindRequest =
 /** Every field comes from one captured revision; digest names those bytes. */
 export type QmdRenderedMatch = { path: string; score: number; digest: string; title: string; description: string; excerpt: string };
 /** Lexical-only results after vector/model failure. Never an exhaustive absence claim. */
-export type QmdDegraded = { retrieval: "lexical"; exhaustive: false; reason: "models-unavailable" | "vector-failed"; diagnostics: QmdDiagnostic[] };
+export type QmdDegraded = { retrieval: "lexical"; exhaustive: false; reason: "models-unavailable" | "vector-failed" | "expansion-failed"; diagnostics: QmdDiagnostic[] };
 export type QmdFindResult =
   | { state: "successful"; mode: "fast" | "deep"; queries: QmdQuery[]; rerank: boolean; degraded?: QmdDegraded; matches: QmdRenderedMatch[];
       /** Omitted candidates: deleted/renamed, stale index, or moving target. Nonempty means text coverage is incomplete. */
@@ -338,6 +338,9 @@ function render(root: string, relative: string | undefined, file: string, score:
   } catch { /* Captured concepts are lint-valid; keep raw text if not. */ }
   return { path: relative, score, digest: expected, title, description, excerpt: excerptOf(body, queries) };
 }
+/** QMD 2.8.3 swallows expansion grammar/context/prompt failures, returns the unchanged
+ * question, then filters it out: an expansion with no usable entry is a failed stage. */
+class ExpansionFailedError extends Error {}
 function vectorFailure(error: unknown, signal: AbortSignal | undefined): boolean {
   return !(error instanceof IndexWriterBusyError) && !signal?.aborted;
 }
@@ -393,6 +396,7 @@ export async function findQmd(root: string, request: QmdFindRequest, captured: Q
           const expanded = await store.expandQuery(request.question);
           // Native inference cannot be cancelled mid-call; stop at the next boundary.
           signal?.throwIfAborted();
+          if (!expanded.some(q => q.query !== request.question)) throw new ExpansionFailedError("Deep query expansion produced no usable entries (" + expanded.length + " returned); expansion and reranking did not run");
           queries = [...(request.terms === undefined ? [] : [lexical]), ...expanded.map(q => ({ type: q.type, query: q.query }))];
         }
         found = await store.search({ queries, rerank: request.mode === "deep", collection: COLLECTION });
@@ -400,7 +404,9 @@ export async function findQmd(root: string, request: QmdFindRequest, captured: Q
       } catch (error) {
         if (!vectorFailure(error, signal)) throw error;
         // Same engine, lexical index only: no second search stack.
-        degraded = { retrieval: "lexical", exhaustive: false, reason: "vector-failed", diagnostics: [{ path: DIRECTORY, message: "Vector/model search failed: " + message(error) }] };
+        degraded = error instanceof ExpansionFailedError
+          ? { retrieval: "lexical", exhaustive: false, reason: "expansion-failed", diagnostics: [{ path: DIRECTORY, message: message(error) }] }
+          : { retrieval: "lexical", exhaustive: false, reason: "vector-failed", diagnostics: [{ path: DIRECTORY, message: "Vector/model search failed: " + message(error) }] };
         queries = [lexical];
       }
     }
