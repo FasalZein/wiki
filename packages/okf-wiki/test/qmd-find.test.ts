@@ -177,3 +177,24 @@ test("okf:11 SDK model cache binds to vault-local derived state, never an absent
     assert.equal(fs.statSync(path.join(vault, ".wiki/search/sdk-cache/qmd/models")).isDirectory(), true);
   } finally { fs.chmodSync(decoy, 0o700); }
 });
+
+test("okf:11 nested SDK cache symlinks or non-directories are refused before SDK effects and leave external directories unchanged", () => {
+  for (const [label, linked] of [["nested qmd", "sdk-cache/qmd"], ["final models", "sdk-cache/qmd/models"], ["config qmd", "sdk-config/qmd"]] as const) {
+    const vault = fresh(); note(vault, "Observatory", "Observatory telescope"); configure(vault, ["embed"]);
+    const external = fs.mkdtempSync(path.join(temp, "external-")); fs.writeFileSync(path.join(external, "keep.txt"), "external bytes");
+    const link = path.join(vault, ".wiki/search", linked);
+    fs.mkdirSync(path.dirname(link), { recursive: true }); fs.symlinkSync(external, link);
+    for (const args of [["search", "sync", "--embed"], ["find", "telescope"]]) {
+      const result = cli(vault, args, "fake-inference");
+      assert.equal(result.status, 7, label + JSON.stringify(result.data)); assert.equal(result.data.error.code, "unavailable");
+      assert.match(JSON.stringify(result.data.diagnostics), /Refusing symlinked target or ancestor/, label);
+      assert.equal(result.calls.length, 0, "No SDK store opened");
+      assert.deepEqual(fs.readdirSync(external), ["keep.txt"], label + ": external listing unchanged");
+      assert.equal(fs.readFileSync(path.join(external, "keep.txt"), "utf8"), "external bytes");
+    }
+  }
+  const vault = fresh(); note(vault, "Observatory", "Observatory telescope"); configure(vault, ["embed"]);
+  fs.mkdirSync(path.join(vault, ".wiki/search/sdk-cache/qmd"), { recursive: true }); fs.writeFileSync(path.join(vault, ".wiki/search/sdk-cache/qmd/models"), "not a directory");
+  const result = cli(vault, ["find", "telescope"], "fake-inference");
+  assert.equal(result.status, 7); assert.match(JSON.stringify(result.data.diagnostics), /Expected a directory/);
+});

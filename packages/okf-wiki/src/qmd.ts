@@ -87,10 +87,23 @@ async function open(root: string, models?: QmdModels): Promise<QMDStore> {
   // QMD 2.8.3 fixes its model cache from XDG_CACHE_HOME (else ~/.cache) at first import
   // and creates it before resolving even absolute local files. Bind cache and config to
   // vault-local derived state first. Process-wide: a one-shot CLI opens one vault.
+  // QMD appends qmd/models (cache) and qmd (config) and mkdirs them recursively, which
+  // follows symlinks. Validate every SDK-managed component and create the cache one
+  // non-recursive level at a time, so an existing symlink or file fails closed.
   const cache = checked(root, DIRECTORY + "/sdk-cache");
-  fs.mkdirSync(cache, { recursive: true });
+  for (const relative of ["sdk-cache", "sdk-cache/qmd", "sdk-cache/qmd/models"]) {
+    const full = checked(root, DIRECTORY + "/" + relative);
+    try { fs.mkdirSync(full); } catch (error) { if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error; }
+    // lstat: a symlink created after the check is not a directory.
+    if (!fs.lstatSync(full).isDirectory()) throw new Error("Expected a directory for SDK cache: " + DIRECTORY + "/" + relative);
+  }
+  const config = checked(root, DIRECTORY + "/sdk-config");
+  for (const relative of ["sdk-config", "sdk-config/qmd"]) {
+    const stat = fs.lstatSync(checked(root, DIRECTORY + "/" + relative), { throwIfNoEntry: false });
+    if (stat && !stat.isDirectory()) throw new Error("Expected a directory for SDK config: " + DIRECTORY + "/" + relative);
+  }
   process.env.XDG_CACHE_HOME = cache;
-  process.env.XDG_CONFIG_HOME = checked(root, DIRECTORY + "/sdk-config");
+  process.env.XDG_CONFIG_HOME = config;
   // Lazy import keeps ordinary vault commands independent of native search dependencies.
   const { createStore } = await import("@tobilu/qmd");
   return createStore({ dbPath, config: { ...(models ? { models } : {}), collections: { [COLLECTION]: {
