@@ -294,31 +294,53 @@ function bindModels(models: QmdModels) {
 }
 
 export type QmdQuery = { type: "lex" | "vec" | "hyde"; query: string };
+/** The documented default of the pinned SDK (@tobilu/qmd 2.8.3 SearchOptions.limit: "Max results (default: 10)").
+ * find uses it as the final result limit when the caller gives none. */
+export const QMD_DEFAULT_LIMIT = 10;
+/** Applied to literal and qmd candidates before the final limit. scope: "personal" or "projects/<project>";
+ * type: a registered type name, matched against the captured frontmatter type. */
+export type QmdFindFilters = { scope?: "personal" | `projects/${string}`; type?: string; limit?: number };
 /** lexical: model-free degraded request after a model readiness failure. */
-export type QmdFindRequest =
+export type QmdFindRequest = QmdFindFilters & (
   | { mode: "fast"; question: string; terms?: string; models: QmdReadyModels<"embed"> }
   | { mode: "deep"; question: string; terms?: string; models: QmdReadyModels<"embed" | "generate" | "rerank"> }
-  | { mode: "lexical"; requested: "fast" | "deep"; question: string; terms?: string; reason: QmdDiagnostic[] };
-/** Every field comes from one captured revision; digest names those bytes. */
-export type QmdRenderedMatch = { path: string; score: number; digest: string; title: string; description: string; excerpt: string };
+  | { mode: "lexical"; requested: "fast" | "deep"; question: string; terms?: string; reason: QmdDiagnostic[] });
+/** Every field comes from one captured revision; digest names those bytes.
+ * score: the qmd score, or null when only literal matching found the note. literal: the matched path-like tokens. */
+export type QmdRenderedMatch = { path: string; score: number | null; literal: string[]; digest: string; title: string; description: string; excerpt: string };
 /** Lexical-only results after vector/model failure. Never an exhaustive absence claim. */
 export type QmdDegraded = { retrieval: "lexical"; exhaustive: false; reason: "models-unavailable" | "vector-failed" | "expansion-failed"; diagnostics: QmdDiagnostic[] };
 export type QmdFindResult =
-  | { state: "successful"; mode: "fast" | "deep"; queries: QmdQuery[]; rerank: boolean; degraded?: QmdDegraded; matches: QmdRenderedMatch[];
+  | { state: "successful"; mode: "fast" | "deep"; queries: QmdQuery[]; rerank: boolean; degraded?: QmdDegraded; literals: string[]; limit: number; matches: QmdRenderedMatch[];
       /** Omitted candidates: deleted/renamed, stale index, or moving target. Nonempty means text coverage is incomplete. */
       omitted: QmdDiagnostic[];
       /** The queried index does not hold exactly the captured inventory (for example another sync replaced it). Nonempty means text coverage is incomplete. */
       indexMismatch: QmdDiagnostic[] }
   | { state: "unavailable"; code: "conflict" | "unavailable"; diagnostics: QmdDiagnostic[] };
 
-function excerptOf(body: string, queries: readonly QmdQuery[]): string {
+// Surrounding quotes, brackets and sentence punctuation are not part of a path-like token.
+const TOKEN_EDGES = /^["'`([{<]+|["'`)\]}>.,;:!?]+$/g;
+// A dotted filename ends in an extension that contains a letter (README.md, .env), not a version number (v1.2).
+const DOTTED_FILENAME = /(?:^|[^.])\.[\w-]*[A-Za-z][\w-]*$/;
+/** Path-like tokens (containing "/" or a dotted filename form), in first-appearance order. */
+export function literalTokens(text: string): string[] {
+  const tokens = text.split(/\s+/).map(token => token.replace(TOKEN_EDGES, ""))
+    .filter(token => /[\p{L}\p{N}]/u.test(token) && (token.includes("/") || DOTTED_FILENAME.test(token)));
+  return [...new Set(tokens)];
+}
+/** The first line containing a matched literal token, else the first line containing a lexical term. */
+function excerptOf(body: string, queries: readonly QmdQuery[], literal: readonly string[]): string {
   const lines = body.split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith("#"));
   const terms = queries.filter(q => q.type === "lex").flatMap(q => q.query.toLowerCase().split(/\s+/)).filter(Boolean);
-  return lines.find(line => terms.some(term => line.toLowerCase().includes(term))) ?? lines[0] ?? "";
+  return lines.find(line => literal.some(token => line.includes(token)))
+    ?? lines.find(line => terms.some(term => line.toLowerCase().includes(term))) ?? lines[0] ?? "";
+}
+function typeOf(markdown: string): unknown {
+  try { return parseNoteText(markdown).frontmatter.type; } catch { return undefined; }
 }
 /** Render from the captured revision and revalidate the current file before emitting.
  * Only vault files are reread; captured sources are never refetched. */
-function render(root: string, relative: string | undefined, file: string, score: number, indexed: string | null, captured: ReadonlyMap<string, string>, queries: readonly QmdQuery[], omitted: QmdDiagnostic[]): QmdRenderedMatch | undefined {
+function render(root: string, relative: string | undefined, file: string, score: number | null, literal: string[], indexed: string | null, captured: ReadonlyMap<string, string>, queries: readonly QmdQuery[], omitted: QmdDiagnostic[]): QmdRenderedMatch | undefined {
   const markdown = relative === undefined ? undefined : captured.get(relative);
   if (relative === undefined || markdown === undefined) { omitted.push({ path: relative ?? file, message: "Indexed candidate is not in the current captured inventory (deleted, renamed or out of scope); omitted" }); return undefined; }
   if (indexed !== markdown) { omitted.push({ path: relative, message: "Indexed content differs from the captured revision; omitted rather than attaching an old excerpt" }); return undefined; }
@@ -336,7 +358,7 @@ function render(root: string, relative: string | undefined, file: string, score:
     if (typeof parsed.frontmatter.title === "string") title = parsed.frontmatter.title;
     if (typeof parsed.frontmatter.description === "string") description = parsed.frontmatter.description;
   } catch { /* Captured concepts are lint-valid; keep raw text if not. */ }
-  return { path: relative, score, digest: expected, title, description, excerpt: excerptOf(body, queries) };
+  return { path: relative, score, literal, digest: expected, title, description, excerpt: excerptOf(body, queries, literal) };
 }
 /** QMD 2.8.3 swallows expansion grammar/context/prompt failures, returns the unchanged
  * question, then filters it out: an expansion with no usable entry is a failed stage. */
@@ -357,6 +379,8 @@ export async function findQmd(root: string, request: QmdFindRequest, captured: Q
   try {
     signal?.throwIfAborted();
     if (!request.question.trim() || request.terms !== undefined && !request.terms.trim()) throw new Error("Expected a nonempty question and terms");
+    const limit = request.limit ?? QMD_DEFAULT_LIMIT;
+    if (!Number.isSafeInteger(limit) || limit < 1) throw new Error("Expected a positive integer find limit");
     release = acquire(root);
     if (!fs.existsSync(checked(root, DIRECTORY + "/qmd.sqlite"))) throw new Error("Text index unavailable; synchronize captured concepts first");
     const identities = readIdentities(root);
@@ -399,7 +423,8 @@ export async function findQmd(root: string, request: QmdFindRequest, captured: Q
           if (!expanded.some(q => q.query !== request.question)) throw new ExpansionFailedError("Deep query expansion produced no usable entries (" + expanded.length + " returned); expansion and reranking did not run");
           queries = [...(request.terms === undefined ? [] : [lexical]), ...expanded.map(q => ({ type: q.type, query: q.query }))];
         }
-        found = await store.search({ queries, rerank: request.mode === "deep", collection: COLLECTION });
+        // The final limit applies after literal merging and filters, so qmd's own result slice spans the whole collection.
+        found = await store.search({ queries, rerank: request.mode === "deep", collection: COLLECTION, limit: Math.max(identities.size, 1) });
         if (missingEmbeddings) { found = undefined; throw new Error(missingEmbeddings + " query embeddings were not produced; QMD skipped those vector legs"); }
       } catch (error) {
         if (!vectorFailure(error, signal)) throw error;
@@ -410,17 +435,44 @@ export async function findQmd(root: string, request: QmdFindRequest, captured: Q
         queries = [lexical];
       }
     }
-    found ??= (await store.searchLex(lexical.query, { collection: COLLECTION })).map(hit => ({ file: hit.filepath, score: hit.score }));
+    found ??= (await store.searchLex(lexical.query, { collection: COLLECTION, limit: Math.max(identities.size, 1) })).map(hit => ({ file: hit.filepath, score: hit.score }));
     signal?.throwIfAborted();
     const matches: QmdRenderedMatch[] = [], omitted: QmdDiagnostic[] = [];
+    // Literal tokens are plain substrings of canonical paths and captured note text. Mentioned
+    // paths are never opened; a regex, shell or FTS reading of the token never happens.
+    const literals = literalTokens(request.question + (request.terms === undefined ? "" : "\n" + request.terms));
+    type Candidate = { path: string; file: string; score: number | null; rank: number; literal: string[] };
+    const candidates = new Map<string, Candidate>();
+    const ranked: { path: string; file: string; score: number }[] = [];
     for (const match of found) {
       if (!match.file.startsWith(PREFIX)) throw new Error("Unexpected indexed collection identity");
       const relative = identities.get(match.file.slice(PREFIX.length));
-      const rendered = render(root, relative, match.file, match.score, relative === undefined ? null : await store.getDocumentBody(match.file), concepts, queries, omitted);
+      if (relative === undefined) render(root, relative, match.file, match.score, [], null, concepts, queries, omitted);
+      else ranked.push({ path: relative, file: match.file, score: match.score });
+    }
+    // qmd order by score, canonical path breaks ties; a path keeps its best-ranked entry.
+    ranked.sort((a, b) => b.score - a.score || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+    for (const [rank, match] of ranked.entries()) if (!candidates.has(match.path)) candidates.set(match.path, { ...match, rank, literal: [] });
+    if (literals.length) for (const [relative, markdown] of concepts) {
+      const literal = literals.filter(token => relative.includes(token) || markdown.includes(token));
+      if (!literal.length) continue;
+      const existing = candidates.get(relative);
+      if (existing) existing.literal = literal;
+      else candidates.set(relative, { path: relative, file: PREFIX + stagedId(relative), score: null, rank: Infinity, literal });
+    }
+    const inScope = (relative: string) => request.scope === undefined || relative.startsWith(request.scope + "/");
+    // A candidate outside the captured inventory has no type; render reports its omission.
+    const ofType = (relative: string) => request.type === undefined || !concepts.has(relative) || typeOf(concepts.get(relative) ?? "") === request.type;
+    const ordered = [...candidates.values()].filter(c => inScope(c.path) && ofType(c.path))
+      .sort((a, b) => Number(!a.literal.length) - Number(!b.literal.length) || a.rank - b.rank || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+    for (const candidate of ordered) {
+      if (matches.length === limit) break;
+      signal?.throwIfAborted();
+      const rendered = render(root, candidate.path, candidate.file, candidate.score, candidate.literal, await store.getDocumentBody(candidate.file), concepts, queries, omitted);
       if (rendered) matches.push(rendered);
     }
     const rerank = request.mode === "deep" && !degraded;
-    result = { state: "successful", mode: request.mode === "lexical" ? request.requested : request.mode, queries, rerank, ...(degraded ? { degraded } : {}), matches, omitted, indexMismatch };
+    result = { state: "successful", mode: request.mode === "lexical" ? request.requested : request.mode, queries, rerank, ...(degraded ? { degraded } : {}), literals, limit, matches, omitted, indexMismatch };
   } catch (error) {
     if (error instanceof IndexWriterBusyError) code = "conflict";
     failures.push({ path: DIRECTORY, message: message(error) });
