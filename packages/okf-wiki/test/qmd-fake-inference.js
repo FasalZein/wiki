@@ -11,6 +11,14 @@ const mode = process.env.OKF_QMD_CLI_GUARD ?? "";
 const log = (entry) => fs.appendFileSync(process.env.OKF_QMD_CALL_LOG, JSON.stringify(entry) + "\n");
 // Source event: deliver the CLI's real SIGTERM handler while inference is in flight.
 const interrupt = (seam) => { if (mode === "fake-inference-interrupt-" + seam && !process.emit("SIGTERM")) throw new Error("No cooperative SIGTERM listener"); };
+// Injected local inference failure: vector/rerank search and expansion throw.
+const vectorFail = () => { if (process.env.OKF_QMD_FAKE_VECTOR === "fail") throw new Error("Injected local vector inference failure"); };
+// Source event: another editor changes or removes a note while search inference runs.
+const move = () => {
+  const target = process.env.OKF_QMD_MOVE_PATH;
+  if (mode === "fake-inference-move-edit") fs.appendFileSync(target, "Concurrent edit\n");
+  if (mode === "fake-inference-move-delete") fs.unlinkSync(target);
+};
 export async function createStore(options) {
   const store = await real.createStore(options);
   const llm = store.internal.llm;
@@ -19,12 +27,15 @@ export async function createStore(options) {
     llm.ensureModelCacheDir();
     log({ op: "expandQuery", query, rest });
     interrupt("expand");
+    vectorFail();
     return [{ type: "lex", query: "telescope" }, { type: "vec", query }];
   };
   store.search = async (request) => {
     llm.ensureModelCacheDir();
     log({ op: "search", request });
     interrupt("search");
+    vectorFail();
+    move();
     // Deterministic stand-in for vector/rerank inference: union of real lexical hits.
     const scores = new Map();
     for (const q of request.queries) {

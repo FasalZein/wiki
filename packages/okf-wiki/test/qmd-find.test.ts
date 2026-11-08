@@ -91,24 +91,37 @@ test("okf:11 fast miss never escalates to deep; deep find explicitly expands and
   assert.deepEqual(deep.data.matches.map((m: { path: string }) => m.path), [star]);
 });
 
-test("okf:11 missing, remote or invalid models are explicit readiness failures before index effects, without downloads", () => {
-  const vault = fresh(); note(vault, "Observatory", "Observatory telescope");
-  for (const args of [["find", "stars"], ["find", "--deep", "stars"], ["search", "sync", "--embed"]]) {
-    const result = cli(vault, args);
-    assert.equal(result.status, 7, JSON.stringify(result)); assert.equal(result.data.error.code, "unavailable"); assert.equal(result.data.readiness, "unavailable");
-    assert.ok(result.data.diagnostics.some((d: { path: string }) => d.path === ".wiki/config.json#search.models.embed"), JSON.stringify(result.data));
-  }
-  assert.equal(fs.existsSync(path.join(vault, ".wiki/search")), false, "Readiness failure precedes index effects");
+// B12 (okf:12) replaced find's former exit 7 here with labelled degraded lexical retrieval; explicit embedding keeps exit 7.
+test("okf:11 okf:12 missing, remote or invalid models are explicit readiness diagnostics without downloads; find degrades to model-free lexical", () => {
+  const vault = fresh(), star = note(vault, "Observatory", "Observatory telescope");
+  const embed = cli(vault, ["search", "sync", "--embed"], "fake-inference");
+  assert.equal(embed.status, 7, JSON.stringify(embed)); assert.equal(embed.data.error.code, "unavailable"); assert.equal(embed.data.readiness, "unavailable");
+  assert.ok(embed.data.diagnostics.some((d: { path: string }) => d.path === ".wiki/config.json#search.models.embed"), JSON.stringify(embed.data));
+  assert.equal(embed.calls.length + embed.textStore, 0, "No SDK store opened");
+  assert.equal(fs.existsSync(path.join(vault, ".wiki/search")), false, "Embedding readiness failure precedes index effects");
+  const degraded = (args: string[], roles: string[]) => {
+    const result = cli(vault, args, "fake-inference");
+    assert.equal(result.status, 0, JSON.stringify(result)); assert.equal(result.data.ok, true);
+    assert.equal(result.data.degraded.retrieval, "lexical"); assert.equal(result.data.degraded.exhaustive, false); assert.equal(result.data.degraded.reason, "models-unavailable");
+    assert.deepEqual(result.data.degraded.diagnostics.map((d: { path: string }) => d.path).sort(), roles.map(r => ".wiki/config.json#search.models." + r));
+    assert.deepEqual(result.data.embeddingCoverage, { state: "unavailable" }); assert.equal(result.data.rerank, false);
+    // Only model-free stores: no expansion, search inference or embedding, and no model configured.
+    assert.deepEqual(ops(result.calls), ["createStore"]); assert.equal(result.calls[0]?.models, null);
+    return result;
+  };
+  for (const args of [["find", "telescope"], ["find", "--deep", "telescope"]]) assert.deepEqual(degraded(args, ["embed", ...(args[1] === "--deep" ? ["generate", "rerank"] : [])]).data.matches.map((m: { path: string }) => m.path), [star]);
   configure(vault, ["embed"]);
-  const deep = cli(vault, ["find", "--deep", "stars"]); assert.equal(deep.status, 7);
-  assert.deepEqual(deep.data.diagnostics.map((d: { path: string }) => d.path).sort(), [".wiki/config.json#search.models.generate", ".wiki/config.json#search.models.rerank"]);
+  degraded(["find", "--deep", "telescope"], ["generate", "rerank"]);
   const config = path.join(vault, ".wiki/config.json"), base = JSON.parse(fs.readFileSync(config, "utf8"));
   const notGguf = path.join(temp, "not-a-model.bin"); fs.writeFileSync(notGguf, "text");
   for (const embed of ["hf:ggml-org/embeddinggemma-300M-GGUF/model.gguf", "https://example.invalid/model.gguf", "relative/model.gguf", path.join(temp, "missing.gguf"), notGguf]) {
     fs.writeFileSync(config, JSON.stringify({ ...base, search: { models: { embed } } }));
-    const result = cli(vault, ["find", "stars"]); assert.equal(result.status, 7, embed); assert.equal(result.data.readiness, "unavailable");
+    degraded(["find", "telescope"], ["embed"]);
+    assert.equal(cli(vault, ["search", "sync", "--embed"]).status, 7, embed);
   }
-  const human = cli(vault, ["find", "stars"], "", false); assert.equal(human.status, 7); assert.match(human.stderr, /^unavailable: Search models are not ready/);
+  const human = cli(vault, ["find", "zzzunmatched"], "", false); assert.equal(human.status, 0);
+  assert.match(human.stdout, /degraded: lexical only \(search models not ready\); a miss is not an exhaustive absence claim/); assert.match(human.stdout, /not exhaustive/);
+  const humanEmbed = cli(vault, ["search", "sync", "--embed"], "", false); assert.equal(humanEmbed.status, 7); assert.match(humanEmbed.stderr, /^unavailable: Search models are not ready/);
 });
 
 test("okf:11 search sync --embed runs explicit embedding synchronously and reports failure or remaining pending coverage", () => {

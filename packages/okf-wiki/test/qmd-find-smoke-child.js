@@ -47,6 +47,8 @@ const fast = cli("find", question);
 assert.equal(fast.mode, "fast"); assert.equal(fast.rerank, false); assert.deepEqual(fast.queries, [{ type: "lex", query: question }, { type: "vec", query: question }]);
 assert.equal(fast.matches[0]?.path, star, JSON.stringify(fast.matches));
 assert.deepEqual(fast.embeddingCoverage, { state: "complete" }, "Find after explicit embed reports measured embedding coverage");
+// B12: real-model results render from the current captured revision and are not degraded.
+assert.equal(fast.degraded, undefined); assert.equal(fast.matches[0]?.digest, "sha256:" + sha(path.join(vault, star))); assert.equal(fast.matches[0]?.title, "Observatory");
 const vectorOnly = cli("find", "astronomy instrument for distant galaxies", "--terms", "zzznolexicalhit");
 assert.equal(vectorOnly.matches[0]?.path, star, "Vector half retrieves without a lexical hit: " + JSON.stringify(vectorOnly.matches));
 const deep = cli("find", "--deep", question);
