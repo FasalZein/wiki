@@ -4,6 +4,10 @@ dist/
 .DS_Store
 *.log
 
+# Local mutation sandboxes, reports, and incremental state
+.stryker-tmp/
+reports/
+
 # CLI state during development
 .wiki/
 

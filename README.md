@@ -47,7 +47,7 @@ on nothing from it.
 ```sh
 git clone https://github.com/FasalZein/wiki.git
 cd wiki
-bun install
+npm ci
 bun run build      # produces dist/cli.js
 bun link           # puts `wiki` on your PATH (~/.bun/bin/wiki)
 ```
@@ -215,7 +215,7 @@ files, prose in link lists) are reported with hints.
 ## Development
 
 ```sh
-bun install
+npm ci
 bun run dev          # watch mode
 bun run typecheck    # tsc --noEmit
 bun test tests/      # ALWAYS scope to tests/ — a bare `bun test` descends into qmd/
