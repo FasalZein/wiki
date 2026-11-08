@@ -5,7 +5,7 @@ It does not build root `dist` or run the installed `wiki` command.
 
 ## Install and run
 
-Use Node >=22 (the pinned StrykerJS 10.1.1 requirement), Bun, and the host's `heavy` command.
+Use Node ^22.18.0 or >=24.11.0 (the engine range of the locked Babel dependencies; tested on Node 24.21.0), Bun, and the host's `heavy` command.
 Install root development dependencies with `heavy -- npm ci`. The root npm lock is authoritative for this tooling.
 No Vitest adoption or Bun-specific Stryker runner is involved.
 
