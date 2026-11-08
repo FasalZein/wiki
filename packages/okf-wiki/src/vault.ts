@@ -14,7 +14,8 @@ export class WikiError extends Error {
 
 const CONFIG = { profile: "wiki-okf", version: 1 };
 const ROOT_INDEX = '---\nokf_version: "0.2"\n---\n# Wiki\n';
-const IGNORES = "/.wiki/tmp/\n/.wiki/locks/\n/.wiki/qmd.sqlite\n/.wiki/qmd.sqlite-*\n";
+// Retain old-location rules as compatibility protection alongside current derived state.
+const IGNORES = "/.wiki/tmp/\n/.wiki/locks/\n/.wiki/search/\n/.wiki/qmd.sqlite\n/.wiki/qmd.sqlite-*\n";
 
 export class ExclusiveCleanupError extends WikiError {
   readonly written = true;
