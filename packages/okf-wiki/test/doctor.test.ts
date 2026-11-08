@@ -267,3 +267,50 @@ test("okf:17 doctor never provisions the SDK cache/config chain after normal syn
   const damaged = doctor(vault); assert.equal(damaged.status, 7);
   assert.equal(fs.existsSync(cache), false); assert.equal(fs.existsSync(config), false);
 });
+
+
+for (const damage of ["missing-row", "stale-body", "stale-title", "stale-identity", "extra-row"]) test("okf:17 review P1 lexical " + damage + " cannot report complete captured text coverage", async () => {
+  const vault = fresh(); configureModels(vault); note(vault);
+  succeeds(vault, ["new", "note", "--personal", "--title", "Lighthouse", "--description", "Second captured concept"]);
+  succeeds(vault, ["search", "sync"]);
+  const { createStore } = await import("@tobilu/qmd");
+  const store = await createStore({ dbPath: path.join(vault, ".wiki/search/qmd.sqlite"), config: { collections: {} } });
+  try {
+    const target = "rowid = (SELECT MIN(id) FROM documents WHERE active = 1)";
+    if (damage === "missing-row") store.internal.db.exec("DELETE FROM documents_fts WHERE " + target);
+    if (damage === "stale-body") store.internal.db.exec("UPDATE documents_fts SET body = 'stale lexical body' WHERE " + target);
+    if (damage === "stale-title") store.internal.db.exec("UPDATE documents_fts SET title = 'stale lexical title' WHERE " + target);
+    if (damage === "stale-identity") store.internal.db.exec("UPDATE documents_fts SET filepath = 'concepts/foreign.md' WHERE " + target);
+    if (damage === "extra-row") store.internal.db.exec("INSERT INTO documents_fts(rowid, filepath, title, body) VALUES(9999, 'concepts/phantom.md', 'Phantom', 'Not in captured inventory')");
+  } finally { await store.close(); }
+  const result = doctor(vault); assert.equal(result.status, 6, JSON.stringify(result.data));
+  assert.equal(result.data.search.database.state, "unavailable"); assert.equal(result.data.search.textCoverage.state, "incomplete");
+  assert.notEqual(result.data.search.embeddingCoverage.state, "complete");
+  assert.ok(result.data.diagnostics.some((d: { path: string; message: string; fix: string }) => d.path === ".wiki/search/qmd.sqlite" && /lexical/i.test(d.message) && /sync/.test(d.fix)));
+});
+
+
+test("okf:17 review P1 unreadable generated index retains every independent readiness section", () => {
+  const vault = fresh(); configureModels(vault); note(vault); succeeds(vault, ["search", "sync"]);
+  fs.appendFileSync(path.join(vault, "index.md"), "Stale but readable generated navigation\n");
+  const result = doctor(vault, { OKF_DOCTOR_GUARD: "unreadable-index" });
+  assert.equal(result.status, 6, JSON.stringify(result.data)); assert.equal(result.data.error.code, "damaged");
+  assert.equal(result.data.runtime.node.version, process.versions.node); assert.equal(result.data.runtime.qmd.state, "ready");
+  assert.equal(result.data.extractors.pandoc.state, "ready"); assert.equal(result.data.extractors.pdftotext.state, "ready");
+  assert.equal(result.data.profile.state, "ready"); assert.equal(result.data.layout.state, "ready"); assert.equal(result.data.registry.state, "ready");
+  assert.equal(result.data.models.embed.state, "ready"); assert.equal(result.data.navigation.state, "unavailable");
+  assert.equal(result.data.search.database.state, "ready"); assert.equal(result.data.search.textCoverage.state, "complete");
+  assert.equal(result.data.search.embeddingCoverage.state, "incomplete");
+  assert.ok(result.data.diagnostics.some((d: { path: string; message: string; fix: string }) => d.path === "personal/index.md" && /EACCES/.test(d.message) && /readable/.test(d.fix)));
+  assert.ok(result.data.diagnostics.some((d: { path: string; message: string }) => d.path === "index.md" && /index.stale/.test(d.message)));
+});
+
+
+test("okf:17 healthy lexical coverage respects pinned qmd CJK field normalization", () => {
+  const vault = fresh(); configureModels(vault);
+  const relative = succeeds(vault, ["new", "note", "--personal", "--title", "Tokyo 東京", "--description", "Mixed 中文 and English"]).path;
+  fs.appendFileSync(path.join(vault, relative), "\n東京 한국 カタカナ ひらがな 中文.\n");
+  succeeds(vault, ["search", "sync"]);
+  const result = doctor(vault); assert.equal(result.status, 0, JSON.stringify(result.data));
+  assert.equal(result.data.search.database.state, "ready"); assert.equal(result.data.search.textCoverage.state, "complete");
+});

@@ -25,6 +25,7 @@ net.Socket.prototype.connect = denyNetwork; globalThis.fetch = denyNetwork;
 const originalRead = fs.readFileSync;
 fs.readFileSync = (file, ...args) => {
   if (mode === "unreadable" && String(file).endsWith("/personal/notes/telescope.md")) throw Object.assign(new Error("Injected unreadable concept"), { code: "EACCES" });
+  if (mode === "unreadable-index" && String(file).endsWith("/personal/index.md")) throw Object.assign(new Error("EACCES: unreadable generated index fixture"), { code: "EACCES" });
   return originalRead(file, ...args);
 };
 function check(file) {

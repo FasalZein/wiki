@@ -585,7 +585,12 @@ search, repairs a lock, or rewrites notes, indexes, logs or configuration. Retai
 temporary entries and writer locks remain visible, not reclaimed based on age.
 
 Text coverage compares captured note paths and full byte digests against the
-successful receipt, identity mapping and actual indexed Markdown. Embedding
+successful receipt, identity mapping and actual indexed Markdown. Before SDK
+initialization, it also requires the retained lexical rows to equal active document
+identities and qmd-normalized content, and the active document set to equal the
+captured inventory. Internal FTS integrity or schema timestamps alone do not prove
+coverage. Unreadable generated indexes produce named diagnostics without aborting
+the runtime, dependency or search checks. Embedding
 coverage is separate and uses qmd status for the configured local embed model.
 An empty synchronized inventory can have complete embedding coverage; a populated
 text index can have pending embeddings. Missing models make embedding coverage

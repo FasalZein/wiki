@@ -21,6 +21,11 @@ const SEARCH = ".wiki/search";
 const DATABASE = SEARCH + "/qmd.sqlite";
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error); }
 function digest(bytes: string | Buffer): string { return "sha256:" + createHash("sha256").update(bytes).digest("hex"); }
+// QMD 2.8.3 stores standalone FTS fields with each CJK run spaced by character
+// (store.js normalizeCjkForFTS). Compare that representation, not raw Markdown.
+function qmdFtsText(text: string): string {
+  return text.replace(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]+/gu, run => " " + Array.from(run).join(" ") + " ");
+}
 function checked(root: string, relative: string): string {
   const inspected = inspectContainedPath(root, relative);
   if (!inspected.ok) throw new Error(inspected.problem.message);
@@ -97,7 +102,15 @@ export async function doctorVault(selected: string) {
       for (const d of issues) problem(d.path, d.rule + ": " + d.message, d.fix);
     } catch (error) { problem(".wiki/types", message(error), "Restore readable compatible registry records and files; no scaffolds are installed"); }
   }
-  const navigationProblems = inventory && inventory.diagnostics.length === 0 ? indexFreshnessDiagnostics(root, inventory.indexes) : [];
+  const navigationProblems: ReturnType<typeof indexFreshnessDiagnostics> = [];
+  if (inventory && inventory.diagnostics.length === 0) {
+    for (const [relative, bytes] of inventory.indexes) {
+      try { navigationProblems.push(...indexFreshnessDiagnostics(root, new Map([[relative, bytes]]))); }
+      catch (error) {
+        navigationProblems.push({ path: relative, rule: "index.unreadable", message: message(error), fix: "Restore readable regular generated-index files, then run index explicitly if needed; doctor does not regenerate navigation" });
+      }
+    }
+  }
   for (const d of navigationProblems) problem(d.path, d.rule + ": " + d.message, d.fix);
   const navigation: Check = { state: inventory && !inventory.diagnostics.length && !navigationProblems.length ? "ready" : "unavailable" };
   for (const relative of [".wiki/locks/mutation.lock", SEARCH + "/writer.lock"]) {
@@ -153,9 +166,21 @@ export async function doctorVault(selected: string) {
     if (integrity.length !== 1 || integrity[0]?.quick_check !== "ok") throw new Error("SQLite integrity check failed: " + JSON.stringify(integrity));
     if (probe.internal.db.prepare("PRAGMA inspected.foreign_key_check").all().length) throw new Error("SQLite foreign-key check failed");
     // Pin the required 2.8.3 metadata schema before the SDK can migrate its copy.
-    probe.internal.db.prepare("SELECT d.collection, d.path, d.active, c.doc FROM inspected.documents d JOIN inspected.content c ON c.hash = d.hash").all();
+    const active = probe.internal.db.prepare("SELECT d.id, d.collection, d.path, d.title, c.doc FROM inspected.documents d JOIN inspected.content c ON c.hash = d.hash WHERE d.active = 1").all<{ id: number; collection: string; path: string; title: string; doc: string }>();
     probe.internal.db.prepare("SELECT hash, seq, model, embed_fingerprint, total_chunks FROM inspected.content_vectors").all();
     probe.internal.db.exec("INSERT INTO inspected.documents_fts(documents_fts) VALUES('integrity-check')");
+    // Internal FTS integrity permits missing/stale standalone rows. Check the
+    // retained set and content before SDK initialization can rebuild its copy.
+    const lexical = probe.internal.db.prepare("SELECT rowid, filepath, title, body FROM inspected.documents_fts").all<{ rowid: number; filepath: string; title: string; body: string }>();
+    const lexicalById = new Map(lexical.map(row => [row.rowid, row]));
+    const lexicalHealthy = lexical.length === active.length && active.every(doc => {
+      const row = lexicalById.get(doc.id);
+      return row?.filepath === qmdFtsText(doc.collection + "/" + doc.path) && row.title === qmdFtsText(doc.title) && row.body === qmdFtsText(doc.doc);
+    });
+    if (!lexicalHealthy) problem(DATABASE, "Lexical index rows do not equal active document identities and content", "Inspect the retained database and run search sync explicitly; FTS internal integrity and timestamps do not prove text coverage");
+    const capturedById = new Map(inventory.concepts.map(concept => [createHash("sha256").update(concept.path).digest("hex") + ".md", concept.markdown]));
+    const indexedInventoryMatches = active.length === capturedById.size && active.every(doc => doc.collection === "concepts" && capturedById.get(doc.path) === doc.doc);
+    if (!indexedInventoryMatches) problem(DATABASE, "Indexed document set/content differs from the captured inventory", "Inspect current notes and run search sync explicitly; no completeness is inferred from timestamps");
     const embedded = probe.internal.db.prepare("SELECT DISTINCT v.hash, v.seq FROM inspected.content_vectors v JOIN inspected.documents d ON d.hash = v.hash WHERE d.active = 1").all<{ hash: string; seq: number }>();
     let vectorsHealthy = true;
     if (embedded.length) {
@@ -170,9 +195,9 @@ export async function doctorVault(selected: string) {
     probe.internal.db.exec("DETACH DATABASE inspected");
     snapshotStore = await createStore({ dbPath: copied, config: { collections: {}, models: modelReadiness.models } });
     const status = await snapshotStore.getStatus();
-    database = { state: vectorsHealthy ? "ready" : "unavailable" };
+    database = { state: lexicalHealthy && vectorsHealthy ? "ready" : "unavailable" };
     const expected = inventory.concepts.map(c => ({ path: c.path, digest: digest(c.markdown) })).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
-    let complete = inventory.diagnostics.length === 0 && status.totalDocuments === expected.length;
+    let complete = lexicalHealthy && indexedInventoryMatches && inventory.diagnostics.length === 0 && status.totalDocuments === expected.length;
     const receipt = readJson(root, SEARCH + "/coverage.json");
     if (!isMapping(receipt) || receipt.version !== 1 || JSON.stringify(receipt.inventory) !== JSON.stringify(expected)) {
       complete = false;
