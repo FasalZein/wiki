@@ -12,11 +12,12 @@ import { inspectVault, lintVault } from "./lint.ts";
 import { syncQmdText, findQmd, embedQmd, qmdModelReadiness, FAST_ROLES, DEEP_ROLES, type QmdInventory, type QmdDiagnostic, type QmdEmbeddingCoverage, type QmdReadyModels, type QmdTextCoverage } from "./qmd.ts";
 import { prepareCapture, publishTextCapture, CaptureValidationError, CapturePublicationError, type TextCaptureRequest, type TextCaptureCandidate } from "./capture.ts";
 import { indexDestinationDiagnostics, indexFreshnessDiagnostics } from "./navigation.ts";
+import { doctorVault, doctorText } from "./doctor.ts";
 
 /** The search command already buffered its structured failure output. */
 class SearchReported extends Error {}
 const EXIT: Record<ErrorCode, number> = { usage: 2, conflict: 3, not_found: 4, unsupported: 5, damaged: 6, unavailable: 7 };
-const USAGE = "okf-wiki (Node source CLI)\nUsage: okf-wiki init <dir> [--json]\n       okf-wiki --vault <dir> init [--json]\n       okf-wiki --vault <dir> type list [--json]\n       okf-wiki --vault <dir> type add <name> --folder <folder> [--json]\n       okf-wiki --vault <dir> lint [path] [--json]\n       okf-wiki --vault <dir> index [--check] [--json]\n       okf-wiki --vault <dir> new <type> (--project <p>|--personal) --title <t> --description <d> [--slug <s>] [--body-file <f>] [--tags <tag> ...] [--status <status>] [--json]\n       okf-wiki --vault <dir> capture <file-or-url> (--project <p>|--personal) --title <t> --description <d> [--slug <s>] [--json]\n       okf-wiki --vault <dir> update <canonical-path> --expect sha256:<64 lowercase hex digits> --file <complete-candidate-markdown> [--dry-run] [--json]\n       okf-wiki --vault <dir> search sync [--embed] [--json]\n       okf-wiki --vault <dir> find <question> [--terms <keywords>] [--deep] [--json]\nFast find sends one typed lex/vec qmd query without expansion or reranking; --deep explicitly expands and reranks. Find synchronizes text but never embeds; search sync --embed fills missing embeddings. Models: explicit local GGUF paths in .wiki/config.json search.models (embed, generate, rerank). If models are not ready or vector search fails, find returns lexical results labelled degraded; a degraded miss is not exhaustive. Results render from current note bytes.\n       okf-wiki --vault <dir> show <path> [--section <heading>] [--json]\nWhole-vault lint checks registry, frontmatter, layout, body, lifecycle, scoped titles, links, and generated-index freshness. Selected-path lint does not check generated-index freshness.\nVault: explicit directory, --vault, or WIKI_VAULT. No default vault.\n";
+const USAGE = "okf-wiki (Node source CLI)\nUsage: okf-wiki init <dir> [--json]\n       okf-wiki --vault <dir> init [--json]\n       okf-wiki --vault <dir> type list [--json]\n       okf-wiki --vault <dir> type add <name> --folder <folder> [--json]\n       okf-wiki --vault <dir> lint [path] [--json]\n       okf-wiki --vault <dir> index [--check] [--json]\n       okf-wiki --vault <dir> new <type> (--project <p>|--personal) --title <t> --description <d> [--slug <s>] [--body-file <f>] [--tags <tag> ...] [--status <status>] [--json]\n       okf-wiki --vault <dir> capture <file-or-url> (--project <p>|--personal) --title <t> --description <d> [--slug <s>] [--json]\n       okf-wiki --vault <dir> update <canonical-path> --expect sha256:<64 lowercase hex digits> --file <complete-candidate-markdown> [--dry-run] [--json]\n       okf-wiki --vault <dir> doctor [--json]\n       okf-wiki --vault <dir> search sync [--embed] [--json]\n       okf-wiki --vault <dir> find <question> [--terms <keywords>] [--deep] [--json]\nFast find sends one typed lex/vec qmd query without expansion or reranking; --deep explicitly expands and reranks. Find synchronizes text but never embeds; search sync --embed fills missing embeddings. Models: explicit local GGUF paths in .wiki/config.json search.models (embed, generate, rerank). If models are not ready or vector search fails, find returns lexical results labelled degraded; a degraded miss is not exhaustive. Results render from current note bytes.\n       okf-wiki --vault <dir> show <path> [--section <heading>] [--json]\nWhole-vault lint checks registry, frontmatter, layout, body, lifecycle, scoped titles, links, and generated-index freshness. Selected-path lint does not check generated-index freshness.\nVault: explicit directory, --vault, or WIKI_VAULT. No default vault.\n";
 let json = process.argv.slice(2).includes("--json");
 type PublishedResult = { written: true; paths: string[] } & ({ digest: string } | { digests: Record<string, string> });
 let publishedResult: PublishedResult | undefined;
@@ -62,6 +63,7 @@ try {
     const add = command === "type" && arg === "add" && extra.length === 1 && values.folder !== undefined;
     const index = command === "index" && arg === undefined && extra.length === 0;
     const sync = command === "search" && arg === "sync" && extra.length === 0;
+    const doctor = command === "doctor" && arg === undefined && extra.length === 0;
     const find = command === "find" && arg !== undefined && extra.length === 0;
     if (values.embed !== undefined && !sync) throw new WikiError("usage", "--embed is only valid with search sync");
     if ((values.terms !== undefined || values.deep !== undefined) && !find) throw new WikiError("usage", "--terms and --deep are only valid with find <question>");
@@ -69,7 +71,7 @@ try {
     if (values.check !== undefined && !index) throw new WikiError("usage", "--check is only valid with index");
     const show = command === "show" && arg !== undefined && extra.length === 0;
     if (values.section !== undefined && !show) throw new WikiError("usage", "--section is only valid with show <path>");
-    if (!(sync || find || update || create || capture || show || index || init && extra.length === 0 || list || add || command === "lint" && extra.length === 0) || values.folder !== undefined && !add) throw new WikiError("usage", USAGE);
+    if (!(doctor || sync || find || update || create || capture || show || index || init && extra.length === 0 || list || add || command === "lint" && extra.length === 0) || values.folder !== undefined && !add) throw new WikiError("usage", USAGE);
     if (init && values.vault !== undefined && arg !== undefined && path.resolve(values.vault) !== path.resolve(arg)) {
       throw new WikiError("usage", "Conflicting vault selections: --vault and init <dir> name different directories");
     }
@@ -78,6 +80,10 @@ try {
     if (init) {
       const vault = initVault(selected);
       output({ ok: true, vault }, "Initialized profile vault: " + vault.root + "\n");
+    } else if (doctor) {
+      const report = await doctorVault(selected);
+      if (report.error) process.exitCode = EXIT[report.error.code];
+      output(report, doctorText(report));
     } else {
       const root = openVault(selected);
       if (sync || find) {
