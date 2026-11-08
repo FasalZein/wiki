@@ -10,7 +10,7 @@ node packages/okf-wiki/bin/okf-wiki.js --vault /explicit/disposable/vault init -
 WIKI_VAULT=/explicit/disposable/vault node packages/okf-wiki/bin/okf-wiki.js init --json
 ```
 
-Implemented commands are `init`, `type list`, `type add`, `index`, `index --check`,
+Implemented commands are `init`, `type list`, `type add`, `index`, `index --check`, `doctor`,
 `new`, `capture` (local UTF-8 documents, PDFs, and explicit HTTP/HTTPS resources), `update` (including no-effect dry-run), `show` (including section selection), and `lint` (including relative links and whole-vault generated-index freshness). The init directory argument is an explicit vault selection. `--vault` takes precedence over `WIKI_VAULT`; an init directory also
 takes precedence over the environment. Conflicting flag and positional
 directories fail with exit 2. There is no default vault. Relative vault locations
@@ -570,6 +570,61 @@ heavy --slots 2 -- node --test --test-concurrency=1 --test-name-pattern "okf:16"
 heavy -- bun run typecheck:okf
 ~~~
 
+
+## Read-only foundation inspection (#31)
+
+```sh
+node packages/okf-wiki/bin/okf-wiki.js --vault /explicit/disposable/vault doctor --json
+```
+
+Doctor reports the actual Node, installed qmd package/native, Pandoc and pdftotext
+versions, plus profile, layout, registry, generated navigation and search status.
+Diagnostics name the path or dependency and an explicit next step. Doctor never
+initializes a vault, installs a dependency, downloads/resolves a model, synchronizes
+search, repairs a lock, or rewrites notes, indexes, logs or configuration. Retained
+temporary entries and writer locks remain visible, not reclaimed based on age.
+
+Text coverage compares captured note paths and full byte digests against the
+successful receipt, identity mapping and actual indexed Markdown. Before SDK
+initialization, it also requires the retained lexical rows to equal active document
+identities and qmd-normalized content, and the active document set to equal the
+captured inventory. Internal FTS integrity or schema timestamps alone do not prove
+coverage. Unreadable generated indexes produce named diagnostics without aborting
+the runtime, dependency or search checks. Embedding
+coverage is separate and uses qmd status for the configured local embed model.
+An empty synchronized inventory can have complete embedding coverage; a populated
+text index can have pending embeddings. Missing models make embedding coverage
+unavailable without hiding usable text coverage. File preflight checks all three
+`search.models` roles (`embed`, `generate`, `rerank`) for existing readable absolute
+local GGUF files, through the same `qmdModelReadiness` preflight used by retrieval.
+Doctor never calls the writable qmd open path that provisions SDK cache/config
+directories. File readiness does not certify inference compatibility. No model resolver
+or inference operation runs. Coverage describes the captured inventory, not
+filesystem freshness at return, and never certifies external source correctness.
+
+Doctor probes native SQLite/FTS and sqlite-vec in memory. It never opens the retained
+SQLite database with the SDK: even a read-only connection can create WAL/SHM files.
+Instead it copies the database bytes to a disposable system-temporary directory,
+checks integrity and required metadata/FTS schema before SDK initialization, and
+queries that private copy. It closes the diagnostic stores and removes the copy.
+The temporary directory must be outside the vault and HOME/XDG locations. A
+retained SQLite sidecar or index-writer lock makes inspection unavailable rather
+than triggering recovery. Embedding metadata without physical vector rows is
+reported as damaged storage, while valid text coverage remains separate. A final byte comparison rejects a changed database.
+These checks do not lock out noncooperating editors.
+
+JSON includes `runtime`, `extractors`, `models`, `profile`, `layout`, `registry`,
+`navigation`, `search.database`, `search.textCoverage`, `search.embeddingCoverage`,
+`coverageBasis`, `sourceCorrectness: "not-asserted"` and actionable `diagnostics`.
+A completed inspection with no diagnostic errors exits 0, including explicitly
+pending embeddings. Otherwise `ok: false` and `error` accompany the full report.
+The first detected error sets the exit: usage 2, retained lock 3, missing vault 4,
+unsupported profile 5, damaged retained state 6, unavailable dependency or
+uninspectable search 7. Human output includes the same diagnostics.
+
+Run `OKF_TEST_PATTERN='okf:17' heavy -- bun run test:okf` for real CLI checks.
+They compare byte digests and complete entry listings, including `.wiki/`, against
+before/after vault and decoy HOME/XDG snapshots on healthy and damaged state.
 
 ## Model-free search synchronization (#24)
 
