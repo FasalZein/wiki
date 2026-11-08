@@ -121,9 +121,9 @@ test("okf:10 CLI interrupted sync invalidates the prior receipt and releases its
   assert.equal(cli(vault, ["search", "sync"]).status, 0);
 });
 
-test("okf:10 CLI rejects unsupported embed/find and unrelated options before index effects", () => {
+test("okf:10 CLI rejects unsupported search subcommands and unrelated options before index effects", () => {
   const vault = fresh(); note(vault);
-  for (const args of [["search", "sync", "--embed"], ["search", "find"], ["search", "sync", "extra"], ["search", "sync", "--check"], ["search", "sync", "--folder", "x"], ["search", "sync", "--section", "x"], ["search", "sync", "--personal"]]) {
+  for (const args of [["search", "find"], ["search", "sync", "extra"], ["search", "sync", "--check"], ["search", "sync", "--folder", "x"], ["search", "sync", "--section", "x"], ["search", "sync", "--personal"]]) {
     const result = cli(vault, args); assert.equal(result.status, 2, JSON.stringify(result)); assert.equal(result.data.error.code, "usage");
   }
   assert.equal(fs.existsSync(path.join(vault, ".wiki/search")), false);
