@@ -306,7 +306,9 @@ export type QmdDegraded = { retrieval: "lexical"; exhaustive: false; reason: "mo
 export type QmdFindResult =
   | { state: "successful"; mode: "fast" | "deep"; queries: QmdQuery[]; rerank: boolean; degraded?: QmdDegraded; matches: QmdRenderedMatch[];
       /** Omitted candidates: deleted/renamed, stale index, or moving target. Nonempty means text coverage is incomplete. */
-      omitted: QmdDiagnostic[] }
+      omitted: QmdDiagnostic[];
+      /** The queried index does not hold exactly the captured inventory (for example another sync replaced it). Nonempty means text coverage is incomplete. */
+      indexMismatch: QmdDiagnostic[] }
   | { state: "unavailable"; code: "conflict" | "unavailable"; diagnostics: QmdDiagnostic[] };
 
 function excerptOf(body: string, queries: readonly QmdQuery[]): string {
@@ -361,7 +363,30 @@ export async function findQmd(root: string, request: QmdFindRequest, captured: Q
     store = await open(root, request.mode === "lexical" ? undefined : request.models);
     let queries: QmdQuery[] = [lexical];
     let found: { file: string; score: number }[] | undefined;
+    // The query must run against the index of this request's captured inventory. Another
+    // cooperative sync can replace it between our sync and this lock; detect, never assume.
+    const concepts = new Map(captured.map(c => [c.path, c.markdown]));
+    const indexMismatch: QmdDiagnostic[] = [];
+    const indexed = new Set(identities.values());
+    for (const [relative, markdown] of concepts) {
+      if (!indexed.has(relative)) indexMismatch.push({ path: relative, message: "Captured concept is missing from the queried index (replaced by another synchronization); text coverage incomplete. Search again" });
+      else if (await store.getDocumentBody(PREFIX + stagedId(relative)) !== markdown) indexMismatch.push({ path: relative, message: "Queried index holds a different revision than this request captured (replaced by another synchronization); text coverage incomplete. Search again" });
+    }
+    for (const relative of indexed) if (!concepts.has(relative)) indexMismatch.push({ path: relative, message: "Queried index holds a concept outside this request's captured inventory; text coverage incomplete. Search again" });
+    signal?.throwIfAborted();
     if (request.mode !== "lexical") {
+      // QMD 2.8.3 logs native model/context/query-embedding failures and returns null
+      // embeddings; structured search then skips vector legs and resolves normally.
+      // Observe the embeddings it received instead of relying on a thrown error.
+      const llm = store.internal.llm;
+      if (!llm) throw new Error("SDK store has no bound local model");
+      let missingEmbeddings = 0;
+      const embedBatch = llm.embedBatch.bind(llm);
+      llm.embedBatch = async (texts, options) => {
+        const embeddings = await embedBatch(texts, options);
+        missingEmbeddings += texts.length - embeddings.filter(e => e?.embedding).length;
+        return embeddings;
+      };
       try {
         if (request.mode === "fast") queries = [lexical, { type: "vec", query: request.question }];
         else {
@@ -371,6 +396,7 @@ export async function findQmd(root: string, request: QmdFindRequest, captured: Q
           queries = [...(request.terms === undefined ? [] : [lexical]), ...expanded.map(q => ({ type: q.type, query: q.query }))];
         }
         found = await store.search({ queries, rerank: request.mode === "deep", collection: COLLECTION });
+        if (missingEmbeddings) { found = undefined; throw new Error(missingEmbeddings + " query embeddings were not produced; QMD skipped those vector legs"); }
       } catch (error) {
         if (!vectorFailure(error, signal)) throw error;
         // Same engine, lexical index only: no second search stack.
@@ -380,7 +406,6 @@ export async function findQmd(root: string, request: QmdFindRequest, captured: Q
     }
     found ??= (await store.searchLex(lexical.query, { collection: COLLECTION })).map(hit => ({ file: hit.filepath, score: hit.score }));
     signal?.throwIfAborted();
-    const concepts = new Map(captured.map(c => [c.path, c.markdown]));
     const matches: QmdRenderedMatch[] = [], omitted: QmdDiagnostic[] = [];
     for (const match of found) {
       if (!match.file.startsWith(PREFIX)) throw new Error("Unexpected indexed collection identity");
@@ -389,7 +414,7 @@ export async function findQmd(root: string, request: QmdFindRequest, captured: Q
       if (rendered) matches.push(rendered);
     }
     const rerank = request.mode === "deep" && !degraded;
-    result = { state: "successful", mode: request.mode === "lexical" ? request.requested : request.mode, queries, rerank, ...(degraded ? { degraded } : {}), matches, omitted };
+    result = { state: "successful", mode: request.mode === "lexical" ? request.requested : request.mode, queries, rerank, ...(degraded ? { degraded } : {}), matches, omitted, indexMismatch };
   } catch (error) {
     if (error instanceof IndexWriterBusyError) code = "conflict";
     failures.push({ path: DIRECTORY, message: message(error) });

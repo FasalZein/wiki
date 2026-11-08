@@ -129,14 +129,16 @@ try {
             if (found.state === "unavailable") report({ code: found.code, message: found.code === "conflict" ? "Search index writer is busy" : "Search find unavailable" }, { mode: requested }, coverageText(result.embeddingCoverage), [...diagnostics, ...found.diagnostics]);
             else {
               // Omitted candidates (deleted, renamed, stale index, moving target) make text coverage incomplete for this request.
-              if (found.omitted.length) textCoverage = { state: "incomplete", diagnostics: [...diagnostics, ...found.omitted] };
+              // A replaced index or omitted candidates make text coverage incomplete for this request.
+              const coverageProblems = [...found.indexMismatch, ...found.omitted];
+              if (coverageProblems.length) textCoverage = { state: "incomplete", diagnostics: [...diagnostics, ...coverageProblems] };
               const coverage = found.degraded ? { state: "unavailable" as const } : embeddingCoverage;
               const label = found.degraded ? " degraded: lexical only (" + (found.degraded.reason === "models-unavailable" ? "search models not ready" : "vector search failed") + "); a miss is not an exhaustive absence claim"
                 : found.mode === "deep" ? " (explicit expansion and reranking)" : " (one typed lex/vec query, no expansion, no reranking)";
               report(undefined, { mode: found.mode, queries: found.queries, rerank: found.rerank, ...(found.degraded ? { degraded: found.degraded } : {}), matches: found.matches },
                 "Mode: " + found.mode + label + "\n" + coverageText(coverage) +
                 (found.matches.length ? found.matches.map(m => m.path + " " + m.score.toFixed(4) + " " + m.digest + "\n  " + m.title + ": " + m.description + "\n  " + m.excerpt).join("\n") + "\n" : found.degraded ? "No degraded lexical matches (not exhaustive)\n" : "No matches\n"),
-                [...diagnostics, ...found.omitted, ...(found.degraded?.diagnostics ?? [])], coverage);
+                [...diagnostics, ...coverageProblems, ...(found.degraded?.diagnostics ?? [])], coverage);
             }
           } else if (readiness.state === "ready") { // Non-find readiness failures were reported above.
             const embedded = await embedQmd(root, readiness.models, controller.signal);

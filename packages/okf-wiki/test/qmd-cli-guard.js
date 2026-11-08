@@ -40,7 +40,15 @@ fs.readFileSync = (file, ...args) => {
   }
   return bytes;
 };
+// Two-process stale-index schedule, synchronized only at source events through FIFOs
+// (blocking open/read, no polling): B captures R0 and pauses before its index lock;
+// A captures R1, syncs and releases; B syncs R0 and releases; then A queries.
+const fifo = (name) => path.join(process.env.OKF_QMD_FIFO_DIR ?? "", name);
+let staleB = false, staleA = false;
 fs.writeFileSync = (file, ...args) => {
+  if (mode === "stale-b" && !staleB && String(file).endsWith("/.wiki/search/writer.lock")) {
+    staleB = true; write(fifo("b-captured"), "captured R0"); read(fifo("b-go"));
+  }
   const result = write(file, ...args);
   if (mode === "inspect-active-lock-ignore" && String(file).endsWith("/.wiki/search/writer.lock")) {
     const root = path.resolve(process.argv[process.argv.indexOf("--vault") + 1]);
@@ -61,6 +69,8 @@ const unlink = fs.unlinkSync;
 fs.unlinkSync = (file, ...args) => {
   const result = unlink(file, ...args);
   // Another cooperative writer takes the index lock between text sync and find/embed.
+  if (mode === "stale-b" && String(file).endsWith("/.wiki/search/writer.lock")) write(fifo("a-go"), "synced R0");
+  if (mode === "fake-inference-stale-a" && !staleA && String(file).endsWith("/.wiki/search/writer.lock")) { staleA = true; write(fifo("b-go"), "synced R1"); read(fifo("a-go")); }
   if (mode === "fake-inference-steal-lock" && !fired && String(file).endsWith("/.wiki/search/writer.lock")) { fired = true; write(file, "other writer", { flag: "wx" }); }
   return result;
 };

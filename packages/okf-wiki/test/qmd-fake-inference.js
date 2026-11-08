@@ -23,6 +23,15 @@ export async function createStore(options) {
   const store = await real.createStore(options);
   const llm = store.internal.llm;
   log({ op: "createStore", models: options.config?.models ?? null, tokenizer: process.env.QMD_EMBED_MODEL ?? null, modelCacheDir: llm.modelCacheDir });
+  if (mode === "fake-inference-native-fail") {
+    // Lower seam: QMD's real structured search and real LlamaCpp.embedBatch run over a
+    // real vector table; only native embedding-context allocation fails.
+    if (llm) {
+      store.internal.ensureVecTable(4);
+      llm.ensureEmbedContexts = async () => { log({ op: "ensureEmbedContexts" }); throw new Error("Injected native context allocation failure"); };
+    }
+    return store;
+  }
   store.expandQuery = async (query, ...rest) => {
     llm.ensureModelCacheDir();
     log({ op: "expandQuery", query, rest });
