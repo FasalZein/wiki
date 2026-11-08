@@ -591,7 +591,9 @@ An empty synchronized inventory can have complete embedding coverage; a populate
 text index can have pending embeddings. Missing models make embedding coverage
 unavailable without hiding usable text coverage. File preflight checks all three
 `search.models` roles (`embed`, `generate`, `rerank`) for existing readable absolute
-local GGUF files. It does not certify inference compatibility. No model resolver
+local GGUF files, through the same `qmdModelReadiness` preflight used by retrieval.
+Doctor never calls the writable qmd open path that provisions SDK cache/config
+directories. File readiness does not certify inference compatibility. No model resolver
 or inference operation runs. Coverage describes the captured inventory, not
 filesystem freshness at return, and never certifies external source correctness.
 

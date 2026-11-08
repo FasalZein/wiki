@@ -245,3 +245,25 @@ test("okf:17 diagnostic native close failure keeps a structured report and never
   assert.equal(result.data.search.textCoverage.state, "unavailable"); assert.equal(result.data.search.embeddingCoverage.state, "unavailable");
   assert.match(JSON.stringify(result.data.diagnostics), /Diagnostic database close failed.*SQLITE_IOERR/);
 });
+
+
+test("okf:17 shared readiness keeps embed available when deep-only model files are missing", () => {
+  const vault = fresh(); configureModels(vault); note(vault); succeeds(vault, ["search", "sync"]);
+  fs.unlinkSync(path.join(vault, "models/generate.gguf")); fs.unlinkSync(path.join(vault, "models/rerank.gguf"));
+  const result = doctor(vault); assert.equal(result.status, 7);
+  assert.equal(result.data.models.embed.state, "ready"); assert.equal(result.data.models.generate.state, "unavailable"); assert.equal(result.data.models.rerank.state, "unavailable");
+  assert.equal(result.data.search.textCoverage.state, "complete"); assert.equal(result.data.search.embeddingCoverage.state, "incomplete");
+});
+
+test("okf:17 doctor never provisions the SDK cache/config chain after normal sync state is removed", () => {
+  const vault = fresh(); configureModels(vault); note(vault); succeeds(vault, ["search", "sync"]);
+  const cache = path.join(vault, ".wiki/search/sdk-cache"), config = path.join(vault, ".wiki/search/sdk-config");
+  assert.equal(fs.existsSync(path.join(cache, "qmd/models")), true, "#25 sync creates the local SDK cache before doctor");
+  fs.rmSync(cache, { recursive: true }); fs.rmSync(config, { recursive: true, force: true });
+  const result = doctor(vault); assert.equal(result.status, 0, JSON.stringify(result.data));
+  assert.equal(result.data.search.textCoverage.state, "complete");
+  assert.equal(fs.existsSync(cache), false); assert.equal(fs.existsSync(config), false);
+  fs.writeFileSync(path.join(vault, ".wiki/search/qmd.sqlite"), "damaged local index");
+  const damaged = doctor(vault); assert.equal(damaged.status, 7);
+  assert.equal(fs.existsSync(cache), false); assert.equal(fs.existsSync(config), false);
+});

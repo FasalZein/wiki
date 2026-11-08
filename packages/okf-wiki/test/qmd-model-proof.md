@@ -39,6 +39,20 @@ configured LLM. The proof therefore supplies the local embedding path through
 QMD_EMBED_MODEL as well as store config. Store config alone does not bind this
 global tokenizer. No remote model URI or alternate engine is used.
 
+## Product find smoke (#25)
+
+    OKF_QMD_PROOF=find OKF_QMD_MODEL_DIR=/existing/models heavy -- node packages/okf-wiki/test/qmd-model-proof.js
+
+The same parent sandbox runs qmd-find-smoke-child.js. It drives the real CLI in a
+disposable vault whose .wiki/config.json names the three local files: search sync
+--embed, fast find (one typed lex/vec query, rerank false), a vector-only hit
+with non-matching terms, and deep find (expansion plus rerank). It records Node,
+QMD, node-llama-cpp versions and model hashes. The CLI binds QMD_EMBED_MODEL from
+the configured embed file itself; the smoke clears it in the child environment.
+The smoke passes an absent decoy HOME and no XDG values. The product binds the QMD
+model cache and config to .wiki/search/sdk-cache and sdk-config before the SDK
+import; the smoke fails if anything appears under the decoy home.
+
 ## Dependency pins
 
 QMD 2.8.3 is retained as the engine. Its exact dependency pins still contain known

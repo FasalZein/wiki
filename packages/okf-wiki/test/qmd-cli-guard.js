@@ -10,12 +10,20 @@ import { registerHooks, syncBuiltinESMExports } from "node:module";
 const mode = process.env.OKF_QMD_CLI_GUARD;
 if (mode === "close-failure") { process.env.OKF_QMD_FAIL_CLOSE = "yes"; await import("./qmd-cleanup-guard.js"); }
 let modelAttempts = 0;
+// Fake only external inference: the wrapper keeps the real SDK store and SQLite storage.
+const FAKE_INFERENCE = new URL("./qmd-fake-inference.js", import.meta.url).href;
 registerHooks({ resolve(specifier, context, nextResolve) {
+  if (mode?.startsWith("fake-inference") && specifier === "@tobilu/qmd" && context.parentURL !== FAKE_INFERENCE) return { url: FAKE_INFERENCE, shortCircuit: true };
   if (specifier === "node-llama-cpp") { modelAttempts++; throw new Error("Model-free CLI attempted native inference import"); }
   if ((mode === "missing-sdk" || mode === "missing-native") && specifier === (mode === "missing-sdk" ? "@tobilu/qmd" : "better-sqlite3")) throw Object.assign(new Error("Injected unavailable SDK"), { code: "ERR_MODULE_NOT_FOUND" });
   return nextResolve(specifier, context);
 } });
 let networkAttempts = 0;
+// Find and sync must not start detached embedding workers or any subprocess.
+if (process.env.OKF_QMD_DENY_SUBPROCESS === "1") {
+  const cp = await import("node:child_process");
+  for (const name of ["spawn", "spawnSync", "exec", "execSync", "execFile", "execFileSync", "fork"]) cp.default[name] = () => { throw new Error("Search attempted subprocess " + name); };
+}
 const deny = () => { networkAttempts++; throw new Error("Model-free CLI attempted network access"); };
 process.on("exit", () => {
   if (modelAttempts || networkAttempts) throw new Error("Forbidden model/network attempts: " + modelAttempts + "/" + networkAttempts);
@@ -47,6 +55,13 @@ fs.writeFileSync = (file, ...args) => {
     fired = true;
     if (!process.emit("SIGTERM")) throw new Error("CLI has no cooperative SIGTERM listener");
   }
+  return result;
+};
+const unlink = fs.unlinkSync;
+fs.unlinkSync = (file, ...args) => {
+  const result = unlink(file, ...args);
+  // Another cooperative writer takes the index lock between text sync and find/embed.
+  if (mode === "fake-inference-steal-lock" && !fired && String(file).endsWith("/.wiki/search/writer.lock")) { fired = true; write(file, "other writer", { flag: "wx" }); }
   return result;
 };
 syncBuiltinESMExports();

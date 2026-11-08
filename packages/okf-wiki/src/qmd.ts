@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import * as path from "node:path";
 import { createHash } from "node:crypto";
 import type { QMDStore, UpdateProgress, UpdateResult } from "@tobilu/qmd";
 import { canonicalPathProblem, inspectContainedPath } from "./paths.ts";
@@ -23,7 +24,9 @@ export type QmdSyncResult =
   | { state: "successful"; textCoverage: Extract<QmdTextCoverage, { state: "complete" }>; embeddingCoverage: QmdEmbeddingCoverage; update: UpdateResult }
   | { state: "incomplete"; textCoverage: Extract<QmdTextCoverage, { state: "incomplete" }>; embeddingCoverage: QmdEmbeddingCoverage; update: UpdateResult }
   | { state: "unavailable"; code: "conflict" | "unavailable"; textCoverage: Extract<QmdTextCoverage, { state: "unavailable" }>; embeddingCoverage: { state: "unavailable" } };
-export type QmdSyncOptions = { signal?: AbortSignal; onProgress?: (progress: UpdateProgress) => void };
+/** models: preflighted local files. Text update never runs inference, but QMD counts
+ * pending embeddings against the configured embedding model identity. */
+export type QmdSyncOptions = { signal?: AbortSignal; onProgress?: (progress: UpdateProgress) => void; models?: QmdModels };
 export type QmdLexResult =
   | { state: "successful"; matches: { path: string; markdown: string; score: number }[] }
   | { state: "unavailable"; diagnostics: QmdDiagnostic[] };
@@ -78,12 +81,32 @@ async function cleanup(store: QMDStore | undefined, release: (() => QmdDiagnosti
 function unavailable(diagnostics: QmdDiagnostic[], code: "conflict" | "unavailable" = "unavailable"): Extract<QmdSyncResult, { state: "unavailable" }> {
   return { state: "unavailable", code, textCoverage: { state: "unavailable", diagnostics }, embeddingCoverage: { state: "unavailable" } };
 }
-async function open(root: string): Promise<QMDStore> {
+async function open(root: string, models?: QmdModels): Promise<QMDStore> {
   const dbPath = checked(root, DIRECTORY + "/qmd.sqlite");
   for (const suffix of ["-wal", "-shm", "-journal"]) checked(root, DIRECTORY + "/qmd.sqlite" + suffix);
+  // QMD 2.8.3 fixes its model cache from XDG_CACHE_HOME (else ~/.cache) at first import
+  // and creates it before resolving even absolute local files. Bind cache and config to
+  // vault-local derived state first. Process-wide: a one-shot CLI opens one vault.
+  // QMD appends qmd/models (cache) and qmd (config) and mkdirs them recursively, which
+  // follows symlinks. Validate every SDK-managed component and create the cache one
+  // non-recursive level at a time, so an existing symlink or file fails closed.
+  const cache = checked(root, DIRECTORY + "/sdk-cache");
+  for (const relative of ["sdk-cache", "sdk-cache/qmd", "sdk-cache/qmd/models"]) {
+    const full = checked(root, DIRECTORY + "/" + relative);
+    try { fs.mkdirSync(full); } catch (error) { if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error; }
+    // lstat: a symlink created after the check is not a directory.
+    if (!fs.lstatSync(full).isDirectory()) throw new Error("Expected a directory for SDK cache: " + DIRECTORY + "/" + relative);
+  }
+  const config = checked(root, DIRECTORY + "/sdk-config");
+  for (const relative of ["sdk-config", "sdk-config/qmd"]) {
+    const stat = fs.lstatSync(checked(root, DIRECTORY + "/" + relative), { throwIfNoEntry: false });
+    if (stat && !stat.isDirectory()) throw new Error("Expected a directory for SDK config: " + DIRECTORY + "/" + relative);
+  }
+  process.env.XDG_CACHE_HOME = cache;
+  process.env.XDG_CONFIG_HOME = config;
   // Lazy import keeps ordinary vault commands independent of native search dependencies.
   const { createStore } = await import("@tobilu/qmd");
-  return createStore({ dbPath, config: { collections: { [COLLECTION]: {
+  return createStore({ dbPath, config: { ...(models ? { models } : {}), collections: { [COLLECTION]: {
     path: checked(root, DIRECTORY + "/snapshots"), pattern: "**/*.md",
   } } } });
 }
@@ -136,7 +159,8 @@ export async function syncQmdText(root: string, inventory: QmdInventory, options
       const full = checked(root, DIRECTORY + "/snapshots/" + id);
       fs.writeFileSync(full, markdown, { flag: "wx" });
     }
-    store = await open(root);
+    if (options.models) bindModels(options.models);
+    store = await open(root, options.models);
     const update = await store.update({ collections: [COLLECTION], onProgress(progress) {
       options.signal?.throwIfAborted();
       const canonical = identities.get(progress.file);
@@ -220,4 +244,139 @@ export async function searchQmdLex(root: string, query: string, limit = 10): Pro
   }
   failures.push(...await cleanup(store, release));
   return failures.length ? { state: "unavailable", diagnostics: failures } : result ?? { state: "unavailable", diagnostics: [{ path: DIRECTORY, message: "Lexical query did not complete" }] };
+}
+
+/** Explicit local model files from .wiki/config.json search.models. Initialization leaves them unset. */
+export type QmdModelRole = "embed" | "generate" | "rerank";
+export type QmdModels = Partial<Record<QmdModelRole, string>>;
+export type QmdReadyModels<R extends QmdModelRole> = Record<R, string> & QmdModels;
+export type QmdReadiness<R extends QmdModelRole> =
+  | { state: "ready"; models: QmdReadyModels<R> }
+  | { state: "unavailable"; diagnostics: QmdDiagnostic[] };
+export const FAST_ROLES = ["embed"] as const;
+export const DEEP_ROLES = ["embed", "generate", "rerank"] as const;
+const GGUF_MAGIC = "GGUF";
+
+/** Preflight before any SDK model use so QMD's default resolver cannot download or call hosted inference. */
+export function qmdModelReadiness<R extends QmdModelRole>(root: string, roles: readonly R[]): QmdReadiness<R> {
+  const diagnostics: QmdDiagnostic[] = [];
+  let configured: Record<string, unknown> = {};
+  try {
+    const raw: unknown = JSON.parse(fs.readFileSync(checked(root, ".wiki/config.json"), "utf8"));
+    const search = typeof raw === "object" && raw !== null && "search" in raw ? raw.search : undefined;
+    const models = typeof search === "object" && search !== null && "models" in search ? search.models : undefined;
+    if (search !== undefined && (typeof search !== "object" || search === null || Array.isArray(search)) || models !== undefined && (typeof models !== "object" || models === null || Array.isArray(models))) {
+      return { state: "unavailable", diagnostics: [{ path: ".wiki/config.json", message: "search.models must be an object of local model file paths" }] };
+    }
+    configured = (models ?? {}) as Record<string, unknown>;
+  } catch (error) { return { state: "unavailable", diagnostics: [{ path: ".wiki/config.json", message: message(error) }] }; }
+  const models: QmdModels = {};
+  for (const role of DEEP_ROLES) {
+    const value = configured[role];
+    const where = ".wiki/config.json#search.models." + role;
+    if (value === undefined) { if ((roles as readonly string[]).includes(role)) diagnostics.push({ path: where, message: "Not configured. Set an existing local GGUF file path; no model is downloaded and no hosted inference is used" }); continue; }
+    if (typeof value !== "string" || !path.isAbsolute(value) || /^[a-z][a-z0-9+.-]*:/i.test(value)) { diagnostics.push({ path: where, message: "Expected an absolute local file path, not a remote model URI" }); continue; }
+    try {
+      if (!fs.statSync(value).isFile()) throw new Error("not a regular file");
+      const fd = fs.openSync(value, "r");
+      try { const header = Buffer.alloc(4); fs.readSync(fd, header, 0, 4, 0); if (header.toString("latin1") !== GGUF_MAGIC) throw new Error("missing GGUF header"); }
+      finally { fs.closeSync(fd); }
+      models[role] = value;
+    } catch (error) { if ((roles as readonly string[]).includes(role)) diagnostics.push({ path: where, message: "Model file unavailable (" + message(error) + "): " + value }); }
+  }
+  return diagnostics.length ? { state: "unavailable", diagnostics } : { state: "ready", models: models as QmdReadyModels<R> };
+}
+function bindModels(models: QmdModels) {
+  // QMD 2.8.3 token chunking uses a process-global tokenizer that reads only
+  // QMD_EMBED_MODEL, separate from the store LLM. Bind both before first SDK use.
+  if (models.embed) process.env.QMD_EMBED_MODEL = models.embed;
+}
+
+export type QmdQuery = { type: "lex" | "vec" | "hyde"; query: string };
+export type QmdFindRequest =
+  | { mode: "fast"; question: string; terms?: string; models: QmdReadyModels<"embed"> }
+  | { mode: "deep"; question: string; terms?: string; models: QmdReadyModels<"embed" | "generate" | "rerank"> };
+export type QmdFindResult =
+  | { state: "successful"; mode: "fast" | "deep"; queries: QmdQuery[]; rerank: boolean; matches: { path: string; score: number }[] }
+  | { state: "unavailable"; code: "conflict" | "unavailable"; diagnostics: QmdDiagnostic[] };
+
+/** Fast: one typed lex/vec request, no expansion, no rerank. Deep: explicit expansion
+ * and reranking. A fast miss never escalates. Synchronize text first; never embeds. */
+export async function findQmd(root: string, request: QmdFindRequest, signal?: AbortSignal): Promise<QmdFindResult> {
+  let release: (() => QmdDiagnostic[]) | undefined;
+  let store: QMDStore | undefined;
+  let result: QmdFindResult | undefined;
+  let code: "conflict" | "unavailable" = "unavailable";
+  const failures: QmdDiagnostic[] = [];
+  try {
+    signal?.throwIfAborted();
+    if (!request.question.trim() || request.terms !== undefined && !request.terms.trim()) throw new Error("Expected a nonempty question and terms");
+    release = acquire(root);
+    if (!fs.existsSync(checked(root, DIRECTORY + "/qmd.sqlite"))) throw new Error("Text index unavailable; synchronize captured concepts first");
+    const identities = readIdentities(root);
+    bindModels(request.models);
+    store = await open(root, request.models);
+    let queries: QmdQuery[];
+    if (request.mode === "fast") queries = [{ type: "lex", query: request.terms ?? request.question }, { type: "vec", query: request.question }];
+    else {
+      const expanded = await store.expandQuery(request.question);
+      // Native inference cannot be cancelled mid-call; stop at the next boundary.
+      signal?.throwIfAborted();
+      queries = [...(request.terms === undefined ? [] : [{ type: "lex" as const, query: request.terms }]), ...expanded.map(q => ({ type: q.type, query: q.query }))];
+    }
+    const rerank = request.mode === "deep";
+    const found = await store.search({ queries, rerank, collection: COLLECTION });
+    signal?.throwIfAborted();
+    const matches = [];
+    for (const match of found) {
+      if (!match.file.startsWith(PREFIX)) throw new Error("Unexpected indexed collection identity");
+      const relative = identities.get(match.file.slice(PREFIX.length));
+      if (!relative) throw new Error("Unmapped indexed concept identity: " + match.file);
+      matches.push({ path: relative, score: match.score });
+    }
+    result = { state: "successful", mode: request.mode, queries, rerank, matches };
+  } catch (error) {
+    if (error instanceof IndexWriterBusyError) code = "conflict";
+    failures.push({ path: DIRECTORY, message: message(error) });
+  }
+  failures.push(...await cleanup(store, release));
+  // A signal during cleanup still withholds success.
+  if (signal?.aborted && !failures.length) failures.push({ path: DIRECTORY, message: message(signal.reason) });
+  return failures.length ? { state: "unavailable", code, diagnostics: failures } : result ?? { state: "unavailable", code, diagnostics: [{ path: DIRECTORY, message: "Find did not complete" }] };
+}
+
+export type QmdEmbedResult =
+  | { state: "complete"; embeddingCoverage: { state: "complete" }; embedded: { docsProcessed: number; chunksEmbedded: number; errors: number } }
+  | { state: "failed"; code: "conflict" | "unavailable"; embeddingCoverage: QmdEmbeddingCoverage; embedded?: { docsProcessed: number; chunksEmbedded: number; errors: number }; diagnostics: QmdDiagnostic[] };
+
+/** Explicit synchronous embedding of current missing content hashes. No detached worker. */
+export async function embedQmd(root: string, models: QmdReadyModels<"embed">, signal?: AbortSignal): Promise<QmdEmbedResult> {
+  let code: "conflict" | "unavailable" = "unavailable";
+  let release: (() => QmdDiagnostic[]) | undefined;
+  let store: QMDStore | undefined;
+  let embedded: { docsProcessed: number; chunksEmbedded: number; errors: number } | undefined;
+  let coverage: QmdEmbeddingCoverage = { state: "unavailable" };
+  const failures: QmdDiagnostic[] = [];
+  try {
+    signal?.throwIfAborted();
+    release = acquire(root);
+    if (!fs.existsSync(checked(root, DIRECTORY + "/qmd.sqlite"))) throw new Error("Text index unavailable; synchronize captured concepts first");
+    bindModels(models);
+    store = await open(root, models);
+    // Progress is the SDK's only callback; aborting there stops between batches.
+    const outcome = await store.embed({ onProgress() { signal?.throwIfAborted(); } });
+    signal?.throwIfAborted();
+    embedded = { docsProcessed: outcome.docsProcessed, chunksEmbedded: outcome.chunksEmbedded, errors: outcome.errors };
+    const status = await store.getStatus();
+    coverage = status.needsEmbedding > 0 ? { state: "pending", contentHashes: status.needsEmbedding } : { state: "complete" };
+    if (outcome.errors > 0) failures.push({ path: DIRECTORY, message: outcome.errors + " embedding errors" });
+    if (coverage.state !== "complete") failures.push({ path: DIRECTORY, message: "Embeddings remain pending after explicit embedding" });
+  } catch (error) {
+    if (error instanceof IndexWriterBusyError) code = "conflict";
+    failures.push({ path: DIRECTORY, message: message(error) });
+  }
+  failures.push(...await cleanup(store, release));
+  if (signal?.aborted && !failures.some(f => f.message === message(signal.reason))) failures.push({ path: DIRECTORY, message: message(signal.reason) });
+  if (failures.length || !embedded || coverage.state !== "complete") return { state: "failed", code, embeddingCoverage: coverage.state === "complete" ? { state: "unavailable" } : coverage, ...(embedded ? { embedded } : {}), diagnostics: failures };
+  return { state: "complete", embeddingCoverage: { state: "complete" }, embedded };
 }

@@ -9,13 +9,15 @@ import { readUpdateCandidate, updateTopic, UpdateConflictError, UpdateTemporaryE
 import { createTopic, CreatePartialError, CreateValidationError, type CreateRequest } from "./create.ts";
 import { withMutationLock, MutationReleaseError } from "./mutation.ts";
 import { inspectVault, lintVault } from "./lint.ts";
-import { syncQmdText, type QmdInventory } from "./qmd.ts";
+import { syncQmdText, findQmd, embedQmd, qmdModelReadiness, FAST_ROLES, DEEP_ROLES, type QmdInventory, type QmdDiagnostic, type QmdEmbeddingCoverage, type QmdReadyModels } from "./qmd.ts";
 import { prepareCapture, publishTextCapture, CaptureValidationError, CapturePublicationError, type TextCaptureRequest, type TextCaptureCandidate } from "./capture.ts";
 import { indexDestinationDiagnostics, indexFreshnessDiagnostics } from "./navigation.ts";
 import { doctorVault, doctorText } from "./doctor.ts";
 
+/** The search command already buffered its structured failure output. */
+class SearchReported extends Error {}
 const EXIT: Record<ErrorCode, number> = { usage: 2, conflict: 3, not_found: 4, unsupported: 5, damaged: 6, unavailable: 7 };
-const USAGE = "okf-wiki (Node source CLI)\nUsage: okf-wiki init <dir> [--json]\n       okf-wiki --vault <dir> init [--json]\n       okf-wiki --vault <dir> type list [--json]\n       okf-wiki --vault <dir> type add <name> --folder <folder> [--json]\n       okf-wiki --vault <dir> lint [path] [--json]\n       okf-wiki --vault <dir> index [--check] [--json]\n       okf-wiki --vault <dir> new <type> (--project <p>|--personal) --title <t> --description <d> [--slug <s>] [--body-file <f>] [--tags <tag> ...] [--status <status>] [--json]\n       okf-wiki --vault <dir> capture <file-or-url> (--project <p>|--personal) --title <t> --description <d> [--slug <s>] [--json]\n       okf-wiki --vault <dir> update <canonical-path> --expect sha256:<64 lowercase hex digits> --file <complete-candidate-markdown> [--dry-run] [--json]\n       okf-wiki --vault <dir> doctor [--json]\n       okf-wiki --vault <dir> search sync [--json]\n       okf-wiki --vault <dir> show <path> [--section <heading>] [--json]\nWhole-vault lint checks registry, frontmatter, layout, body, lifecycle, scoped titles, links, and generated-index freshness. Selected-path lint does not check generated-index freshness.\nVault: explicit directory, --vault, or WIKI_VAULT. No default vault.\n";
+const USAGE = "okf-wiki (Node source CLI)\nUsage: okf-wiki init <dir> [--json]\n       okf-wiki --vault <dir> init [--json]\n       okf-wiki --vault <dir> type list [--json]\n       okf-wiki --vault <dir> type add <name> --folder <folder> [--json]\n       okf-wiki --vault <dir> lint [path] [--json]\n       okf-wiki --vault <dir> index [--check] [--json]\n       okf-wiki --vault <dir> new <type> (--project <p>|--personal) --title <t> --description <d> [--slug <s>] [--body-file <f>] [--tags <tag> ...] [--status <status>] [--json]\n       okf-wiki --vault <dir> capture <file-or-url> (--project <p>|--personal) --title <t> --description <d> [--slug <s>] [--json]\n       okf-wiki --vault <dir> update <canonical-path> --expect sha256:<64 lowercase hex digits> --file <complete-candidate-markdown> [--dry-run] [--json]\n       okf-wiki --vault <dir> doctor [--json]\n       okf-wiki --vault <dir> search sync [--embed] [--json]\n       okf-wiki --vault <dir> find <question> [--terms <keywords>] [--deep] [--json]\nFast find sends one typed lex/vec qmd query without expansion or reranking; --deep explicitly expands and reranks. Find synchronizes text but never embeds; search sync --embed fills missing embeddings. Models: explicit local GGUF paths in .wiki/config.json search.models (embed, generate, rerank).\n       okf-wiki --vault <dir> show <path> [--section <heading>] [--json]\nWhole-vault lint checks registry, frontmatter, layout, body, lifecycle, scoped titles, links, and generated-index freshness. Selected-path lint does not check generated-index freshness.\nVault: explicit directory, --vault, or WIKI_VAULT. No default vault.\n";
 let json = process.argv.slice(2).includes("--json");
 type PublishedResult = { written: true; paths: string[] } & ({ digest: string } | { digests: Record<string, string> });
 let publishedResult: PublishedResult | undefined;
@@ -25,7 +27,7 @@ function output(value: object, human: string, stderr = "") { outputBuffer.pendin
 try {
   const { values, positionals } = parseArgs({
     allowPositionals: true,
-    options: { expect: { type: "string" }, file: { type: "string" }, "dry-run": { type: "boolean" }, project: { type: "string" }, personal: { type: "boolean" }, title: { type: "string" }, description: { type: "string" }, slug: { type: "string" }, "body-file": { type: "string" }, tags: { type: "string", multiple: true }, status: { type: "string" }, vault: { type: "string" }, folder: { type: "string" }, section: { type: "string" }, json: { type: "boolean" }, check: { type: "boolean" }, help: { type: "boolean", short: "h" } },
+    options: { expect: { type: "string" }, file: { type: "string" }, "dry-run": { type: "boolean" }, project: { type: "string" }, personal: { type: "boolean" }, title: { type: "string" }, description: { type: "string" }, slug: { type: "string" }, "body-file": { type: "string" }, tags: { type: "string", multiple: true }, status: { type: "string" }, vault: { type: "string" }, folder: { type: "string" }, section: { type: "string" }, terms: { type: "string" }, deep: { type: "boolean" }, embed: { type: "boolean" }, json: { type: "boolean" }, check: { type: "boolean" }, help: { type: "boolean", short: "h" } },
   });
   json = values.json ?? false;
   if (values.help) {
@@ -62,10 +64,14 @@ try {
     const index = command === "index" && arg === undefined && extra.length === 0;
     const sync = command === "search" && arg === "sync" && extra.length === 0;
     const doctor = command === "doctor" && arg === undefined && extra.length === 0;
+    const find = command === "find" && arg !== undefined && extra.length === 0;
+    if (values.embed !== undefined && !sync) throw new WikiError("usage", "--embed is only valid with search sync");
+    if ((values.terms !== undefined || values.deep !== undefined) && !find) throw new WikiError("usage", "--terms and --deep are only valid with find <question>");
+    if (find && (!arg.trim() || values.terms !== undefined && !values.terms.trim())) throw new WikiError("usage", "find requires a nonempty question and nonempty --terms when given");
     if (values.check !== undefined && !index) throw new WikiError("usage", "--check is only valid with index");
     const show = command === "show" && arg !== undefined && extra.length === 0;
     if (values.section !== undefined && !show) throw new WikiError("usage", "--section is only valid with show <path>");
-    if (!(doctor || sync || update || create || capture || show || index || init && extra.length === 0 || list || add || command === "lint" && extra.length === 0) || values.folder !== undefined && !add) throw new WikiError("usage", USAGE);
+    if (!(doctor || sync || find || update || create || capture || show || index || init && extra.length === 0 || list || add || command === "lint" && extra.length === 0) || values.folder !== undefined && !add) throw new WikiError("usage", USAGE);
     if (init && values.vault !== undefined && arg !== undefined && path.resolve(values.vault) !== path.resolve(arg)) {
       throw new WikiError("usage", "Conflicting vault selections: --vault and init <dir> name different directories");
     }
@@ -80,11 +86,22 @@ try {
       output(report, doctorText(report));
     } else {
       const root = openVault(selected);
-      if (sync) {
+      if (sync || find) {
         const controller = new AbortController();
-        const abort = () => controller.abort(new Error("Search synchronization interrupted"));
+        const abort = () => controller.abort(new Error("Search " + (find ? "find" : "synchronization") + " interrupted"));
         process.on("SIGINT", abort); process.on("SIGTERM", abort);
         try {
+          // Preflight explicit local models before any index effect or SDK model use.
+          const roles = find ? (values.deep ? DEEP_ROLES : FAST_ROLES) : values.embed ? FAST_ROLES : [];
+          const readiness = qmdModelReadiness(root, roles);
+          // Plain sync measures pending embeddings against a configured embed model when one is ready.
+          const measured = roles.length ? readiness : qmdModelReadiness(root, FAST_ROLES);
+          if (readiness.state === "unavailable") {
+            process.exitCode = EXIT.unavailable;
+            const error = { code: "unavailable", message: "Search models are not ready; configure existing local files (no download or hosted inference is attempted)" };
+            output({ ok: false, error, readiness: "unavailable", diagnostics: readiness.diagnostics }, "", error.code + ": " + error.message + "\n" + readiness.diagnostics.map(d => d.path + ": " + d.message).join("\n") + "\n");
+            throw new SearchReported();
+          }
           let captured: QmdInventory;
           try {
             const inventory = inspectVault(root);
@@ -93,16 +110,33 @@ try {
             // An incomplete scan cannot reuse an earlier successful receipt.
             captured = { concepts: [], diagnostics: [{ path: "", message: error instanceof Error ? error.message : String(error) }] };
           }
-          const result = await syncQmdText(root, captured, { signal: controller.signal });
+          const result = await syncQmdText(root, captured, { signal: controller.signal, ...(measured.state === "ready" ? { models: measured.models } : {}) });
           const diagnostics = result.textCoverage.state === "complete" ? [] : result.textCoverage.diagnostics;
           const embeddingCoverage = result.embeddingCoverage.state === "pending"
             ? { state: "incomplete", contentHashes: result.embeddingCoverage.contentHashes } : result.embeddingCoverage;
           const error = result.state === "unavailable" ? { code: result.code, message: result.code === "conflict" ? "Search index writer is busy" : "Search synchronization unavailable" } : undefined;
-          if (error) process.exitCode = EXIT[error.code];
-          output({ ok: !error, ...(error ? { error } : {}), coverageBasis: "captured-inventory", textCoverage: result.textCoverage, embeddingCoverage, diagnostics },
-            "Text coverage: " + result.textCoverage.state + " (captured inventory, not a current-at-return guarantee)\nEmbedding coverage: " + embeddingCoverage.state +
-            ("contentHashes" in embeddingCoverage ? " (" + embeddingCoverage.contentHashes + " content hashes pending)" : "") + "\n",
-            (error ? error.code + ": " + error.message + "\n" : "") + diagnostics.map(d => d.path + ": " + d.message).join("\n") + (diagnostics.length ? "\n" : ""));
+          const coverageText = (coverage: QmdEmbeddingCoverage | typeof embeddingCoverage) => "Text coverage: " + result.textCoverage.state + " (captured inventory, not a current-at-return guarantee)\nEmbedding coverage: " + (coverage.state === "pending" ? "incomplete" : coverage.state) +
+            ("contentHashes" in coverage ? " (" + coverage.contentHashes + " content hashes pending)" : "") + "\n";
+          const report = (failure: { code: "conflict" | "unavailable"; message: string } | undefined, extra: object, human: string, problems: QmdDiagnostic[], coverage: object = embeddingCoverage) => {
+            if (failure) process.exitCode = EXIT[failure.code];
+            output({ ok: !failure, ...(failure ? { error: failure } : {}), coverageBasis: "captured-inventory", textCoverage: result.textCoverage, embeddingCoverage: coverage, ...extra, diagnostics: problems },
+              human, (failure ? failure.code + ": " + failure.message + "\n" : "") + problems.map(d => d.path + ": " + d.message).join("\n") + (problems.length ? "\n" : ""));
+          };
+          if (error || !(find || values.embed)) report(error, {}, coverageText(result.embeddingCoverage), diagnostics);
+          else if (find && arg !== undefined) {
+            const question = arg, terms = values.terms;
+            const found = values.deep ? await findQmd(root, { mode: "deep", question, terms, models: readiness.models as QmdReadyModels<"embed" | "generate" | "rerank"> }, controller.signal) // --deep preflighted DEEP_ROLES
+              : await findQmd(root, { mode: "fast", question, terms, models: readiness.models }, controller.signal);
+            if (found.state === "unavailable") report({ code: found.code, message: found.code === "conflict" ? "Search index writer is busy" : "Search find unavailable" }, { mode: values.deep ? "deep" : "fast" }, coverageText(result.embeddingCoverage), [...diagnostics, ...found.diagnostics]);
+            else report(undefined, { mode: found.mode, queries: found.queries, rerank: found.rerank, matches: found.matches },
+              "Mode: " + found.mode + (found.mode === "deep" ? " (explicit expansion and reranking)" : " (one typed lex/vec query, no expansion, no reranking)") + "\n" + coverageText(result.embeddingCoverage) +
+              (found.matches.length ? found.matches.map(m => m.path + " " + m.score.toFixed(4)).join("\n") + "\n" : "No matches\n"), diagnostics);
+          } else {
+            const embedded = await embedQmd(root, readiness.models, controller.signal);
+            const coverage = embedded.embeddingCoverage.state === "pending" ? { state: "incomplete", contentHashes: embedded.embeddingCoverage.contentHashes } : embedded.embeddingCoverage;
+            if (embedded.state === "failed") report({ code: embedded.code, message: embedded.code === "conflict" ? "Search index writer is busy" : "Embedding synchronization failed" }, { embedding: "failed", ...(embedded.embedded ? { embedded: embedded.embedded } : {}) }, coverageText(embedded.embeddingCoverage), [...diagnostics, ...embedded.diagnostics], coverage);
+            else report(undefined, { embedding: "complete", embedded: embedded.embedded }, coverageText(embedded.embeddingCoverage), diagnostics, coverage);
+          }
         } finally { process.removeListener("SIGINT", abort); process.removeListener("SIGTERM", abort); }
       } else {
         // Extraction, including the only input read, finishes before acquiring the mutation lock.
@@ -170,6 +204,7 @@ try {
     }
   }
 } catch (error) {
+  if (!(error instanceof SearchReported)) {
   const release = error instanceof MutationReleaseError ? error : undefined;
   const cleanup = release ? { path: ".wiki/locks/mutation.lock", retained: true, message: release.cause instanceof Error ? release.cause.message : String(release.cause) } : undefined;
   const pending = outputBuffer.pending;
@@ -199,6 +234,7 @@ try {
       }
       if (failure instanceof CreateValidationError || failure instanceof CaptureValidationError) process.stderr.write(failure.diagnostics.map(d => d.path + ": " + d.rule + ": " + d.message + "; fix: " + d.fix).join("\n") + "\n");
     }
+  }
   }
 }
 const pending = outputBuffer.pending;

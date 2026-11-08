@@ -10,14 +10,13 @@ import { inspectVault } from "./lint.ts";
 import { isMapping } from "./frontmatter.ts";
 import { indexFreshnessDiagnostics } from "./navigation.ts";
 import type { ErrorCode } from "./vault.ts";
+import { qmdModelReadiness, DEEP_ROLES, type QmdModels, type QmdModelRole } from "./qmd.ts";
 
 type Problem = { path: string; message: string; fix: string };
 type Check = { state: "ready" } | { state: "unavailable" };
 type VersionCheck = { state: "ready"; version: string } | { state: "unavailable"; version?: string };
 type Coverage = { state: "complete" | "incomplete" | "unavailable" };
 type EmbeddingCoverage = { state: "complete" | "incomplete"; contentHashes: number } | { state: "unavailable" };
-type ModelRole = "embed" | "generate" | "rerank";
-const ROLES = ["embed", "generate", "rerank"] as const;
 const SEARCH = ".wiki/search";
 const DATABASE = SEARCH + "/qmd.sqlite";
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error); }
@@ -29,36 +28,23 @@ function checked(root: string, relative: string): string {
 }
 function readJson(root: string, relative: string): unknown { return JSON.parse(fs.readFileSync(checked(root, relative), "utf8")); }
 
-/** Reconcile with #25: replace this file-only preflight with
- * qmdModelReadiness(root, ["embed", "generate", "rerank"]). Never resolve a model through the SDK. */
+/** Delegate all file/configuration validation to search's model-free preflight.
+ * Request each role separately so a missing deep-only model does not hide embed readiness. */
 function doctorModelReadiness(root: string, problems: Problem[]) {
-  const models: Partial<Record<ModelRole, string>> = {};
-  const checks: Record<ModelRole, Check> = { embed: { state: "unavailable" }, generate: { state: "unavailable" }, rerank: { state: "unavailable" } };
-  let configured: Record<string, unknown> = {};
-  try {
-    const config = readJson(root, ".wiki/config.json");
-    const search = isMapping(config) ? config.search : undefined;
-    if (search !== undefined && !isMapping(search)) throw new Error("search must be an object");
-    const raw = isMapping(search) ? search.models : undefined;
-    if (raw !== undefined && !isMapping(raw)) throw new Error("search.models must be an object");
-    configured = isMapping(raw) ? raw : {};
-  } catch (error) {
-    problems.push({ path: ".wiki/config.json#search.models", message: message(error), fix: "Set search.models to local GGUF file paths; doctor never downloads models" });
-    return { models, checks };
-  }
-  for (const role of ROLES) {
-    const value = configured[role];
-    try {
-      if (typeof value !== "string" || !path.isAbsolute(value) || /^[a-z][a-z0-9+.-]*:/i.test(value)) throw new Error("Expected an absolute local GGUF file path, not a remote URI or an unset model");
-      if (!fs.statSync(value).isFile()) throw new Error("Not a regular model file");
-      const fd = fs.openSync(value, "r");
-      try { const header = Buffer.alloc(4); fs.readSync(fd, header, 0, 4, 0); if (header.toString("latin1") !== "GGUF") throw new Error("Missing GGUF header"); }
-      finally { fs.closeSync(fd); }
-      models[role] = value; checks[role] = { state: "ready" };
-    } catch (error) {
-      problems.push({ path: ".wiki/config.json#search.models." + role, message: "Model file unavailable" + (typeof value === "string" ? " (" + value + ")" : "") + ": " + message(error), fix: "Configure an existing readable local GGUF file. File readiness does not prove inference compatibility; no model is resolved or downloaded" });
+  const models: QmdModels = {};
+  const checks: Record<QmdModelRole, Check> = { embed: { state: "unavailable" }, generate: { state: "unavailable" }, rerank: { state: "unavailable" } };
+  const diagnostics = new Map<string, Problem>();
+  for (const role of DEEP_ROLES) {
+    const readiness = qmdModelReadiness(root, [role]);
+    if (readiness.state === "ready") {
+      models[role] = readiness.models[role]; checks[role] = { state: "ready" };
+    } else {
+      for (const diagnostic of readiness.diagnostics) diagnostics.set(diagnostic.path + "\n" + diagnostic.message, {
+        ...diagnostic, fix: "Configure an existing readable absolute local GGUF file in search.models. File readiness does not prove inference compatibility; doctor never resolves or downloads models",
+      });
     }
   }
+  problems.push(...diagnostics.values());
   return { models, checks };
 }
 
