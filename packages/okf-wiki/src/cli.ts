@@ -9,7 +9,7 @@ import { readUpdateCandidate, updateTopic, UpdateConflictError, UpdateTemporaryE
 import { createTopic, CreatePartialError, CreateValidationError, type CreateRequest } from "./create.ts";
 import { withMutationLock, MutationReleaseError } from "./mutation.ts";
 import { inspectVault, lintVault } from "./lint.ts";
-import { syncQmdText, findQmd, embedQmd, qmdModelReadiness, FAST_ROLES, DEEP_ROLES, type QmdInventory, type QmdDiagnostic, type QmdEmbeddingCoverage, type QmdReadyModels, type QmdTextCoverage } from "./qmd.ts";
+import { syncQmdText, findQmd, embedQmd, qmdModelReadiness, FAST_ROLES, DEEP_ROLES, QMD_DEFAULT_LIMIT, type QmdFindFilters, type QmdInventory, type QmdDiagnostic, type QmdEmbeddingCoverage, type QmdReadyModels, type QmdTextCoverage } from "./qmd.ts";
 import { prepareCapture, publishTextCapture, CaptureValidationError, CapturePublicationError, type TextCaptureRequest, type TextCaptureCandidate } from "./capture.ts";
 import { indexDestinationDiagnostics, indexFreshnessDiagnostics } from "./navigation.ts";
 import { doctorVault, doctorText } from "./doctor.ts";
@@ -17,7 +17,7 @@ import { doctorVault, doctorText } from "./doctor.ts";
 /** The search command already buffered its structured failure output. */
 class SearchReported extends Error {}
 const EXIT: Record<ErrorCode, number> = { usage: 2, conflict: 3, not_found: 4, unsupported: 5, damaged: 6, unavailable: 7 };
-const USAGE = "okf-wiki (Node source CLI)\nUsage: okf-wiki init <dir> [--json]\n       okf-wiki --vault <dir> init [--json]\n       okf-wiki --vault <dir> type list [--json]\n       okf-wiki --vault <dir> type add <name> --folder <folder> [--json]\n       okf-wiki --vault <dir> lint [path] [--json]\n       okf-wiki --vault <dir> index [--check] [--json]\n       okf-wiki --vault <dir> new <type> (--project <p>|--personal) --title <t> --description <d> [--slug <s>] [--body-file <f>] [--tags <tag> ...] [--status <status>] [--json]\n       okf-wiki --vault <dir> capture <file-or-url> (--project <p>|--personal) --title <t> --description <d> [--slug <s>] [--json]\n       okf-wiki --vault <dir> update <canonical-path> --expect sha256:<64 lowercase hex digits> --file <complete-candidate-markdown> [--dry-run] [--json]\n       okf-wiki --vault <dir> doctor [--json]\n       okf-wiki --vault <dir> search sync [--embed] [--json]\n       okf-wiki --vault <dir> find <question> [--terms <keywords>] [--deep] [--json]\nFast find sends one typed lex/vec qmd query without expansion or reranking; --deep explicitly expands and reranks. Find synchronizes text but never embeds; search sync --embed fills missing embeddings. Models: explicit local GGUF paths in .wiki/config.json search.models (embed, generate, rerank). If models are not ready or vector search fails, find returns lexical results labelled degraded; a degraded miss is not exhaustive. Results render from current note bytes.\n       okf-wiki --vault <dir> show <path> [--section <heading>] [--json]\nWhole-vault lint checks registry, frontmatter, layout, body, lifecycle, scoped titles, links, and generated-index freshness. Selected-path lint does not check generated-index freshness.\nVault: explicit directory, --vault, or WIKI_VAULT. No default vault.\n";
+const USAGE = "okf-wiki (Node source CLI)\nUsage: okf-wiki init <dir> [--json]\n       okf-wiki --vault <dir> init [--json]\n       okf-wiki --vault <dir> type list [--json]\n       okf-wiki --vault <dir> type add <name> --folder <folder> [--json]\n       okf-wiki --vault <dir> lint [path] [--json]\n       okf-wiki --vault <dir> index [--check] [--json]\n       okf-wiki --vault <dir> new <type> (--project <p>|--personal) --title <t> --description <d> [--slug <s>] [--body-file <f>] [--tags <tag> ...] [--status <status>] [--json]\n       okf-wiki --vault <dir> capture <file-or-url> (--project <p>|--personal) --title <t> --description <d> [--slug <s>] [--json]\n       okf-wiki --vault <dir> update <canonical-path> --expect sha256:<64 lowercase hex digits> --file <complete-candidate-markdown> [--dry-run] [--json]\n       okf-wiki --vault <dir> doctor [--json]\n       okf-wiki --vault <dir> search sync [--embed] [--json]\n       okf-wiki --vault <dir> find <question> [--terms <keywords>] [--deep] [--project <p>|--personal] [--type <type>] [--limit <n>] [--json]\nFast find sends one typed lex/vec qmd query without expansion or reranking; --deep explicitly expands and reranks. Path-like tokens (containing / or a dotted filename) also match canonical paths and captured note text literally; literal matches come first. Scope and type filters apply before --limit (default " + QMD_DEFAULT_LIMIT + ", the pinned qmd SDK default). Find synchronizes text but never embeds; search sync --embed fills missing embeddings. Models: explicit local GGUF paths in .wiki/config.json search.models (embed, generate, rerank). If models are not ready or vector search fails, find returns lexical results labelled degraded; a degraded miss is not exhaustive. Results render from current note bytes.\n       okf-wiki --vault <dir> show <path> [--section <heading>] [--json]\nWhole-vault lint checks registry, frontmatter, layout, body, lifecycle, scoped titles, links, and generated-index freshness. Selected-path lint does not check generated-index freshness.\nVault: explicit directory, --vault, or WIKI_VAULT. No default vault.\n";
 let json = process.argv.slice(2).includes("--json");
 type PublishedResult = { written: true; paths: string[] } & ({ digest: string } | { digests: Record<string, string> });
 let publishedResult: PublishedResult | undefined;
@@ -27,7 +27,7 @@ function output(value: object, human: string, stderr = "") { outputBuffer.pendin
 try {
   const { values, positionals } = parseArgs({
     allowPositionals: true,
-    options: { expect: { type: "string" }, file: { type: "string" }, "dry-run": { type: "boolean" }, project: { type: "string" }, personal: { type: "boolean" }, title: { type: "string" }, description: { type: "string" }, slug: { type: "string" }, "body-file": { type: "string" }, tags: { type: "string", multiple: true }, status: { type: "string" }, vault: { type: "string" }, folder: { type: "string" }, section: { type: "string" }, terms: { type: "string" }, deep: { type: "boolean" }, embed: { type: "boolean" }, json: { type: "boolean" }, check: { type: "boolean" }, help: { type: "boolean", short: "h" } },
+    options: { expect: { type: "string" }, file: { type: "string" }, "dry-run": { type: "boolean" }, project: { type: "string" }, personal: { type: "boolean" }, title: { type: "string" }, description: { type: "string" }, slug: { type: "string" }, "body-file": { type: "string" }, tags: { type: "string", multiple: true }, status: { type: "string" }, vault: { type: "string" }, folder: { type: "string" }, section: { type: "string" }, terms: { type: "string" }, deep: { type: "boolean" }, type: { type: "string" }, limit: { type: "string" }, embed: { type: "boolean" }, json: { type: "boolean" }, check: { type: "boolean" }, help: { type: "boolean", short: "h" } },
   });
   json = values.json ?? false;
   if (values.help) {
@@ -43,7 +43,8 @@ try {
     const candidate = update && values.file !== undefined ? readUpdateCandidate(values.file) : undefined;
     let request: CreateRequest | undefined;
     let captureRequest: TextCaptureRequest | undefined;
-    if (!create && !capture && [values.project, values.personal, values.title, values.description, values.slug, values["body-file"], values.tags, values.status].some(v => v !== undefined)) throw new WikiError("usage", "Create/capture options require new <type> or capture <file-or-url>");
+    const finding = positionals[0] === "find";
+    if (!create && !capture && [...(finding ? [] : [values.project, values.personal]), values.title, values.description, values.slug, values["body-file"], values.tags, values.status].some(v => v !== undefined)) throw new WikiError("usage", "Create/capture options require new <type> or capture <file-or-url>");
     if (capture && [values["body-file"], values.tags, values.status].some(v => v !== undefined)) throw new WikiError("usage", "--body-file, --tags, and --status are only valid with new <type>");
     if ((create || capture) && arg !== undefined) {
       if ((values.project !== undefined) === (values.personal === true) || values.personal === false || values.title === undefined || values.description === undefined) throw new WikiError("usage", (capture ? "Capture" : "Create") + " requires exactly one explicit --project or --personal scope, --title and --description");
@@ -68,6 +69,10 @@ try {
     if (values.embed !== undefined && !sync) throw new WikiError("usage", "--embed is only valid with search sync");
     if ((values.terms !== undefined || values.deep !== undefined) && !find) throw new WikiError("usage", "--terms and --deep are only valid with find <question>");
     if (find && (!arg.trim() || values.terms !== undefined && !values.terms.trim())) throw new WikiError("usage", "find requires a nonempty question and nonempty --terms when given");
+    if ((values.type !== undefined || values.limit !== undefined) && !find) throw new WikiError("usage", "--type and --limit are only valid with find <question>");
+    if (find && (values.project !== undefined && values.personal !== undefined || values.personal === false || values.project !== undefined && !safeName(values.project))) throw new WikiError("usage", "find accepts at most one of --project <safe-project-name> or --personal");
+    if (find && values.limit !== undefined && !(/^[1-9][0-9]*$/.test(values.limit) && Number.isSafeInteger(Number(values.limit)))) throw new WikiError("usage", "--limit must be a positive integer");
+    if (find && values.type !== undefined && !safeName(values.type)) throw new WikiError("usage", "--type must be a registered type name");
     if (values.check !== undefined && !index) throw new WikiError("usage", "--check is only valid with index");
     const show = command === "show" && arg !== undefined && extra.length === 0;
     if (values.section !== undefined && !show) throw new WikiError("usage", "--section is only valid with show <path>");
@@ -87,6 +92,7 @@ try {
     } else {
       const root = openVault(selected);
       if (sync || find) {
+        if (find && values.type !== undefined && !loadRegistry(root).types.some(t => t.record.name === values.type)) throw new WikiError("usage", "--type must name a registered type: " + values.type);
         const controller = new AbortController();
         const abort = () => controller.abort(new Error("Search " + (find ? "find" : "synchronization") + " interrupted"));
         process.on("SIGINT", abort); process.on("SIGTERM", abort);
@@ -129,9 +135,10 @@ try {
           else if (find && arg !== undefined) {
             const question = arg, terms = values.terms;
             const requested = values.deep ? "deep" as const : "fast" as const;
-            const found = readiness.state === "unavailable" ? await findQmd(root, { mode: "lexical", requested, question, terms, reason: readiness.diagnostics }, captured.concepts, controller.signal)
-              : values.deep ? await findQmd(root, { mode: "deep", question, terms, models: readiness.models as QmdReadyModels<"embed" | "generate" | "rerank"> }, captured.concepts, controller.signal) // --deep preflighted DEEP_ROLES
-              : await findQmd(root, { mode: "fast", question, terms, models: readiness.models }, captured.concepts, controller.signal);
+            const filters: QmdFindFilters = { ...(values.personal ? { scope: "personal" as const } : values.project !== undefined ? { scope: `projects/${values.project}` as const } : {}), ...(values.type !== undefined ? { type: values.type } : {}), ...(values.limit !== undefined ? { limit: Number(values.limit) } : {}) };
+            const found = readiness.state === "unavailable" ? await findQmd(root, { ...filters, mode: "lexical", requested, question, terms, reason: readiness.diagnostics }, captured.concepts, controller.signal)
+              : values.deep ? await findQmd(root, { ...filters, mode: "deep", question, terms, models: readiness.models as QmdReadyModels<"embed" | "generate" | "rerank"> }, captured.concepts, controller.signal) // --deep preflighted DEEP_ROLES
+              : await findQmd(root, { ...filters, mode: "fast", question, terms, models: readiness.models }, captured.concepts, controller.signal);
             if (found.state === "unavailable") report({ code: found.code, message: found.code === "conflict" ? "Search index writer is busy" : "Search find unavailable" }, { mode: requested }, coverageText(result.embeddingCoverage), [...diagnostics, ...found.diagnostics]);
             else {
               // Omitted candidates (deleted, renamed, stale index, moving target) make text coverage incomplete for this request.
@@ -141,9 +148,9 @@ try {
               const coverage = found.degraded ? { state: "unavailable" as const } : embeddingCoverage;
               const label = found.degraded ? " degraded: lexical only (" + ({ "models-unavailable": "search models not ready", "vector-failed": "vector search failed", "expansion-failed": "deep expansion failed; no reranking" } as const)[found.degraded.reason] + "); a miss is not an exhaustive absence claim"
                 : found.mode === "deep" ? " (explicit expansion and reranking)" : " (one typed lex/vec query, no expansion, no reranking)";
-              report(undefined, { mode: found.mode, queries: found.queries, rerank: found.rerank, ...(found.degraded ? { degraded: found.degraded } : {}), matches: found.matches },
+              report(undefined, { mode: found.mode, queries: found.queries, rerank: found.rerank, ...(found.degraded ? { degraded: found.degraded } : {}), literals: found.literals, limit: found.limit, filters: { ...(filters.scope ? { scope: filters.scope } : {}), ...(filters.type ? { type: filters.type } : {}) }, matches: found.matches },
                 "Mode: " + found.mode + label + "\n" + coverageText(coverage) +
-                (found.matches.length ? found.matches.map(m => m.path + " " + m.score.toFixed(4) + " " + m.digest + "\n  " + m.title + ": " + m.description + "\n  " + m.excerpt).join("\n") + "\n" : found.degraded ? "No degraded lexical matches (not exhaustive)\n" : "No matches\n"),
+                (found.matches.length ? found.matches.map(m => m.path + " " + (m.score === null ? "literal" : m.score.toFixed(4)) + " " + m.digest + (m.literal.length ? " [literal: " + m.literal.join(" ") + "]" : "") + "\n  " + m.title + ": " + m.description + "\n  " + m.excerpt).join("\n") + "\n" : found.degraded ? "No degraded lexical matches (not exhaustive)\n" : "No matches\n"),
                 [...diagnostics, ...coverageProblems, ...(found.degraded?.diagnostics ?? [])], coverage);
             }
           } else if (readiness.state === "ready") { // Non-find readiness failures were reported above.

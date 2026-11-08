@@ -30,6 +30,12 @@ process.on("exit", () => {
 });
 http.request = http.get = https.request = https.get = net.connect = net.createConnection = tls.connect = deny;
 net.Socket.prototype.connect = deny; globalThis.fetch = deny;
+// A repository path that a note mentions must never be opened by search.
+const forbidden = process.env.OKF_QMD_FORBID_PATH;
+if (forbidden) for (const name of ["readFileSync", "openSync", "statSync", "lstatSync", "existsSync", "accessSync", "readdirSync", "realpathSync"]) {
+  const original = fs[name];
+  fs[name] = (file, ...args) => { if (String(file).includes(forbidden)) throw new Error("Search opened a mentioned repository path: " + String(file)); return original(file, ...args); };
+}
 const read = fs.readFileSync, write = fs.writeFileSync;
 let fired = false;
 fs.readFileSync = (file, ...args) => {

@@ -54,7 +54,7 @@ test("okf:12 add, equal-size restored-mtime edit, rename and delete between find
   const vault = fresh(), star = note(vault, "Observatory", "Observatory telescope", "Violet photon detector");
   const file = path.join(vault, star), time = new Date("2026-01-01T00:00:00Z"); fs.utimesSync(file, time, time);
   let found = succeeds(vault, ["find", "photon"]).data;
-  assert.deepEqual(found.matches, [{ path: star, score: found.matches[0].score, digest: current(vault, star), title: "Observatory", description: "Observatory telescope", excerpt: "Violet photon detector" }]);
+  assert.deepEqual(found.matches, [{ path: star, scope: "personal", type: "note", score: found.matches[0].score, literal: [], digest: current(vault, star), title: "Observatory", description: "Observatory telescope", excerpt: "Violet photon detector" }]);
   // Equal size and restored mtime: only content comparison can see this edit.
   const before = fs.statSync(file), edited = fs.readFileSync(file, "utf8").replace("Violet", "Yellow");
   fs.writeFileSync(file, edited); fs.utimesSync(file, time, time);
