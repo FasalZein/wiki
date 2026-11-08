@@ -27,12 +27,26 @@ The command accepts exactly one literal production path. Supported affected-test
 | `packages/okf-wiki/src/charset.ts` | `node --test --test-concurrency=1 packages/okf-wiki/test/capture-web.test.ts` |
 | `packages/okf-wiki/src/extract-process.ts` | `node --test --test-concurrency=1 packages/okf-wiki/test/capture-pdf.test.ts packages/okf-wiki/test/capture-web.test.ts` |
 | `packages/okf-wiki/src/html.ts` | `node --test --test-concurrency=1 packages/okf-wiki/test/html.test.ts packages/okf-wiki/test/capture-web.test.ts` |
-| `packages/okf-wiki/src/pdf.ts` | `node --test --test-concurrency=1 packages/okf-wiki/test/capture-pdf.test.ts packages/okf-wiki/test/capture-web.test.ts` |
+| `packages/okf-wiki/src/pdf.ts` | `node --test --test-concurrency=1 --test-name-pattern='okf:15|PDF|pdftotext' packages/okf-wiki/test/capture-pdf.test.ts packages/okf-wiki/test/capture-web.test.ts` |
 | `packages/okf-wiki/src/web.ts` | `node --test --test-concurrency=1 packages/okf-wiki/test/capture-web.test.ts` |
 | `packages/okf-wiki/src/paths.ts` | `node --test --test-concurrency=1 packages/okf-wiki/test/links-paths.test.ts packages/okf-wiki/test/update.test.ts packages/okf-wiki/test/capture-cli.test.ts` |
 | `packages/okf-wiki/src/mutation.ts` | `node --test --test-concurrency=1 packages/okf-wiki/test/concurrent-writers.test.ts packages/okf-wiki/test/write-boundaries.test.ts packages/okf-wiki/test/update.test.ts packages/okf-wiki/test/capture-cli.test.ts` |
 | `packages/okf-wiki/src/vault.ts` | `node --test --test-concurrency=1 packages/okf-wiki/test/init.test.ts packages/okf-wiki/test/write-boundaries.test.ts packages/okf-wiki/test/capture-cli.test.ts packages/okf-wiki/test/update.test.ts` |
 | `packages/okf-wiki/src/create.ts` | `node --test --test-concurrency=1 packages/okf-wiki/test/create.test.ts packages/okf-wiki/test/write-boundaries.test.ts packages/okf-wiki/test/capture-cli.test.ts packages/okf-wiki/test/update.test.ts` |
+
+The PDF plan selects all local PDF tests (`okf:15`) and all web tests named `PDF` or `pdftotext`.
+This retains real nonempty/empty extraction, exact bytes and arguments, provenance, corrupt input,
+missing tools, version/status/UTF-8 errors, and cancellation/child cleanup in both entry paths.
+HTML/Pandoc, charset sniffing, and HTTP-only URL/redirect/body tests remain in their other plans;
+they do not exercise PDF extraction. If PDF test names change, revisit this explicit filter.
+The full unfiltered PDF/web command remains a landing-suite concern, not a per-mutant requirement.
+The focused boundary measured 26 passing native tests in 13.789 s; Stryker dry-run generated
+54 mutants and passed the sandbox baseline in 13.483 s. At one worker, ordinary mutation
+execution is approximately 54 × 13.789 = 745 s, before startup and timeout allowances.
+The completed fresh-cache setup run took 11 min 7 s: 54 generated, 47 killed, 7 survived,
+0 timeout/errors/no-coverage, score 87.04%. The exact native command passed again afterward
+(26 pass, 0 fail); all 131 tracked source/package file hashes matched the pre-run snapshot.
+This is scoped proof, not a survivor waiver or a completed hardening gate.
 
 Other targets, globs, ranges, directories, and runtime JSON-schema files fail before Stryker starts.
 Add a reviewed affected-test plan before using another production target. A plan is not a claim that its target was mutation-tested.

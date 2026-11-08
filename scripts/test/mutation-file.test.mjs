@@ -41,7 +41,8 @@ test("supports all eleven OKF capture/update risk boundaries with serial sandbox
     const target = "packages/okf-wiki/src/" + file;
     const options = mutationOptions(target, { HEAVY_CPUS: "8" });
     assert.deepEqual(options.mutate, [target]);
-    assert.equal(options.commandRunner.command, "node --test --test-concurrency=1 " + tests.map(name => "packages/okf-wiki/test/" + name + ".test.ts").join(" "));
+    const filter = file === "pdf.ts" ? "--test-name-pattern='okf:15|PDF|pdftotext' " : "";
+    assert.equal(options.commandRunner.command, "node --test --test-concurrency=1 " + filter + tests.map(name => "packages/okf-wiki/test/" + name + ".test.ts").join(" "));
     caches.add(options.incrementalFile);
   }
   assert.equal(caches.size, 11);

@@ -9,7 +9,7 @@ const testCommands = new Map([
   ["packages/okf-wiki/src/charset.ts", "node --test --test-concurrency=1 packages/okf-wiki/test/capture-web.test.ts"],
   ["packages/okf-wiki/src/extract-process.ts", "node --test --test-concurrency=1 packages/okf-wiki/test/capture-pdf.test.ts packages/okf-wiki/test/capture-web.test.ts"],
   ["packages/okf-wiki/src/html.ts", "node --test --test-concurrency=1 packages/okf-wiki/test/html.test.ts packages/okf-wiki/test/capture-web.test.ts"],
-  ["packages/okf-wiki/src/pdf.ts", "node --test --test-concurrency=1 packages/okf-wiki/test/capture-pdf.test.ts packages/okf-wiki/test/capture-web.test.ts"],
+  ["packages/okf-wiki/src/pdf.ts", "node --test --test-concurrency=1 --test-name-pattern='okf:15|PDF|pdftotext' packages/okf-wiki/test/capture-pdf.test.ts packages/okf-wiki/test/capture-web.test.ts"],
   ["packages/okf-wiki/src/web.ts", "node --test --test-concurrency=1 packages/okf-wiki/test/capture-web.test.ts"],
   ["packages/okf-wiki/src/paths.ts", "node --test --test-concurrency=1 packages/okf-wiki/test/links-paths.test.ts packages/okf-wiki/test/update.test.ts packages/okf-wiki/test/capture-cli.test.ts"],
   ["packages/okf-wiki/src/mutation.ts", "node --test --test-concurrency=1 packages/okf-wiki/test/concurrent-writers.test.ts packages/okf-wiki/test/write-boundaries.test.ts packages/okf-wiki/test/update.test.ts packages/okf-wiki/test/capture-cli.test.ts"],
