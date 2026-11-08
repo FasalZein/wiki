@@ -14,7 +14,7 @@ const GUARD = fileURLToPath(new URL("./qmd-cli-guard.js", import.meta.url));
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "okf-qmd-literal-"));
 after(() => fs.rmSync(temp, { recursive: true, force: true }));
 let counter = 0;
-type Match = { path: string; score: number | null; literal: string[]; digest: string; title: string; description: string; excerpt: string };
+type Match = { path: string; scope: string; type: string; score: number | null; literal: string[]; digest: string; title: string; description: string; excerpt: string };
 function cli(vault: string, args: string[], mode = "fake-inference", extraEnv: Record<string, string> = {}, json = true) {
   const log = vault + ".calls.jsonl";
   fs.rmSync(log, { force: true });
@@ -71,6 +71,37 @@ test("okf:13 a note mentioning a slash path or dotted filename is found when qmd
     assert.deepEqual(paths(succeeds(vault, ["find", "notes/garden.md", "--terms", "zzzunmatched"]).data.matches), ["personal/notes/garden.md"]);
     assert.deepEqual(succeeds(vault, ["find", "version v1.2 of zzzunmatched"]).data.literals, [], "A version number is not a dotted filename");
   }
+});
+
+test("okf:13 dotted filenames with numeric or punctuation extensions are literal tokens; version strings are not", () => {
+  const vault = fresh(false);
+  const man = note(vault, "Manual page", "Read printf.3 for format details.\n");
+  const lib = note(vault, "Library", "Link against libssl.so.3 at runtime.\n");
+  const cpp = note(vault, "Cpp", "The entry point is main.c++ in the root.\n");
+  note(vault, "Release", "Shipped version v1.2 last week.\n");
+  for (const [token, expected] of [["printf.3", man], ["libssl.so.3", lib], ["main.c++", cpp]] as const) {
+    const found = succeeds(vault, ["find", token, "--terms", "zzzunmatched"]).data;
+    assert.equal(found.degraded.reason, "models-unavailable");
+    assert.deepEqual(found.literals, [token]); assert.deepEqual(paths(found.matches), [expected], token);
+    assert.equal(found.matches[0].score, null, "Found by literal match only");
+  }
+  for (const version of ["v1.2", "1.2.3", "v2.0.1-beta"]) {
+    const found = succeeds(vault, ["find", version, "--terms", "zzzunmatched"]).data;
+    assert.deepEqual(found.literals, [], version + " is a version, not a filename"); assert.deepEqual(found.matches, []);
+  }
+});
+
+test("okf:13 every match carries its scope and registered type from the captured revision", () => {
+  const vault = fresh();
+  succeeds(vault, ["type", "add", "building", "--folder", "build"], "");
+  const custom = note(vault, "Hangar", "Hangar plan in docs/hangar.md.\n", ["--project", "site"], "building");
+  const personal = note(vault, "Hangar notes", "Hangar notes.\n");
+  const found = succeeds(vault, ["find", "where is docs/hangar.md", "--terms", "hangar"]).data;
+  const byPath = new Map((found.matches as Match[]).map(m => [m.path, m]));
+  assert.equal(custom, "projects/site/build/hangar.md");
+  assert.deepEqual([byPath.get(custom)?.scope, byPath.get(custom)?.type], ["projects/site", "building"], "Literal match metadata");
+  assert.deepEqual([byPath.get(personal)?.scope, byPath.get(personal)?.type], ["personal", "note"], "qmd match metadata");
+  assert.equal(byPath.get(personal)?.literal.length, 0);
 });
 
 test("okf:13 tokens match literally, never as regex, shell or FTS syntax", () => {

@@ -693,8 +693,11 @@ There is still no boot script; B20/#34 owns the final boot check.
 `find <question> [--terms <keywords>] [--project <p>|--personal] [--type <type>] [--limit <n>]`
 adds literal matching to qmd retrieval:
 
-- A path-like token contains `/` or has a dotted filename form, such as
-  `README.md` or `.env.production`. A version such as `v1.2` is not path-like.
+- A path-like token contains `/` or has a dotted filename form: a stem (empty for
+  a dotfile) and one or more nonempty extension segments of any characters, such
+  as `README.md`, `.env.production`, `printf.3`, `libssl.so.3` or `main.c++`.
+  The token needs a letter. A version string such as `v1.2`, `1.2.3` or
+  `v2.0.1-beta` is not path-like.
   Tokens come from the question and from `--terms`. Surrounding quotes,
   brackets, and sentence punctuation are removed.
 - Each token is a case-sensitive plain substring. It is never a regex, glob,
@@ -704,7 +707,9 @@ adds literal matching to qmd retrieval:
 - Literal matches come first. qmd candidates follow. Each canonical path occurs
   once. Inside each group, qmd score order applies, and the canonical path breaks
   ties. A literal match that qmd did not return has `score: null`. Each match
-  lists its matched tokens in `literal`.
+  lists its matched tokens in `literal`, its `scope` (`personal` or
+  `projects/<project>`, from the canonical path) and its registered `type` (from
+  the captured frontmatter).
 - Scope (`--project`, `--personal`) and registered type (`--type`) filters
   apply to all candidates before the final limit. Find asks qmd for results up to
   the size of the indexed collection, so the qmd result slice does not remove

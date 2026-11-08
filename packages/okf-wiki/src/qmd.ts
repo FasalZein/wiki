@@ -306,8 +306,9 @@ export type QmdFindRequest = QmdFindFilters & (
   | { mode: "deep"; question: string; terms?: string; models: QmdReadyModels<"embed" | "generate" | "rerank"> }
   | { mode: "lexical"; requested: "fast" | "deep"; question: string; terms?: string; reason: QmdDiagnostic[] });
 /** Every field comes from one captured revision; digest names those bytes.
+ * scope: "personal" or "projects/<project>" from the canonical path; type: the captured frontmatter type.
  * score: the qmd score, or null when only literal matching found the note. literal: the matched path-like tokens. */
-export type QmdRenderedMatch = { path: string; score: number | null; literal: string[]; digest: string; title: string; description: string; excerpt: string };
+export type QmdRenderedMatch = { path: string; scope: string; type: string; score: number | null; literal: string[]; digest: string; title: string; description: string; excerpt: string };
 /** Lexical-only results after vector/model failure. Never an exhaustive absence claim. */
 export type QmdDegraded = { retrieval: "lexical"; exhaustive: false; reason: "models-unavailable" | "vector-failed" | "expansion-failed"; diagnostics: QmdDiagnostic[] };
 export type QmdFindResult =
@@ -320,12 +321,18 @@ export type QmdFindResult =
 
 // Surrounding quotes, brackets and sentence punctuation are not part of a path-like token.
 const TOKEN_EDGES = /^["'`([{<]+|["'`)\]}>.,;:!?]+$/g;
-// A dotted filename ends in an extension that contains a letter (README.md, .env), not a version number (v1.2).
-const DOTTED_FILENAME = /(?:^|[^.])\.[\w-]*[A-Za-z][\w-]*$/;
+// Version strings (v1.2, 1.2.3, v2.0.1-beta) look dotted but are not filenames.
+const VERSION = /^[vV]?\d+(?:\.\d+)+(?:[-+][\w.+-]*)?$/;
+/** A filename-like stem (empty for dotfiles such as .env) and one or more nonempty extension
+ * segments of any characters: README.md, printf.3, libssl.so.3, main.c++. */
+function dottedFilename(token: string): boolean {
+  const segments = token.split(".");
+  return segments.length > 1 && segments.slice(1).every(Boolean) && /\p{L}/u.test(token) && !VERSION.test(token);
+}
 /** Path-like tokens (containing "/" or a dotted filename form), in first-appearance order. */
 export function literalTokens(text: string): string[] {
   const tokens = text.split(/\s+/).map(token => token.replace(TOKEN_EDGES, ""))
-    .filter(token => /[\p{L}\p{N}]/u.test(token) && (token.includes("/") || DOTTED_FILENAME.test(token)));
+    .filter(token => /[\p{L}\p{N}]/u.test(token) && (token.includes("/") || dottedFilename(token)));
   return [...new Set(tokens)];
 }
 /** The first line containing a matched literal token, else the first line containing a lexical term. */
@@ -351,14 +358,17 @@ function render(root: string, relative: string | undefined, file: string, score:
     if (stat?.isFile()) current = "sha256:" + createHash("sha256").update(fs.readFileSync(checked(root, relative))).digest("hex");
   } catch { current = undefined; }
   if (current !== expected) { omitted.push({ path: relative, message: (current === undefined ? "Note disappeared" : "Note changed") + " after capture (moving target); omitted, not retried. Search again for its current revision" }); return undefined; }
-  let title = "", description = "", body = markdown;
+  let title = "", description = "", type = "", body = markdown;
   try {
     const parsed = parseNoteText(markdown);
     body = parsed.body;
     if (typeof parsed.frontmatter.title === "string") title = parsed.frontmatter.title;
     if (typeof parsed.frontmatter.description === "string") description = parsed.frontmatter.description;
+    if (typeof parsed.frontmatter.type === "string") type = parsed.frontmatter.type;
   } catch { /* Captured concepts are lint-valid; keep raw text if not. */ }
-  return { path: relative, score, literal, digest: expected, title, description, excerpt: excerptOf(body, queries, literal) };
+  // Captured concepts are validated personal/<folder> or projects/<project>/<folder> paths.
+  const scope = relative.startsWith("personal/") ? "personal" : relative.split("/").slice(0, 2).join("/");
+  return { path: relative, scope, type, score, literal, digest: expected, title, description, excerpt: excerptOf(body, queries, literal) };
 }
 /** QMD 2.8.3 swallows expansion grammar/context/prompt failures, returns the unchanged
  * question, then filters it out: an expansion with no usable entry is a failed stage. */
