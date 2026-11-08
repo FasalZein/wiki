@@ -84,6 +84,13 @@ function unavailable(diagnostics: QmdDiagnostic[], code: "conflict" | "unavailab
 async function open(root: string, models?: QmdModels): Promise<QMDStore> {
   const dbPath = checked(root, DIRECTORY + "/qmd.sqlite");
   for (const suffix of ["-wal", "-shm", "-journal"]) checked(root, DIRECTORY + "/qmd.sqlite" + suffix);
+  // QMD 2.8.3 fixes its model cache from XDG_CACHE_HOME (else ~/.cache) at first import
+  // and creates it before resolving even absolute local files. Bind cache and config to
+  // vault-local derived state first. Process-wide: a one-shot CLI opens one vault.
+  const cache = checked(root, DIRECTORY + "/sdk-cache");
+  fs.mkdirSync(cache, { recursive: true });
+  process.env.XDG_CACHE_HOME = cache;
+  process.env.XDG_CONFIG_HOME = checked(root, DIRECTORY + "/sdk-config");
   // Lazy import keeps ordinary vault commands independent of native search dependencies.
   const { createStore } = await import("@tobilu/qmd");
   return createStore({ dbPath, config: { ...(models ? { models } : {}), collections: { [COLLECTION]: {
@@ -278,16 +285,18 @@ export type QmdFindRequest =
   | { mode: "deep"; question: string; terms?: string; models: QmdReadyModels<"embed" | "generate" | "rerank"> };
 export type QmdFindResult =
   | { state: "successful"; mode: "fast" | "deep"; queries: QmdQuery[]; rerank: boolean; matches: { path: string; score: number }[] }
-  | { state: "unavailable"; diagnostics: QmdDiagnostic[] };
+  | { state: "unavailable"; code: "conflict" | "unavailable"; diagnostics: QmdDiagnostic[] };
 
 /** Fast: one typed lex/vec request, no expansion, no rerank. Deep: explicit expansion
  * and reranking. A fast miss never escalates. Synchronize text first; never embeds. */
-export async function findQmd(root: string, request: QmdFindRequest): Promise<QmdFindResult> {
+export async function findQmd(root: string, request: QmdFindRequest, signal?: AbortSignal): Promise<QmdFindResult> {
   let release: (() => QmdDiagnostic[]) | undefined;
   let store: QMDStore | undefined;
   let result: QmdFindResult | undefined;
+  let code: "conflict" | "unavailable" = "unavailable";
   const failures: QmdDiagnostic[] = [];
   try {
+    signal?.throwIfAborted();
     if (!request.question.trim() || request.terms !== undefined && !request.terms.trim()) throw new Error("Expected a nonempty question and terms");
     release = acquire(root);
     if (!fs.existsSync(checked(root, DIRECTORY + "/qmd.sqlite"))) throw new Error("Text index unavailable; synchronize captured concepts first");
@@ -298,10 +307,13 @@ export async function findQmd(root: string, request: QmdFindRequest): Promise<Qm
     if (request.mode === "fast") queries = [{ type: "lex", query: request.terms ?? request.question }, { type: "vec", query: request.question }];
     else {
       const expanded = await store.expandQuery(request.question);
+      // Native inference cannot be cancelled mid-call; stop at the next boundary.
+      signal?.throwIfAborted();
       queries = [...(request.terms === undefined ? [] : [{ type: "lex" as const, query: request.terms }]), ...expanded.map(q => ({ type: q.type, query: q.query }))];
     }
     const rerank = request.mode === "deep";
     const found = await store.search({ queries, rerank, collection: COLLECTION });
+    signal?.throwIfAborted();
     const matches = [];
     for (const match of found) {
       if (!match.file.startsWith(PREFIX)) throw new Error("Unexpected indexed collection identity");
@@ -310,35 +322,48 @@ export async function findQmd(root: string, request: QmdFindRequest): Promise<Qm
       matches.push({ path: relative, score: match.score });
     }
     result = { state: "successful", mode: request.mode, queries, rerank, matches };
-  } catch (error) { failures.push({ path: DIRECTORY, message: message(error) }); }
+  } catch (error) {
+    if (error instanceof IndexWriterBusyError) code = "conflict";
+    failures.push({ path: DIRECTORY, message: message(error) });
+  }
   failures.push(...await cleanup(store, release));
-  return failures.length ? { state: "unavailable", diagnostics: failures } : result ?? { state: "unavailable", diagnostics: [{ path: DIRECTORY, message: "Find did not complete" }] };
+  // A signal during cleanup still withholds success.
+  if (signal?.aborted && !failures.length) failures.push({ path: DIRECTORY, message: message(signal.reason) });
+  return failures.length ? { state: "unavailable", code, diagnostics: failures } : result ?? { state: "unavailable", code, diagnostics: [{ path: DIRECTORY, message: "Find did not complete" }] };
 }
 
 export type QmdEmbedResult =
   | { state: "complete"; embeddingCoverage: { state: "complete" }; embedded: { docsProcessed: number; chunksEmbedded: number; errors: number } }
-  | { state: "failed"; embeddingCoverage: QmdEmbeddingCoverage; embedded?: { docsProcessed: number; chunksEmbedded: number; errors: number }; diagnostics: QmdDiagnostic[] };
+  | { state: "failed"; code: "conflict" | "unavailable"; embeddingCoverage: QmdEmbeddingCoverage; embedded?: { docsProcessed: number; chunksEmbedded: number; errors: number }; diagnostics: QmdDiagnostic[] };
 
 /** Explicit synchronous embedding of current missing content hashes. No detached worker. */
-export async function embedQmd(root: string, models: QmdReadyModels<"embed">): Promise<QmdEmbedResult> {
+export async function embedQmd(root: string, models: QmdReadyModels<"embed">, signal?: AbortSignal): Promise<QmdEmbedResult> {
+  let code: "conflict" | "unavailable" = "unavailable";
   let release: (() => QmdDiagnostic[]) | undefined;
   let store: QMDStore | undefined;
   let embedded: { docsProcessed: number; chunksEmbedded: number; errors: number } | undefined;
   let coverage: QmdEmbeddingCoverage = { state: "unavailable" };
   const failures: QmdDiagnostic[] = [];
   try {
+    signal?.throwIfAborted();
     release = acquire(root);
     if (!fs.existsSync(checked(root, DIRECTORY + "/qmd.sqlite"))) throw new Error("Text index unavailable; synchronize captured concepts first");
     bindModels(models);
     store = await open(root, models);
-    const outcome = await store.embed();
+    // Progress is the SDK's only callback; aborting there stops between batches.
+    const outcome = await store.embed({ onProgress() { signal?.throwIfAborted(); } });
+    signal?.throwIfAborted();
     embedded = { docsProcessed: outcome.docsProcessed, chunksEmbedded: outcome.chunksEmbedded, errors: outcome.errors };
     const status = await store.getStatus();
     coverage = status.needsEmbedding > 0 ? { state: "pending", contentHashes: status.needsEmbedding } : { state: "complete" };
     if (outcome.errors > 0) failures.push({ path: DIRECTORY, message: outcome.errors + " embedding errors" });
     if (coverage.state !== "complete") failures.push({ path: DIRECTORY, message: "Embeddings remain pending after explicit embedding" });
-  } catch (error) { failures.push({ path: DIRECTORY, message: message(error) }); }
+  } catch (error) {
+    if (error instanceof IndexWriterBusyError) code = "conflict";
+    failures.push({ path: DIRECTORY, message: message(error) });
+  }
   failures.push(...await cleanup(store, release));
-  if (failures.length || !embedded || coverage.state !== "complete") return { state: "failed", embeddingCoverage: coverage.state === "complete" ? { state: "unavailable" } : coverage, ...(embedded ? { embedded } : {}), diagnostics: failures };
+  if (signal?.aborted && !failures.some(f => f.message === message(signal.reason))) failures.push({ path: DIRECTORY, message: message(signal.reason) });
+  if (failures.length || !embedded || coverage.state !== "complete") return { state: "failed", code, embeddingCoverage: coverage.state === "complete" ? { state: "unavailable" } : coverage, ...(embedded ? { embedded } : {}), diagnostics: failures };
   return { state: "complete", embeddingCoverage: { state: "complete" }, embedded };
 }

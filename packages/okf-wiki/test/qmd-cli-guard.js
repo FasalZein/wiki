@@ -57,4 +57,11 @@ fs.writeFileSync = (file, ...args) => {
   }
   return result;
 };
+const unlink = fs.unlinkSync;
+fs.unlinkSync = (file, ...args) => {
+  const result = unlink(file, ...args);
+  // Another cooperative writer takes the index lock between text sync and find/embed.
+  if (mode === "fake-inference-steal-lock" && !fired && String(file).endsWith("/.wiki/search/writer.lock")) { fired = true; write(file, "other writer", { flag: "wx" }); }
+  return result;
+};
 syncBuiltinESMExports();

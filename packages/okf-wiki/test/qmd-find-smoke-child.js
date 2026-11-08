@@ -16,9 +16,12 @@ const models = {
   rerank: path.resolve(supplied, "hf_ggml-org_qwen3-reranker-0.6b-q8_0.gguf"),
 };
 const BIN = fileURLToPath(new URL("../bin/okf-wiki.js", import.meta.url));
-const home = path.join(sandbox, "home");
-fs.mkdirSync(home);
-const env = { ...process.env, HOME: home, XDG_CONFIG_HOME: path.join(home, "config"), XDG_CACHE_HOME: path.join(home, "cache"), XDG_DATA_HOME: path.join(home, "data"), TMPDIR: sandbox,
+// Decoy user home: absent, inside the sandbox so any creation is observable rather
+// than denied. No XDG values: the product itself must bind SDK state vault-locally.
+const home = path.join(sandbox, "decoy-home");
+const inherited = { ...process.env };
+for (const key of ["XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME"]) delete inherited[key];
+const env = { ...inherited, HOME: home, TMPDIR: sandbox,
   WIKI_VAULT: "", QMD_EMBED_MODEL: "", QMD_EMBED_PARALLELISM: "1", QMD_EXPAND_CONTEXT_SIZE: "1024", QMD_RERANK_CONTEXT_SIZE: "1024", QMD_EMBED_CONTEXT_SIZE: "512" };
 const vault = path.join(sandbox, "vault");
 function cli(...args) {
@@ -50,6 +53,8 @@ const deep = cli("find", "--deep", question);
 assert.equal(deep.mode, "deep"); assert.equal(deep.rerank, true); assert.ok(deep.queries.length > 0 && deep.queries.every(q => ["lex", "vec", "hyde"].includes(q.type)));
 assert.equal(deep.matches[0]?.path, star, JSON.stringify(deep.matches));
 for (const [k, f] of Object.entries(models)) assert.equal(sha(f), before[k], "Model changed: " + k);
-assert.equal(fs.existsSync(path.join(home, "config")), false);
+assert.equal(fs.existsSync(home), false, "Product created state under the decoy home");
+const vaultCache = path.join(vault, ".wiki/search/sdk-cache/qmd/models");
+console.error("cache isolation " + JSON.stringify({ decoyHome: home, decoyHomeExists: fs.existsSync(home), sandboxEntries: fs.readdirSync(sandbox).sort(), vaultCache, vaultCacheExists: fs.existsSync(vaultCache), vaultCacheEntries: fs.readdirSync(vaultCache) }));
 const pkg = (name) => JSON.parse(fs.readFileSync(fileURLToPath(new URL("../node_modules/" + name + "/package.json", import.meta.url)), "utf8")).version;
 console.error("find smoke " + JSON.stringify({ node: process.version, platform: process.platform, arch: process.arch, qmd: pkg("@tobilu/qmd"), nodeLlamaCpp: pkg("node-llama-cpp"), models: Object.fromEntries(Object.entries(models).map(([k, f]) => [k, { file: path.basename(f), sha256: before[k] }])) }));

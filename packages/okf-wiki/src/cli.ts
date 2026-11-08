@@ -82,7 +82,7 @@ try {
       const root = openVault(selected);
       if (sync || find) {
         const controller = new AbortController();
-        const abort = () => controller.abort(new Error("Search synchronization interrupted"));
+        const abort = () => controller.abort(new Error("Search " + (find ? "find" : "synchronization") + " interrupted"));
         process.on("SIGINT", abort); process.on("SIGTERM", abort);
         try {
           // Preflight explicit local models before any index effect or SDK model use.
@@ -119,16 +119,16 @@ try {
           if (error || !(find || values.embed)) report(error, {}, coverageText(result.embeddingCoverage), diagnostics);
           else if (find && arg !== undefined) {
             const question = arg, terms = values.terms;
-            const found = values.deep ? await findQmd(root, { mode: "deep", question, terms, models: readiness.models as QmdReadyModels<"embed" | "generate" | "rerank"> }) // --deep preflighted DEEP_ROLES
-              : await findQmd(root, { mode: "fast", question, terms, models: readiness.models });
-            if (found.state === "unavailable") report({ code: "unavailable", message: "Search find unavailable" }, { mode: values.deep ? "deep" : "fast" }, coverageText(result.embeddingCoverage), [...diagnostics, ...found.diagnostics]);
+            const found = values.deep ? await findQmd(root, { mode: "deep", question, terms, models: readiness.models as QmdReadyModels<"embed" | "generate" | "rerank"> }, controller.signal) // --deep preflighted DEEP_ROLES
+              : await findQmd(root, { mode: "fast", question, terms, models: readiness.models }, controller.signal);
+            if (found.state === "unavailable") report({ code: found.code, message: found.code === "conflict" ? "Search index writer is busy" : "Search find unavailable" }, { mode: values.deep ? "deep" : "fast" }, coverageText(result.embeddingCoverage), [...diagnostics, ...found.diagnostics]);
             else report(undefined, { mode: found.mode, queries: found.queries, rerank: found.rerank, matches: found.matches },
               "Mode: " + found.mode + (found.mode === "deep" ? " (explicit expansion and reranking)" : " (one typed lex/vec query, no expansion, no reranking)") + "\n" + coverageText(result.embeddingCoverage) +
               (found.matches.length ? found.matches.map(m => m.path + " " + m.score.toFixed(4)).join("\n") + "\n" : "No matches\n"), diagnostics);
           } else {
-            const embedded = await embedQmd(root, readiness.models);
+            const embedded = await embedQmd(root, readiness.models, controller.signal);
             const coverage = embedded.embeddingCoverage.state === "pending" ? { state: "incomplete", contentHashes: embedded.embeddingCoverage.contentHashes } : embedded.embeddingCoverage;
-            if (embedded.state === "failed") report({ code: "unavailable", message: "Embedding synchronization failed" }, { embedding: "failed", ...(embedded.embedded ? { embedded: embedded.embedded } : {}) }, coverageText(embedded.embeddingCoverage), [...diagnostics, ...embedded.diagnostics], coverage);
+            if (embedded.state === "failed") report({ code: embedded.code, message: embedded.code === "conflict" ? "Search index writer is busy" : "Embedding synchronization failed" }, { embedding: "failed", ...(embedded.embedded ? { embedded: embedded.embedded } : {}) }, coverageText(embedded.embeddingCoverage), [...diagnostics, ...embedded.diagnostics], coverage);
             else report(undefined, { embedding: "complete", embedded: embedded.embedded }, coverageText(embedded.embeddingCoverage), diagnostics, coverage);
           }
         } finally { process.removeListener("SIGINT", abort); process.removeListener("SIGTERM", abort); }

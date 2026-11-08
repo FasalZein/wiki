@@ -133,3 +133,47 @@ test("okf:11 find option boundaries are usage errors before index effects", () =
   }
   assert.equal(fs.existsSync(path.join(vault, ".wiki/search")), false);
 });
+
+test("okf:11 SIGTERM during explicit embedding, expansion or search is never reported as success and releases the index lock", () => {
+  const vault = fresh(); note(vault, "Observatory", "Observatory telescope for stars");
+  configure(vault, ["embed", "generate", "rerank"]);
+  for (const [seam, args] of [["embed", ["search", "sync", "--embed"]], ["search", ["find", "telescope"]], ["expand", ["find", "--deep", "telescope"]], ["search", ["find", "--deep", "telescope"]]] as const) {
+    const result = cli(vault, [...args], "fake-inference-interrupt-" + seam);
+    assert.equal(result.status, 7, seam + JSON.stringify(result.data)); assert.equal(result.data.ok, false); assert.equal(result.data.error.code, "unavailable");
+    assert.ok(result.calls.some(c => c.op === (seam === "expand" ? "expandQuery" : seam)), "The interrupt fired at the inference seam");
+    assert.notEqual(result.data.embedding, "complete"); assert.equal(result.data.matches, undefined);
+    assert.match(JSON.stringify(result.data.diagnostics), /interrupted/);
+    assert.equal(fs.existsSync(path.join(vault, ".wiki/search/writer.lock")), false);
+  }
+});
+
+test("okf:11 a writer taking the index lock between text sync and find/embed is conflict exit 3, not unavailable", () => {
+  const vault = fresh(); note(vault, "Observatory", "Observatory telescope");
+  configure(vault, ["embed"]);
+  for (const args of [["find", "telescope"], ["search", "sync", "--embed"]]) {
+    const lock = path.join(vault, ".wiki/search/writer.lock"); fs.rmSync(lock, { force: true });
+    const result = cli(vault, args, "fake-inference-steal-lock");
+    assert.equal(result.status, 3, JSON.stringify(result.data)); assert.equal(result.data.error.code, "conflict");
+    assert.equal(result.data.textCoverage.state, "complete", "Text sync finished before the other writer arrived");
+    assert.equal(fs.readFileSync(lock, "utf8"), "other writer", "The other writer's lock is never removed");
+    const human = cli(vault, args, "fake-inference-steal-lock", false); assert.equal(human.status, 3); assert.match(human.stderr, /^conflict:/);
+    fs.rmSync(lock);
+  }
+});
+
+test("okf:11 SDK model cache binds to vault-local derived state, never an absent or unwritable user cache", () => {
+  const vault = fresh(); note(vault, "Observatory", "Observatory telescope");
+  configure(vault, ["embed", "generate", "rerank"]);
+  const decoy = path.join(temp, "decoy-" + counter); fs.mkdirSync(decoy); fs.chmodSync(decoy, 0o500);
+  const env = { HOME: path.join(decoy, "home"), XDG_CACHE_HOME: path.join(decoy, "cache"), XDG_CONFIG_HOME: path.join(decoy, "config"), XDG_DATA_HOME: path.join(decoy, "data") };
+  try {
+    for (const args of [["search", "sync", "--embed"], ["find", "telescope"], ["find", "--deep", "telescope"]]) {
+      const result = cli(vault, args, "fake-inference", true, env);
+      assert.ok(result.status === 0 || args[2] === "--embed" && result.status === 7, JSON.stringify(result.data));
+      assert.doesNotMatch(JSON.stringify(result.data.diagnostics), /EACCES|decoy/);
+      for (const call of result.calls.filter(c => c.op === "createStore")) assert.equal((call as { modelCacheDir?: string }).modelCacheDir, path.join(fs.realpathSync(vault), ".wiki/search/sdk-cache/qmd/models"));
+      assert.deepEqual(fs.readdirSync(decoy), [], "No cache, config or data under the decoy home");
+    }
+    assert.equal(fs.statSync(path.join(vault, ".wiki/search/sdk-cache/qmd/models")).isDirectory(), true);
+  } finally { fs.chmodSync(decoy, 0o700); }
+});

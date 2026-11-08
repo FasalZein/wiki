@@ -49,6 +49,9 @@ disposable vault whose .wiki/config.json names the three local files: search syn
 with non-matching terms, and deep find (expansion plus rerank). It records Node,
 QMD, node-llama-cpp versions and model hashes. The CLI binds QMD_EMBED_MODEL from
 the configured embed file itself; the smoke clears it in the child environment.
+The smoke passes an absent decoy HOME and no XDG values. The product binds the QMD
+model cache and config to .wiki/search/sdk-cache and sdk-config before the SDK
+import; the smoke fails if anything appears under the decoy home.
 
 ## Dependency pins
 
