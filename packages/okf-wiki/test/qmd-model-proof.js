@@ -68,7 +68,7 @@ function stop(signal) {
 const onTerm = () => stop("SIGTERM");
 const onInt = () => stop("SIGINT");
 try {
-  child = spawn("/usr/bin/sandbox-exec", ["-f", profile, process.execPath, fileURLToPath(new URL("qmd-model-proof-child.js", import.meta.url))], {
+  child = spawn("/usr/bin/sandbox-exec", ["-f", profile, process.execPath, fileURLToPath(new URL(process.env.OKF_QMD_PROOF === "find" ? "qmd-find-smoke-child.js" : "qmd-model-proof-child.js", import.meta.url))], {
     detached: true,
     stdio: "inherit",
     env: { ...process.env, OKF_QMD_MODEL_DIR: modelDir, OKF_QMD_SANDBOX: sandbox },
