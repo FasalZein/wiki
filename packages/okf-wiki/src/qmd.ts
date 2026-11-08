@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { createHash } from "node:crypto";
 import type { QMDStore, UpdateProgress, UpdateResult } from "@tobilu/qmd";
 import { canonicalPathProblem, inspectContainedPath } from "./paths.ts";
+import { parseNoteText } from "./frontmatter.ts";
 
 /** Caller supplies a complete capture of validated concepts, not a selected subset.
  * Report every invalid/unreadable concept in diagnostics; never silently omit it. */
@@ -293,16 +294,61 @@ function bindModels(models: QmdModels) {
 }
 
 export type QmdQuery = { type: "lex" | "vec" | "hyde"; query: string };
+/** lexical: model-free degraded request after a model readiness failure. */
 export type QmdFindRequest =
   | { mode: "fast"; question: string; terms?: string; models: QmdReadyModels<"embed"> }
-  | { mode: "deep"; question: string; terms?: string; models: QmdReadyModels<"embed" | "generate" | "rerank"> };
+  | { mode: "deep"; question: string; terms?: string; models: QmdReadyModels<"embed" | "generate" | "rerank"> }
+  | { mode: "lexical"; requested: "fast" | "deep"; question: string; terms?: string; reason: QmdDiagnostic[] };
+/** Every field comes from one captured revision; digest names those bytes. */
+export type QmdRenderedMatch = { path: string; score: number; digest: string; title: string; description: string; excerpt: string };
+/** Lexical-only results after vector/model failure. Never an exhaustive absence claim. */
+export type QmdDegraded = { retrieval: "lexical"; exhaustive: false; reason: "models-unavailable" | "vector-failed" | "expansion-failed"; diagnostics: QmdDiagnostic[] };
 export type QmdFindResult =
-  | { state: "successful"; mode: "fast" | "deep"; queries: QmdQuery[]; rerank: boolean; matches: { path: string; score: number }[] }
+  | { state: "successful"; mode: "fast" | "deep"; queries: QmdQuery[]; rerank: boolean; degraded?: QmdDegraded; matches: QmdRenderedMatch[];
+      /** Omitted candidates: deleted/renamed, stale index, or moving target. Nonempty means text coverage is incomplete. */
+      omitted: QmdDiagnostic[];
+      /** The queried index does not hold exactly the captured inventory (for example another sync replaced it). Nonempty means text coverage is incomplete. */
+      indexMismatch: QmdDiagnostic[] }
   | { state: "unavailable"; code: "conflict" | "unavailable"; diagnostics: QmdDiagnostic[] };
 
+function excerptOf(body: string, queries: readonly QmdQuery[]): string {
+  const lines = body.split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith("#"));
+  const terms = queries.filter(q => q.type === "lex").flatMap(q => q.query.toLowerCase().split(/\s+/)).filter(Boolean);
+  return lines.find(line => terms.some(term => line.toLowerCase().includes(term))) ?? lines[0] ?? "";
+}
+/** Render from the captured revision and revalidate the current file before emitting.
+ * Only vault files are reread; captured sources are never refetched. */
+function render(root: string, relative: string | undefined, file: string, score: number, indexed: string | null, captured: ReadonlyMap<string, string>, queries: readonly QmdQuery[], omitted: QmdDiagnostic[]): QmdRenderedMatch | undefined {
+  const markdown = relative === undefined ? undefined : captured.get(relative);
+  if (relative === undefined || markdown === undefined) { omitted.push({ path: relative ?? file, message: "Indexed candidate is not in the current captured inventory (deleted, renamed or out of scope); omitted" }); return undefined; }
+  if (indexed !== markdown) { omitted.push({ path: relative, message: "Indexed content differs from the captured revision; omitted rather than attaching an old excerpt" }); return undefined; }
+  const expected = digest(markdown);
+  let current: string | undefined;
+  try {
+    const stat = fs.lstatSync(checked(root, relative), { throwIfNoEntry: false });
+    if (stat?.isFile()) current = "sha256:" + createHash("sha256").update(fs.readFileSync(checked(root, relative))).digest("hex");
+  } catch { current = undefined; }
+  if (current !== expected) { omitted.push({ path: relative, message: (current === undefined ? "Note disappeared" : "Note changed") + " after capture (moving target); omitted, not retried. Search again for its current revision" }); return undefined; }
+  let title = "", description = "", body = markdown;
+  try {
+    const parsed = parseNoteText(markdown);
+    body = parsed.body;
+    if (typeof parsed.frontmatter.title === "string") title = parsed.frontmatter.title;
+    if (typeof parsed.frontmatter.description === "string") description = parsed.frontmatter.description;
+  } catch { /* Captured concepts are lint-valid; keep raw text if not. */ }
+  return { path: relative, score, digest: expected, title, description, excerpt: excerptOf(body, queries) };
+}
+/** QMD 2.8.3 swallows expansion grammar/context/prompt failures, returns the unchanged
+ * question, then filters it out: an expansion with no usable entry is a failed stage. */
+class ExpansionFailedError extends Error {}
+function vectorFailure(error: unknown, signal: AbortSignal | undefined): boolean {
+  return !(error instanceof IndexWriterBusyError) && !signal?.aborted;
+}
+
 /** Fast: one typed lex/vec request, no expansion, no rerank. Deep: explicit expansion
- * and reranking. A fast miss never escalates. Synchronize text first; never embeds. */
-export async function findQmd(root: string, request: QmdFindRequest, signal?: AbortSignal): Promise<QmdFindResult> {
+ * and reranking. A fast miss never escalates. Synchronize text first; never embeds.
+ * captured: the same inventory passed to syncQmdText; results render only from it. */
+export async function findQmd(root: string, request: QmdFindRequest, captured: QmdInventory["concepts"], signal?: AbortSignal): Promise<QmdFindResult> {
   let release: (() => QmdDiagnostic[]) | undefined;
   let store: QMDStore | undefined;
   let result: QmdFindResult | undefined;
@@ -314,27 +360,67 @@ export async function findQmd(root: string, request: QmdFindRequest, signal?: Ab
     release = acquire(root);
     if (!fs.existsSync(checked(root, DIRECTORY + "/qmd.sqlite"))) throw new Error("Text index unavailable; synchronize captured concepts first");
     const identities = readIdentities(root);
-    bindModels(request.models);
-    store = await open(root, request.models);
-    let queries: QmdQuery[];
-    if (request.mode === "fast") queries = [{ type: "lex", query: request.terms ?? request.question }, { type: "vec", query: request.question }];
-    else {
-      const expanded = await store.expandQuery(request.question);
-      // Native inference cannot be cancelled mid-call; stop at the next boundary.
-      signal?.throwIfAborted();
-      queries = [...(request.terms === undefined ? [] : [{ type: "lex" as const, query: request.terms }]), ...expanded.map(q => ({ type: q.type, query: q.query }))];
+    const lexical: QmdQuery = { type: "lex", query: request.terms ?? request.question };
+    let degraded: QmdDegraded | undefined = request.mode === "lexical" ? { retrieval: "lexical", exhaustive: false, reason: "models-unavailable", diagnostics: request.reason } : undefined;
+    if (request.mode !== "lexical") bindModels(request.models);
+    store = await open(root, request.mode === "lexical" ? undefined : request.models);
+    let queries: QmdQuery[] = [lexical];
+    let found: { file: string; score: number }[] | undefined;
+    // The query must run against the index of this request's captured inventory. Another
+    // cooperative sync can replace it between our sync and this lock; detect, never assume.
+    const concepts = new Map(captured.map(c => [c.path, c.markdown]));
+    const indexMismatch: QmdDiagnostic[] = [];
+    const indexed = new Set(identities.values());
+    for (const [relative, markdown] of concepts) {
+      if (!indexed.has(relative)) indexMismatch.push({ path: relative, message: "Captured concept is missing from the queried index (replaced by another synchronization); text coverage incomplete. Search again" });
+      else if (await store.getDocumentBody(PREFIX + stagedId(relative)) !== markdown) indexMismatch.push({ path: relative, message: "Queried index holds a different revision than this request captured (replaced by another synchronization); text coverage incomplete. Search again" });
     }
-    const rerank = request.mode === "deep";
-    const found = await store.search({ queries, rerank, collection: COLLECTION });
+    for (const relative of indexed) if (!concepts.has(relative)) indexMismatch.push({ path: relative, message: "Queried index holds a concept outside this request's captured inventory; text coverage incomplete. Search again" });
     signal?.throwIfAborted();
-    const matches = [];
+    if (request.mode !== "lexical") {
+      // QMD 2.8.3 logs native model/context/query-embedding failures and returns null
+      // embeddings; structured search then skips vector legs and resolves normally.
+      // Observe the embeddings it received instead of relying on a thrown error.
+      const llm = store.internal.llm;
+      if (!llm) throw new Error("SDK store has no bound local model");
+      let missingEmbeddings = 0;
+      const embedBatch = llm.embedBatch.bind(llm);
+      llm.embedBatch = async (texts, options) => {
+        const embeddings = await embedBatch(texts, options);
+        missingEmbeddings += texts.length - embeddings.filter(e => e?.embedding).length;
+        return embeddings;
+      };
+      try {
+        if (request.mode === "fast") queries = [lexical, { type: "vec", query: request.question }];
+        else {
+          const expanded = await store.expandQuery(request.question);
+          // Native inference cannot be cancelled mid-call; stop at the next boundary.
+          signal?.throwIfAborted();
+          if (!expanded.some(q => q.query !== request.question)) throw new ExpansionFailedError("Deep query expansion produced no usable entries (" + expanded.length + " returned); expansion and reranking did not run");
+          queries = [...(request.terms === undefined ? [] : [lexical]), ...expanded.map(q => ({ type: q.type, query: q.query }))];
+        }
+        found = await store.search({ queries, rerank: request.mode === "deep", collection: COLLECTION });
+        if (missingEmbeddings) { found = undefined; throw new Error(missingEmbeddings + " query embeddings were not produced; QMD skipped those vector legs"); }
+      } catch (error) {
+        if (!vectorFailure(error, signal)) throw error;
+        // Same engine, lexical index only: no second search stack.
+        degraded = error instanceof ExpansionFailedError
+          ? { retrieval: "lexical", exhaustive: false, reason: "expansion-failed", diagnostics: [{ path: DIRECTORY, message: message(error) }] }
+          : { retrieval: "lexical", exhaustive: false, reason: "vector-failed", diagnostics: [{ path: DIRECTORY, message: "Vector/model search failed: " + message(error) }] };
+        queries = [lexical];
+      }
+    }
+    found ??= (await store.searchLex(lexical.query, { collection: COLLECTION })).map(hit => ({ file: hit.filepath, score: hit.score }));
+    signal?.throwIfAborted();
+    const matches: QmdRenderedMatch[] = [], omitted: QmdDiagnostic[] = [];
     for (const match of found) {
       if (!match.file.startsWith(PREFIX)) throw new Error("Unexpected indexed collection identity");
       const relative = identities.get(match.file.slice(PREFIX.length));
-      if (!relative) throw new Error("Unmapped indexed concept identity: " + match.file);
-      matches.push({ path: relative, score: match.score });
+      const rendered = render(root, relative, match.file, match.score, relative === undefined ? null : await store.getDocumentBody(match.file), concepts, queries, omitted);
+      if (rendered) matches.push(rendered);
     }
-    result = { state: "successful", mode: request.mode, queries, rerank, matches };
+    const rerank = request.mode === "deep" && !degraded;
+    result = { state: "successful", mode: request.mode === "lexical" ? request.requested : request.mode, queries, rerank, ...(degraded ? { degraded } : {}), matches, omitted, indexMismatch };
   } catch (error) {
     if (error instanceof IndexWriterBusyError) code = "conflict";
     failures.push({ path: DIRECTORY, message: message(error) });
