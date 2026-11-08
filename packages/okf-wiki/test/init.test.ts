@@ -193,7 +193,7 @@ test("okf:01 Node init seeds an isolated profile without Git or search state", (
   assert.equal(fs.readFileSync(path.join(vault, "index.md"), "utf8"), '---\nokf_version: "0.2"\n---\n# Wiki\n');
   assert.equal(fs.readFileSync(path.join(vault, "log.md"), "utf8"), "");
   const ignores = fs.readFileSync(path.join(vault, ".gitignore"), "utf8");
-  for (const rule of ["/.wiki/tmp/", "/.wiki/locks/", "/.wiki/qmd.sqlite", "/.wiki/qmd.sqlite-*"]) assert.ok(ignores.split("\n").includes(rule));
+  for (const rule of ["/.wiki/tmp/", "/.wiki/locks/", "/.wiki/search/", "/.wiki/qmd.sqlite", "/.wiki/qmd.sqlite-*"]) assert.ok(ignores.split("\n").includes(rule));
   assert.equal(fs.existsSync(path.join(vault, ".git")), false);
   assert.equal(fs.existsSync(path.join(vault, ".wiki/qmd.sqlite")), false);
   assert.equal(fs.existsSync(path.join(temp, ".cache")), false);
