@@ -36,11 +36,16 @@ export function readUpdateCandidate(file: string): UpdateCandidate {
   } catch { throw new WikiError("usage", "Candidate must be a readable regular file containing valid UTF-8"); }
   finally { if (fd !== undefined) fs.closeSync(fd); }
 }
-function captureTarget(root: string, relative: string): { bytes: Buffer; mode: number } {
+const TOPIC_PATH_LENGTH = new Map([["personal", 3], ["projects", 4]]);
+function validateUpdatePath(relative: string): void {
   const invalid = canonicalPathProblem(relative);
   if (invalid) throw new WikiError("usage", invalid.message);
   const parts = relative.split("/");
-  if (!(parts[0] === "personal" && parts.length === 3 || parts[0] === "projects" && parts.length === 4) || !relative.endsWith(".md") || parts.some(p => ["assets", "index.md", "log.md"].includes(p))) throw new WikiError("usage", "Expected a canonical topic path, not navigation or operational data");
+  if (parts.length !== TOPIC_PATH_LENGTH.get(parts[0]!) || !relative.endsWith(".md") || parts.some(p => ["assets", "index.md", "log.md"].includes(p))) throw new WikiError("usage", "Expected a canonical topic path, not navigation or operational data");
+}
+
+function captureTarget(root: string, relative: string): { bytes: Buffer; mode: number } {
+  validateUpdatePath(relative);
   const target = containedEntry(root, relative);
   if (!target.stat) throw new WikiError("not_found", "Missing requested note: " + relative);
   if (!target.stat.isFile()) throw new WikiError("usage", "Expected a regular Markdown topic: " + relative);
@@ -60,11 +65,31 @@ function difference(before: Buffer, after: UpdateCandidate) {
   // Common edge lines keep proposal output focused without normalizing retained bytes.
   const oldLines = before.toString("utf8").split("\n"), newLines = after.markdown.split("\n");
   let start = 0, oldEnd = oldLines.length, newEnd = newLines.length;
-  while (start < oldEnd && start < newEnd && oldLines[start] === newLines[start]) start++;
-  while (oldEnd > start && newEnd > start && oldLines[oldEnd - 1] === newLines[newEnd - 1]) { oldEnd--; newEnd--; }
+  const commonLength = Math.min(oldEnd, newEnd);
+  while (start < commonLength && oldLines[start] === newLines[start]) start++;
+  while (Math.min(oldEnd, newEnd) > start && oldLines[oldEnd - 1] === newLines[newEnd - 1]) { oldEnd--; newEnd--; }
   return { summary: { beforeBytes: before.length, candidateBytes: after.bytes.length, removedLines: oldEnd - start, addedLines: newEnd - start },
     diff: { startLine: start + 1, removed: oldLines.slice(start, oldEnd), added: newLines.slice(start, newEnd) } };
 }
+function replaceTopic(root: string, relative: string, expected: string, candidate: UpdateCandidate, mode: number): void {
+  const temporaryPath = ".wiki/tmp/" + randomUUID(), tmp = containedEntry(root, temporaryPath).full;
+  let primary: unknown, renamed = false;
+  try {
+    // Stage privately from creation, then retain the actual target access bits, not candidate/umask defaults.
+    fs.writeFileSync(tmp, candidate.bytes, { flag: "wx", mode: 0o600 });
+    fs.chmodSync(tmp, mode);
+    // Last full-byte read after validation and temp preparation, immediately before rename.
+    compare(root, relative, expected);
+    fs.renameSync(tmp, containedEntry(root, relative).full);
+    renamed = true;
+  } catch (error) { primary = error; throw error; }
+  finally {
+    // Rename consumes the temporary name; no post-publication cleanup can mask a write.
+    try { if (!renamed) fs.rmSync(tmp, { force: true }); }
+    catch (error) { throw new UpdateTemporaryError(temporaryPath, primary, error); }
+  }
+}
+
 /** Apply caller holds the mutation lock; dry-run never acquires it or writes. */
 export function updateTopic(root: string, relative: string, expected: string, candidate: UpdateCandidate, dryRun: boolean) {
   const before = compare(root, relative, expected);
@@ -79,22 +104,7 @@ export function updateTopic(root: string, relative: string, expected: string, ca
     return { ...result, outcome: "unchanged" as const, navigation: "unchanged", log: "unchanged" };
   }
   const title = parseNoteText(candidate.markdown).frontmatter.title;
-  const temporaryPath = ".wiki/tmp/" + randomUUID(), tmp = containedEntry(root, temporaryPath).full;
-  let primary: unknown, renamed = false;
-  try {
-    // Stage privately from creation, then retain the actual target access bits, not candidate/umask defaults.
-    fs.writeFileSync(tmp, candidate.bytes, { flag: "wx", mode: 0o600 });
-    fs.chmodSync(tmp, before.mode);
-    // Last full-byte read after validation and temp preparation, immediately before rename.
-    compare(root, relative, expected);
-    fs.renameSync(tmp, containedEntry(root, relative).full);
-    renamed = true;
-  } catch (error) { primary = error; throw error; }
-  finally {
-    // Rename consumes the temporary name; no post-publication cleanup can mask a write.
-    try { if (!renamed) fs.rmSync(tmp, { force: true }); }
-    catch (error) { throw new UpdateTemporaryError(temporaryPath, primary, error); }
-  }
+  replaceTopic(root, relative, expected, candidate, before.mode);
   completeTopicPublication(root, relative, String(title), candidate.digest, inventory.indexes, "updated");
   return { ...result, outcome: "updated" as const, written: true as const, navigation: "updated", log: "appended" };
 }

@@ -6,7 +6,7 @@ import { syncBuiltinESMExports } from "node:module";
 const root = fs.realpathSync(process.argv[process.argv.indexOf("--vault") + 1]);
 const input = process.argv[process.argv.indexOf("capture") + 1];
 const inputStat = fs.statSync(input), mode = process.env.OKF_CAPTURE_GUARD;
-const open = fs.openSync, read = fs.readFileSync, write = fs.writeFileSync, link = fs.linkSync;
+const open = fs.openSync, read = fs.readFileSync, write = fs.writeFileSync, link = fs.linkSync, mkdir = fs.mkdirSync;
 const lock = path.join(root, ".wiki/locks/mutation.lock"), tmp = path.join(root, ".wiki/tmp");
 let reads = 0;
 function denyRelease() { fs.chmodSync(path.dirname(lock), 0o500); }
@@ -65,5 +65,12 @@ fs.linkSync = (from, to) => {
   if (original && mode.startsWith("temporary") || note && mode === "note-temporary") fs.chmodSync(tmp, 0o500);
   if (original && mode === "temporary-release" || note && mode === "index-release") denyRelease();
   return result;
+};
+fs.mkdirSync = (directory, ...args) => {
+  if (directory === path.join(root, "personal/assets/captured-topic")) {
+    if (mode === "reserve-race") mkdir(directory);
+    if (mode === "reserve-permission") fs.chmodSync(path.dirname(directory), 0o500);
+  }
+  return mkdir(directory, ...args);
 };
 syncBuiltinESMExports();

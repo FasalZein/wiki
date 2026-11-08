@@ -26,7 +26,7 @@ describe("supersede tolerates a schema-stale target (PRD-0020)", () => {
       "--supersedes", old,
     ], f);
 
-    expect(result.exitCode).toBe(0);
+    expect(result.exitCode, result.diagnostic).toBe(0);
     expect(result.stderr).not.toContain("summary: required");
     const newId = result.stdout.trim();
 
@@ -49,7 +49,7 @@ describe("supersede tolerates a schema-stale target (PRD-0020)", () => {
       "--supersedes", old,
     ], f);
 
-    expect(result.exitCode).toBe(0);
+    expect(result.exitCode, result.diagnostic).toBe(0);
     const newId = result.stdout.trim();
     const target = await readSlice(f, old);
     expect(target).toContain("status: superseded");
@@ -87,7 +87,7 @@ describe("supersede tolerates a schema-stale target (PRD-0020)", () => {
       "--supersedes", old,
     ], f);
 
-    expect(result.exitCode).toBe(0);
+    expect(result.exitCode, result.diagnostic).toBe(0);
     const newId = result.stdout.trim();
 
     const after = matter(await readFile(path, "utf8"));
@@ -125,7 +125,7 @@ describe("supersede tolerates a schema-stale target (PRD-0020)", () => {
       "--supersedes", "SLICE-9999",
     ], f);
 
-    expect(result.exitCode).not.toBe(0);
+    expect(result.exitCode, result.diagnostic).not.toBe(0);
     // Error names the TARGET id and the real reason, not a bare new-artifact error.
     expect(result.stderr).toContain("SLICE-9999");
     expect(result.stderr).not.toContain("summary: required");
@@ -154,7 +154,7 @@ describe("supersede tolerates a schema-stale target (PRD-0020)", () => {
       "--supersedes", "PRD-0001",
     ], f);
 
-    expect(result.exitCode).not.toBe(0);
+    expect(result.exitCode, result.diagnostic).not.toBe(0);
     expect(result.stderr).toContain("PRD-0001");
     expect(result.stderr).not.toContain("summary: required");
     // The real PRD-0001 is untouched (not marked superseded, byte-identical).
@@ -178,7 +178,7 @@ describe("supersede tolerates a schema-stale target (PRD-0020)", () => {
       "--supersedes", old,
     ], f);
 
-    expect(result.exitCode).not.toBe(0);
+    expect(result.exitCode, result.diagnostic).not.toBe(0);
     expect(result.stderr).toContain("summary");
     // target untouched: still not marked superseded
     const target = await readSlice(f, old);
@@ -209,10 +209,10 @@ async function fixture(): Promise<Fixture> {
 async function seedSlice(f: Fixture): Promise<string> {
   if ((await readdir(join(f.projectPath, "prds"))).length === 0) {
     const prd = await runWiki(["create", "prd", "--title", "Parent PRD for stale supersede tests", "--summary", "Parent PRD for stale supersede tests.", "--project", "wiki-v2", "--force-new", "Seeding a parent PRD for the stale supersede tests"], f);
-    expect(prd.exitCode).toBe(0);
+    expect(prd.exitCode, prd.diagnostic).toBe(0);
   }
   const result = await runWiki(["create", "slice", "--title", "Slice that will be superseded", "--summary", "Slice that will be superseded by a replacement.", "--project", "wiki-v2", "--parent-prd", "PRD-0001", "--acceptance", "does the thing", "--force-new", "Seeding a slice to supersede in the stale-target tests"], f);
-  expect(result.exitCode).toBe(0);
+  expect(result.exitCode, result.diagnostic).toBe(0);
   return result.stdout.trim();
 }
 
@@ -239,7 +239,7 @@ async function readSlice(f: Fixture, id: string): Promise<string> {
   return readFile(join(f.projectPath, "slices", await sliceFileName(f, id)), "utf8");
 }
 
-async function runWiki(args: string[], f: Fixture): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+async function runWiki(args: string[], f: Fixture): Promise<{ exitCode: number; stdout: string; stderr: string; diagnostic: string }> {
   const proc = Bun.spawn(["bun", "src/cli.ts", ...args], {
     cwd: import.meta.dir.replace(/\/tests$/, ""),
     env: { ...process.env, KNOWLEDGE_VAULT_ROOT: f.vaultRoot, ...f.env },
@@ -251,5 +251,6 @@ async function runWiki(args: string[], f: Fixture): Promise<{ exitCode: number; 
     new Response(proc.stderr).text(),
     proc.exited,
   ]);
-  return { exitCode, stdout, stderr };
+  const diagnostic = JSON.stringify({ args, exitCode, signalCode: proc.signalCode ?? null, stdout, stderr }, null, 2);
+  return { exitCode, stdout, stderr, diagnostic };
 }

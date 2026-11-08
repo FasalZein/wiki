@@ -174,6 +174,30 @@ test("okf:14 CLI reads input exactly once before lock acquisition and returns hu
 });
 
 const original = "personal/assets/captured-topic/original.txt", extracted = "personal/assets/captured-topic/extracted.txt", note = "personal/references/captured-topic.md";
+for (const mode of ["reserve-race", "reserve-permission"]) test("okf:14 CLI reservation failure preserves no-publication outcome: " + mode, () => {
+  const { root, input } = fresh();
+  const index = read(root, "index.md");
+  try {
+    const result = cli(root, args(input), mode);
+    assert.notEqual(result.status, 0);
+    assert.equal(result.data.ok, false);
+    assert.equal(result.data.written, undefined);
+    assert.equal(result.data.retainedDirectory, undefined);
+    if (mode === "reserve-race") {
+      assert.equal(result.status, 3);
+      assert.equal(result.data.error.message, "Existing capture destination; no overwrite or suffix performed");
+      assert.deepEqual(fs.readdirSync(path.join(root, "personal/assets/captured-topic")), []);
+    } else {
+      assert.match(result.data.error.message, /EACCES|permission denied/i);
+      assert.equal(fs.existsSync(path.join(root, "personal/assets/captured-topic")), false);
+    }
+    for (const file of [original, extracted, note]) assert.equal(fs.existsSync(path.join(root, file)), false);
+    assert.equal(read(root, "index.md"), index);
+    assert.equal(read(root, "log.md"), "");
+    assert.deepEqual(fs.readdirSync(path.join(root, ".wiki/tmp")), []);
+    assert.deepEqual(fs.readdirSync(path.join(root, ".wiki/locks")), []);
+  } finally { restore(root); }
+});
 for (const [mode, expected] of [
   ["asset-fail", [original]], ["note-fail", [original, extracted]],
   ["index-fail", [original, extracted, note]], ["log-fail", [original, extracted, note]],
