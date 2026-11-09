@@ -17,6 +17,7 @@
     "typecheck:wiki": "tsc -p packages/wiki/tsconfig.json",
     "test:wiki": "node packages/wiki/test/run.js",
     "verify:wiki": "bun run typecheck:wiki && bun run test:wiki",
+    "boot:wiki": "node packages/wiki/scripts/boot.js",
     "verify:next": "tsc -p packages/tsconfig.json && node --test \"packages/*/test/*.test.ts\""
   },
   "dependencies": {

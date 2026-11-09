@@ -212,15 +212,16 @@ existing `verify:next` wildcard also runs these tests, and its TypeScript projec
 includes this package source and tests. Full suites run at the batch gate, not
 after every slice. Current process tests use disposable fixtures only.
 
-### Planned `boot:wiki` contract (B20, not executable yet)
+### Boot check and handoff smoke (#34)
 
-There is **no boot script** yet. Do not add a passing placeholder to the
-manifest. B20 will supply `heavy -- bun run boot:wiki`: start the source Node CLI
-in temporary storage, run init/new/show/lint/index-check, assert their results,
-clean up, and exit. Any search smoke must use isolated qmd state and explicitly
-selected local models. This contract requires no root build, global install,
-archive access, or blanket Git staging. Until then, `wiki:01` provides the concrete
-real-process init smoke, preservation checks, and refusal fixtures.
+`heavy -- bun run boot:wiki` runs `scripts/boot.js`: the source CLI under the
+current Node, in a temporary directory with a decoy HOME. It runs init, type list,
+lint, new, show, a refused stale-digest update, and index --check, removes the
+directory, and exits 0; any failed step exits 1. `wiki:20` (test/boot.test.ts)
+runs it as a real process. The complete handoff smoke with real local models is
+`WIKI_QMD_PROOF=handoff` in test/qmd-model-proof.md. Tested runtimes, unverified
+platforms, and operating limits are in
+[docs/wiki-foundation.md](../../docs/wiki-foundation.md).
 
 
 ## Exclusive topic creation and cooperative mutations (#21)
@@ -686,7 +687,7 @@ test/qmd-model-proof.md; it does not implement that product configuration.
 Real CLI-process e2e cases live in test/qmd-cli.test.ts in the wiki:10 group.
 They use disposable vaults and actual SDK indexing/retrieval. Only dependency,
 I/O-failure, captured-read replacement, and signal-event boundaries are injected.
-There is still no boot script; B20/#34 owns the final boot check.
+The boot check is `boot:wiki` (see Verification above).
 
 ## Literal path matches, filters, and result limits (#27)
 

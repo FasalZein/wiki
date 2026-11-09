@@ -53,6 +53,19 @@ The smoke passes an absent decoy HOME and no XDG values. The product binds the Q
 model cache and config to .wiki/search/sdk-cache and sdk-config before the SDK
 import; the smoke fails if anything appears under the decoy home.
 
+## Complete handoff smoke (#34)
+
+    WIKI_QMD_PROOF=handoff WIKI_QMD_MODEL_DIR=/existing/models heavy -- node packages/wiki/test/qmd-model-proof.js
+
+The same parent sandbox runs qmd-handoff-smoke-child.js. Through the real CLI in a
+disposable vault it runs init, type list, lint, new, show, a refused stale update,
+an applied update, local text capture, index --check, search sync --embed, fast and
+deep find, a find that returns the captured source, show of the hit (same digest),
+and doctor. It has the same decoy-HOME, vault-local SDK cache, model-hash, and
+global-state checks as the find smoke, and records Node, QMD, node-llama-cpp,
+extractor versions and model hashes. Tested runtimes and limits are in
+docs/wiki-foundation.md.
+
 ## Dependency pins
 
 QMD 2.8.3 is retained as the engine. Its exact dependency pins still contain known
