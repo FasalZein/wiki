@@ -60,14 +60,15 @@ function parseHandoff(input: unknown) {
     contentScope: text("contentScope"), ownerDecisions: list("ownerDecisions"), knownOpen: data.knownOpen };
 }
 
-function session(vault: string) {
+function session(vault: string, mode = "model-free") {
+  const callLog = path.join(temp, "qmd-calls-" + ++counter + ".jsonl");
   const calls: { args: string[]; status: number | null }[] = [];
   function cli(args: string[]) {
     const result = spawnSync(process.execPath, ["--import", GUARD, BIN, "--vault", vault, ...args, "--json"], {
       encoding: "utf8", timeout: 30000, cwd: temp,
       env: { ...process.env, HOME: temp, XDG_CACHE_HOME: path.join(temp, "cache"), XDG_CONFIG_HOME: path.join(temp, "config"),
         XDG_DATA_HOME: path.join(temp, "data"), WIKI_VAULT: "", QMD_EMBED_MODEL: "",
-        WIKI_QMD_CLI_GUARD: "model-free", WIKI_QMD_DENY_SUBPROCESS: "1" },
+        WIKI_QMD_CLI_GUARD: mode, WIKI_QMD_CALL_LOG: callLog, WIKI_QMD_DENY_SUBPROCESS: "1" },
     });
     assert.equal(result.error, undefined); assert.equal(result.signal, null); assert.equal(result.stderr, "");
     calls.push({ args, status: result.status });
@@ -97,13 +98,13 @@ function snapshot(dir: string): unknown[] {
   });
 }
 
-function runProtocol(raw: unknown, topic = { title: "Release checklist", description: "Synthetic release procedure" }) {
-  const h = parseHandoff(raw), s = session(h.vault);
+function runProtocol(raw: unknown, topic = { title: "Release checklist", description: "Synthetic release procedure" }, mode = "model-free") {
+  const h = parseHandoff(raw), s = session(h.vault, mode);
   // Fast find precedes registry, show and any candidate/write operation.
   const query = topic.title;
   const search = ["find", query, "--terms", query, "--project", h.project];
-  const found = s.ok(search);
-  if (!found.matches.length) s.ok([...search, "--deep"]);
+  let found = s.ok(search);
+  if (!found.matches.length) found = s.ok([...search, "--deep"]);
   const registry = s.ok(["type", "list"]);
   assert.ok(JSON.stringify(registry).includes("procedure"));
   const paths = new Set<string>(found.matches.map((m: { path: string }) => m.path));
@@ -120,6 +121,11 @@ function runProtocol(raw: unknown, topic = { title: "Release checklist", descrip
     (read && (h.action !== "authorized factual update" || !h.baseDigest || !h.target));
   if (proposal) {
     const check = read ? s.cli(["update", target, "--expect", h.baseDigest ?? read.digest, "--file", candidate, "--dry-run"]) : null;
+    if (check?.status === 3) {
+      assert.deepEqual(snapshot(h.vault), before);
+      return { outcome: "conflict", path: target, conflict: check.data, candidate,
+        checks: [], calls: s.calls, found, limitations: h.limitations };
+    }
     if (check) { assert.equal(check.status, 0, JSON.stringify(check)); assert.equal(check.data.outcome, "dry-run"); }
     assert.deepEqual(snapshot(h.vault), before, "Proposal validation changes no vault bytes");
     return { outcome: "proposed", path: target, candidate, checks: check ? [check.data] : [], calls: s.calls, found, limitations: h.limitations };
@@ -195,4 +201,54 @@ test("wiki:19 incomplete update authority and all owner-reviewed classes yield p
     assert.equal(result.outcome, "proposed");
     assert.ok(result.calls.filter(c => c.args[0] === "update").every(c => c.args.includes("--dry-run")));
   }
+});
+
+
+test("wiki:19 deep-only hit is read and proposed under create-only authority, never created", () => {
+  const f = setup();
+  const candidate = path.join(temp, "deep-hit-" + ++counter + ".md");
+  fs.writeFileSync(candidate, f.reviewed.markdown + "2. Use the telescope for the synthetic release.\n");
+  f.s.ok(["update", f.created.path, "--expect", f.reviewed.digest, "--file", candidate]);
+  // Reuse the existing external-inference seam: expansion adds 'telescope'.
+  // Indexing, lexical retrieval, CLI processes, and note reads remain real.
+  const model = path.join(temp, "deep-hit-model-" + ++counter + ".gguf");
+  fs.writeFileSync(model, "GGUF placeholder; inference is faked, never loaded");
+  const config = path.join(f.vault, ".wiki/config.json");
+  fs.writeFileSync(config, JSON.stringify({ ...JSON.parse(fs.readFileSync(config, "utf8")),
+    search: { models: { embed: model, generate: model, rerank: model } } }) + "\n");
+  const topic = { title: "zzzspectrallookup", description: "Synthetic alternate name for the existing topic" };
+  const search = session(f.vault, "fake-inference");
+  assert.deepEqual(search.ok(["find", topic.title, "--terms", topic.title, "--project", "demo"]).matches, [], "Fast query misses the existing topic");
+  const noteBefore = fs.readFileSync(path.join(f.vault, f.created.path));
+  const result = runProtocol({ ...f.handoff, action: "authorized create", target: null, baseDigest: null,
+    content: "## Steps\n\n1. Synthetic deep-hit finding.\n" }, topic, "fake-inference");
+  assert.equal(result.found.mode, "deep", "Use the deep result after the fast miss");
+  assert.deepEqual(result.found.matches.map((m: { path: string }) => m.path), [f.created.path]);
+  assert.ok(result.calls[1]?.args.includes("--deep"));
+  assert.ok(result.calls.some(c => c.args[0] === "show" && c.args[1] === f.created.path), "Read the deep-only match");
+  assert.equal(result.outcome, "proposed"); assert.equal(result.path, f.created.path);
+  assert.equal(result.calls.filter(c => c.args[0] === "new").length, 0, "An existing deep match must not be created");
+  const updates = result.calls.filter(c => c.args[0] === "update");
+  assert.equal(updates.length, 1); assert.ok(updates[0]?.args.includes("--dry-run"));
+  assert.deepEqual(fs.readFileSync(path.join(f.vault, f.created.path)), noteBefore);
+});
+
+test("wiki:19 stale proposal reports one dry-run conflict without retry or note changes", () => {
+  const f = setup();
+  const candidate = path.join(temp, "stale-proposal-" + ++counter + ".md");
+  fs.writeFileSync(candidate, f.reviewed.markdown + "2. Owner correction before proposal validation.\n");
+  const owner = f.s.ok(["update", f.created.path, "--expect", f.reviewed.digest, "--file", candidate]);
+  const before = fs.readFileSync(path.join(f.vault, f.created.path));
+  const result = runProtocol({ ...f.handoff, knownOpen: true });
+  assert.equal(result.outcome, "conflict", "Stale proposal returns the conflict instead of a proposal or throw");
+  assert.equal(result.path, f.created.path);
+  assert.equal(result.conflict.error.code, "conflict");
+  assert.equal(result.conflict.expected, f.reviewed.digest); assert.equal(result.conflict.current, owner.digest);
+  assert.notEqual(result.conflict.expected, result.conflict.current);
+  const updates = result.calls.filter(c => c.args[0] === "update");
+  assert.equal(updates.length, 1, "Never retry the stale proposal");
+  assert.ok(updates[0]?.args.includes("--dry-run")); assert.equal(updates[0]?.status, 3);
+  assert.equal(updates[0]?.args[3], f.reviewed.digest);
+  assert.equal(result.calls.at(-1), updates[0], "No protocol commands follow the conflict");
+  assert.deepEqual(fs.readFileSync(path.join(f.vault, f.created.path)), before, "Keep the owner's revision unchanged");
 });
