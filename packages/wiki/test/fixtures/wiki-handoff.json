@@ -1,0 +1,78 @@
+{
+  "synthetic": true,
+  "seed": {
+    "title": "Release checklist",
+    "description": "Synthetic release procedure",
+    "body": "## Steps\n\n1. Read src/release.ts.\n"
+  },
+  "handoff": {
+    "vault": "$DISPOSABLE_VAULT",
+    "project": "demo",
+    "kind": "factual",
+    "content": "2. Confirm the release digest from the synthetic release specification.\n",
+    "sources": [
+      "fixture:synthetic-release-spec#digest"
+    ],
+    "limitations": [
+      "Synthetic source only; no live release was observed."
+    ],
+    "action": "authorized factual update",
+    "target": "projects/demo/procedures/release-checklist.md",
+    "baseDigest": "$REVIEWED_BASE_DIGEST",
+    "contentScope": "Append the digest check to Steps; preserve all other content.",
+    "ownerDecisions": [
+      "Preserve the existing release order."
+    ],
+    "knownOpen": false
+  },
+  "cases": [
+    {
+      "name": "authorized update",
+      "changes": {}
+    },
+    {
+      "name": "stale digest",
+      "changes": {},
+      "interveningEdit": true
+    },
+    {
+      "name": "missing authority",
+      "changes": {
+        "action": null
+      }
+    },
+    {
+      "name": "decision",
+      "changes": {
+        "kind": "decision",
+        "content": "The owner should change the release policy.\n"
+      }
+    },
+    {
+      "name": "create only existing",
+      "changes": {
+        "action": "authorized create"
+      }
+    },
+    {
+      "name": "known open editor",
+      "changes": {
+        "knownOpen": true
+      }
+    },
+    {
+      "name": "authorized create",
+      "changes": {
+        "action": "authorized create",
+        "target": null,
+        "baseDigest": null,
+        "content": "## Steps\n\n1. Check the synthetic rollback digest.\n",
+        "contentScope": "Create one rollback procedure."
+      },
+      "newTopic": {
+        "title": "Rollback checklist",
+        "description": "Synthetic rollback procedure"
+      }
+    }
+  ]
+}

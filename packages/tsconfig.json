@@ -16,5 +16,5 @@
     "erasableSyntaxOnly": true,
     "noEmit": true
   },
-  "include": ["wiki-core/src/**/*", "wiki-cli/src/**/*", "wiki-cli/test/**/*", "wiki-core/test/**/*"]
+  "include": ["wiki-core/src/**/*", "wiki-cli/src/**/*", "wiki-cli/test/**/*", "wiki-core/test/**/*", "wiki/src/**/*", "wiki/test/**/*"]
 }
