@@ -30,10 +30,18 @@ interface NavigationRow { type: string; path: string; row: string }
 function navigationDirectoryRows(directories: NavigationDirectory[], topics: NavigationTopic[]): Map<string, NavigationRow[]> {
   const rows = new Map<string, NavigationRow[]>();
   for (const directory of directories) rows.set(directory.path, []);
+  // One pass: credit each topic to every ancestor directory path.
+  const counts = new Map<string, number>();
+  for (const topic of topics) {
+    for (let slash = topic.path.indexOf("/"); slash !== -1; slash = topic.path.indexOf("/", slash + 1)) {
+      const ancestor = topic.path.slice(0, slash);
+      counts.set(ancestor, (counts.get(ancestor) ?? 0) + 1);
+    }
+  }
   for (const directory of directories) {
     if (!directory.path) continue;
     const parent = path.posix.dirname(directory.path) === "." ? "" : path.posix.dirname(directory.path);
-    const count = topics.filter(n => n.path.startsWith(directory.path + "/")).length;
+    const count = counts.get(directory.path) ?? 0;
     rows.get(parent)?.push({ type: directory.type, path: directory.path,
       row: "* [" + markdownText(path.posix.basename(directory.path)) + "](" + path.posix.relative(parent, directory.path + "/index.md") + ") - " + count + " concept" + (count === 1 ? "" : "s") });
   }
