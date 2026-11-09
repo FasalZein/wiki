@@ -5,9 +5,9 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, test } from "node:test";
+import { spawnCli } from "./cli-helper.ts";
 import { fileURLToPath } from "node:url";
 
-const BIN = fileURLToPath(new URL("../bin/wiki.js", import.meta.url));
 const GUARD = fileURLToPath(new URL("./doctor-guard.js", import.meta.url));
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-doctor-"));
 const home = path.join(temp, "home");
@@ -17,7 +17,8 @@ const env = { ...process.env, HOME: home, XDG_CACHE_HOME: path.join(home, "cache
 after(() => fs.rmSync(temp, { recursive: true, force: true }));
 let counter = 0;
 function cli(vault: string, args: string[], overrides = {}, json = true) {
-  const result = spawnSync(process.execPath, [...(args[0] === "doctor" ? ["--import", GUARD] : []), BIN, "--vault", vault, ...(json ? ["--json"] : []), ...args], { env: { ...env, ...overrides }, encoding: "utf8", timeout: 20000 });
+  // The doctor guard patches globals per process, so doctor runs stay in a subprocess.
+  const result = spawnCli(["--vault", vault, ...(json ? ["--json"] : []), ...args], { imports: args[0] === "doctor" ? [GUARD] : [], env: { ...env, ...overrides }, timeout: 20000 });
   assert.equal(result.error, undefined); assert.equal(result.signal, null, result.stderr);
   if (json) assert.equal(result.stderr, "");
   return { status: result.status, data: json ? JSON.parse(result.stdout) : undefined, stdout: result.stdout, stderr: result.stderr };

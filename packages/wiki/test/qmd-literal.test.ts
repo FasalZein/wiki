@@ -1,15 +1,14 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, test } from "node:test";
+import { spawnCli } from "./cli-helper.ts";
 import { fileURLToPath } from "node:url";
 
 // Real CLI processes over real QMD storage. Only external inference is faked
 // (qmd-fake-inference.js: the fake vector half contributes nothing, so lexical misses stay misses).
-const BIN = fileURLToPath(new URL("../bin/wiki.js", import.meta.url));
 const GUARD = fileURLToPath(new URL("./qmd-cli-guard.js", import.meta.url));
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-qmd-literal-"));
 after(() => fs.rmSync(temp, { recursive: true, force: true }));
@@ -18,8 +17,8 @@ type Match = { path: string; scope: string; type: string; score: number | null; 
 function cli(vault: string, args: string[], mode = "fake-inference", extraEnv: Record<string, string> = {}, json = true) {
   const log = vault + ".calls.jsonl";
   fs.rmSync(log, { force: true });
-  const result = spawnSync(process.execPath, ["--import", GUARD, BIN, "--vault", vault, ...(json ? ["--json"] : []), ...args], {
-    encoding: "utf8", timeout: 30000,
+  const result = spawnCli(["--vault", vault, ...(json ? ["--json"] : []), ...args], {
+    imports: [GUARD], timeout: 30000,
     env: { ...process.env, HOME: temp, XDG_CACHE_HOME: path.join(temp, "cache"), XDG_CONFIG_HOME: path.join(temp, "config"), XDG_DATA_HOME: path.join(temp, "data"), WIKI_VAULT: "", QMD_EMBED_MODEL: "", WIKI_QMD_CLI_GUARD: mode, WIKI_QMD_CALL_LOG: log, WIKI_QMD_DENY_SUBPROCESS: "1", ...extraEnv },
   });
   assert.equal(result.error, undefined);

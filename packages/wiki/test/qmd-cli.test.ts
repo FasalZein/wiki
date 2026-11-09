@@ -5,10 +5,10 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, test } from "node:test";
+import { spawnCli } from "./cli-helper.ts";
 import { fileURLToPath } from "node:url";
 import { searchQmdLex } from "../src/qmd.ts";
 
-const BIN = fileURLToPath(new URL("../bin/wiki.js", import.meta.url));
 const GUARD = fileURLToPath(new URL("./qmd-cli-guard.js", import.meta.url));
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-qmd-cli-"));
 process.env.HOME = temp;
@@ -28,8 +28,8 @@ function complete(entries: { path: string; digest: string }[]) {
   return { state: "complete", inventoryCount: sorted.length, inventoryDigest: digest(JSON.stringify(sorted)) };
 }
 function cli(vault: string, args: string[], mode = "", json = true) {
-  const result = spawnSync(process.execPath, ["--import", GUARD, BIN, "--vault", vault, ...(json ? ["--json"] : []), ...args], {
-    encoding: "utf8", timeout: 15000,
+  const result = spawnCli(["--vault", vault, ...(json ? ["--json"] : []), ...args], {
+    imports: [GUARD], timeout: 15000,
     env: { ...process.env, HOME: temp, XDG_CACHE_HOME: path.join(temp, "cache"), XDG_CONFIG_HOME: path.join(temp, "config"), WIKI_VAULT: "", WIKI_QMD_CLI_GUARD: mode },
   });
   assert.equal(result.error, undefined);

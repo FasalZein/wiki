@@ -1,21 +1,17 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, test } from "node:test";
+import { spawnJson } from "./cli-helper.ts";
 import { fileURLToPath } from "node:url";
 
-const BIN = fileURLToPath(new URL("../bin/wiki.js", import.meta.url));
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-links-"));
 after(() => fs.rmSync(temp, { recursive: true, force: true }));
 let counter = 0;
+// The link network guard patches network and fs globals per process, so every run stays in a subprocess.
 function cli(vault: string, ...args: string[]) {
-  const result = spawnSync(process.execPath, ["--import", fileURLToPath(new URL("./link-network-guard.js", import.meta.url)), BIN, "--json", "--vault", vault, ...args], {
-    encoding: "utf8", cwd: temp, env: { ...process.env, HOME: temp, WIKI_VAULT: "", WIKI_TEST_ROOT: temp, WIKI_TEST_VAULT: vault },
-  });
-  assert.equal(result.stderr, "");
-  return { status: result.status, data: JSON.parse(result.stdout) };
+  return spawnJson(["--vault", vault, ...args], { imports: [fileURLToPath(new URL("./link-network-guard.js", import.meta.url))], cwd: temp, env: { HOME: temp, WIKI_TEST_ROOT: temp, WIKI_TEST_VAULT: vault } });
 }
 function indexedLint(vault: string) {
   const generated = cli(vault, "index");
