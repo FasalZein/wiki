@@ -213,7 +213,7 @@ export async function run(argv: readonly string[], options: RunOptions): Promise
             finally { unsubscribe?.(); }
           }
           const updateOutput = (result: ReturnType<typeof updateTopic>) => output({ ok: true, ...result }, (result.outcome === "updated" ? "Updated topic: " : result.outcome === "dry-run" ? "Dry-run topic: " : "Unchanged topic: ") + result.path + "\n" + result.digest + "\n" + JSON.stringify(result.summary) + "\n" + JSON.stringify(result.diff) + "\nNavigation: " + result.navigation + "; log: " + result.log + "\n");
-          const lintFailure = (diagnostics: Diagnostic[]) => {
+          const lintFailure = (diagnostics: readonly Diagnostic[]) => {
             exitCode = 1;
             const error = { code: "lint", message: "Wiki validation failed" };
             output({ ok: false, error, diagnostics }, "", diagnostics.map(d => d.path + ": " + d.rule + ": " + d.message + "; fix: " + d.fix).join("\n") + "\n");
@@ -262,11 +262,9 @@ export async function run(argv: readonly string[], options: RunOptions): Promise
               // --check only compares current bytes.
               const checked = index ? checkVault(root) : undefined;
               const indexes = checked ? navigationIndexes(checked) : undefined;
-              const diagnostics = registry ? registry.diagnostics : checked ? checked.diagnostics : lintVault(vault, arg);
-              if (indexes && !diagnostics.length) {
-                diagnostics.push(...indexFreshnessDiagnostics(root, indexes));
-                sortDiagnostics(diagnostics);
-              }
+              const found = registry ? registry.diagnostics : checked ? checked.diagnostics : lintVault(vault, arg);
+              // Index freshness is checked only over a clean inventory; the validated list stays unchanged.
+              const diagnostics = indexes && !found.length ? sortDiagnostics([...found, ...indexFreshnessDiagnostics(root, indexes)]) : found;
               if (diagnostics.length) lintFailure(diagnostics);
               else if (indexes) indexOutput(indexes);
               else if (registry) {

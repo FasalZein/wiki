@@ -18,7 +18,7 @@ export interface ValidatedInventory {
   readonly registry: Registry;
   readonly notes: readonly CheckedNote[];
   readonly directories: readonly NavigationDirectory[];
-  readonly diagnostics: Diagnostic[];
+  readonly diagnostics: readonly Diagnostic[];
 }
 export interface ValidateOptions {
   /** Selected-path lint requires link targets that exist now. Whole-vault validation also accepts generated
