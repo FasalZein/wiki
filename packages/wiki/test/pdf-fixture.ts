@@ -1,4 +1,5 @@
-// Synthetic PDF builder adapted from wiki-cli capture tests. No donor runtime import.
+// Synthetic PDF builder adapted from the capture tests of the former standalone
+// Node CLI package (removed in #41; see git history). No donor runtime import.
 export function buildPdf(stream: string): Buffer {
   const bodyStream = stream.endsWith("\n") ? stream : `${stream}\n`;
   const objects = [

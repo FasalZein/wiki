@@ -2,7 +2,7 @@
 
 Status: Owner-approved structure-first build direction, reconciled 2026-11-06. This file is the authoritative build specification. Implementation and runtime verification remain outstanding.
 
-This specification supersedes the 2026-10-05 evidence-first implementation plan previously stored here. Existing evidence-first code in `packages/wiki-core` and `packages/wiki-cli`, legacy code, and historical evidence records remain untouched. The new foundation is CLI + schema registry + skill + an inactive repository-owned dedicated wiki-agent example. GitHub ticket publication and closure of #9-#14 require owner approval of exact text; this repository update does not authorize those writes.
+This specification supersedes the 2026-10-05 evidence-first implementation plan previously stored here. Existing evidence-first code in `packages/wiki-core` and `packages/wiki-cli`, legacy code, and historical evidence records remain untouched (both packages and the legacy code were later removed: #38, #41). The new foundation is CLI + schema registry + skill + an inactive repository-owned dedicated wiki-agent example. GitHub ticket publication and closure of #9-#14 require owner approval of exact text; this repository update does not authorize those writes.
 
 ## Problem Statement
 
@@ -441,6 +441,7 @@ Search does not block basic structural correctness or safe reads/writes. Source 
 - Owner decision 2026-11-08: the new CLI ships as `wiki` and replaces the legacy binary at release; the repository skill replaces `skills/wiki/SKILL.md`; the legacy code is removed after the new install is verified. Global skill, agent, and CLI installation and the cutover itself stay outside this specification until release.
 - 2026-11-09: after the new install was verified, the legacy Bun CLI (root `src/`, `tests/`, templates, root build wiring, and its mutation plan) was removed (#38). The batch gate is `verify:next` plus `boot:wiki`.
 - 2026-11-09: the architecture and performance pass ([wiki-architecture-pass.md](wiki-architecture-pass.md)) supersedes D16 for wiki-core and wiki-cli and amends D17 with an in-process command interface.
+- 2026-11-09: per decision A2 of that pass, the earlier Node packages `packages/wiki-core` and `packages/wiki-cli`, their typecheck include, mutation plan, and the root `gray-matter` dependency were removed (#41); git history keeps the code.
 - Automatic Git staging/commits, general rename/backlink migration, OCR, unsupported attachment formats, link crawling, and network correctness checking during reads or lint.
 
 ## Further Notes
