@@ -92,7 +92,7 @@ function bindings(f: Fixture, args: string[]): Record<string, string> {
   return {
     vault: f.vault, dir: path.join(temp, "init-" + n), project: "demo", type: "procedure", folder: addingType ? "runbooks" : "procedures",
     name: "runbook", question: "seeded release", keywords: "seeded release", n: "5", path: f.seeded, heading: "Steps",
-    digest: sha(path.join(f.vault, f.seeded)), candidate, title: "Fresh topic", description: "Fresh topic description",
+    digest: sha(path.join(f.vault, f.seeded)), "base-digest": sha(path.join(f.vault, f.seeded)), candidate, title: "Fresh topic", description: "Fresh topic description",
     "body-file": body, slug: "fresh-topic", tag: "release", status: "draft", "file-or-url": source,
   };
 }
@@ -184,7 +184,7 @@ function expectDocumented(args: string[], f: Fixture, values: Record<string, str
         assert.equal(data.digest, sha(seededFile)); cleanVault(f.vault);
         const stale = cli(bind(args, values));
         assert.equal(stale.status, 3, "The old digest is now stale"); assert.equal(stale.data.error.code, "conflict");
-        assert.equal(stale.data.expected, values.digest); assert.equal(stale.data.current, sha(seededFile));
+        assert.equal(stale.data.expected, values["base-digest"]); assert.equal(stale.data.current, sha(seededFile));
       }
       break;
     case "capture":
@@ -226,6 +226,27 @@ test("wiki:18 each documented skill command runs against a disposable vault and 
     const f = fixture();
     expectDocumented(args, f, bindings(f, args));
   }
+});
+
+test("wiki:18 an authorized update passes the handoff base digest: after another edit it exits 3 and leaves the note unchanged", () => {
+  const f = fixture(false);
+  const file = path.join(f.vault, f.seeded);
+  // The working agent reviewed this revision and hands its digest over.
+  const handoffDigest = ok(["--vault", f.vault, "show", f.seeded, "--json"]).digest as string;
+  // The owner edits the note before the wiki agent applies the handoff.
+  const ownerEdit = path.join(temp, "owner-" + (++counter) + ".md");
+  fs.writeFileSync(ownerEdit, fs.readFileSync(file, "utf8") + "2. Owner correction.\n");
+  ok(["--vault", f.vault, "update", f.seeded, "--expect", handoffDigest, "--file", ownerEdit, "--json"]);
+  const ownerBytes = fs.readFileSync(file);
+  // The wiki agent reads the note to build its candidate, then applies with the handoff digest, as the skill states.
+  const [documented] = COMMANDS.filter(args => verb(args) === "update" && !args.includes("--dry-run"));
+  assert.ok(documented?.includes("<base-digest>"), "The skill passes the handoff base digest to --expect");
+  const candidate = path.join(temp, "agent-" + (++counter) + ".md");
+  fs.writeFileSync(candidate, ok(["--vault", f.vault, "show", f.seeded, "--json"]).markdown + "3. Agent finding.\n");
+  const stale = cli(bind(documented as string[], { vault: f.vault, path: f.seeded, "base-digest": handoffDigest, candidate }));
+  assert.equal(stale.status, 3, JSON.stringify(stale.data)); assert.equal(stale.data.error.code, "conflict");
+  assert.equal(stale.data.expected, handoffDigest); assert.equal(stale.data.current, sha(file));
+  assert.deepEqual(fs.readFileSync(file), ownerBytes, "The owner's revision stays unchanged");
 });
 
 test("wiki:18 search results read as the skill states: degraded lexical misses are not exhaustive and literal tokens match note text", () => {
