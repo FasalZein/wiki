@@ -67,7 +67,7 @@ handoffs. `packages/wiki/test/agent.test.ts` binds the disposable vault and
 reviewed base digest, then scripts the protocol with real CLI processes. This is
 a deterministic fixture, not a handoff parser shipped to users, live model
 judgment, authenticated approval, egress consent, or production-use evidence.
-Run `WIKI_TEST_PATTERN='wiki:19' heavy -- bun run test:wiki`.
+Run `WIKI_TEST_PATTERN='wiki:19' heavy --slots 2 -- bun run test:wiki`.
 
 Format reference: pi-subagents 2.9.2 README, **Agent definitions** and
 **Frontmatter reference**. All fields used above are documented there; no field
