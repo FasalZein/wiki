@@ -446,7 +446,7 @@ async function inSession<O>(root: string, models: QmdModels | undefined, env: Qm
   });
 }
 /** The fold of a sync-led request. operation: the failures of its follow-on find or embed. */
-function releasedSync(sync: QmdSyncResult, operation: QmdDiagnostic[], release: QmdDiagnostic[]): { sync: QmdSyncResult } {
+function releasedSync(sync: QmdSyncResult, operation: QmdDiagnostic[], release: QmdDiagnostic[]): { sync: QmdUnavailableSync } {
   return { sync: sync.state === "unavailable" ? unavailable([...sync.textCoverage.diagnostics, ...release], sync.code) : unavailable([...operation, ...release]) };
 }
 
@@ -554,26 +554,30 @@ export async function findQmd(root: string, request: QmdFindRequest, captured: Q
   return inSession(root, undefined, process.env, session => session.find(request, captured, signal),
     (find, release) => ({ state: "unavailable", code: find.state === "unavailable" ? find.code : "unavailable", diagnostics: [...(find.state === "unavailable" ? find.diagnostics : []), ...release] }));
 }
-/** One find request: synchronize text and query under one session lock. find is absent when the
- * text update was unavailable (find did not run). */
-export async function syncAndFindQmd(root: string, inventory: QmdInventory, options: QmdSyncOptions, request: QmdFindRequest, env: QmdEnvironment, signal?: AbortSignal): Promise<{ sync: QmdSyncResult; find?: QmdFindResult }> {
-  return inSession(root, options.models, env, async (session): Promise<{ sync: QmdSyncResult; find?: QmdFindResult }> => {
+export type QmdUnavailableSync = Extract<QmdSyncResult, { state: "unavailable" }>;
+export type QmdAvailableSync = Exclude<QmdSyncResult, { state: "unavailable" }>;
+/** A sync-led find: find ran exactly when the text update was available. */
+export type QmdSyncedFind = { sync: QmdUnavailableSync } | { sync: QmdAvailableSync; find: QmdFindResult };
+/** One find request: synchronize text and query under one session lock. */
+export async function syncAndFindQmd(root: string, inventory: QmdInventory, options: QmdSyncOptions, request: QmdFindRequest, env: QmdEnvironment, signal?: AbortSignal): Promise<QmdSyncedFind> {
+  return inSession(root, options.models, env, async (session): Promise<QmdSyncedFind> => {
     const sync = await session.sync(inventory, options);
     return sync.state === "unavailable" ? { sync } : { sync, find: await session.find(request, inventory.concepts, signal) };
-  }, (o, release) => releasedSync(o.sync, o.find?.state === "unavailable" ? o.find.diagnostics : [], release));
+  }, (o, release) => releasedSync(o.sync, "find" in o && o.find.state === "unavailable" ? o.find.diagnostics : [], release));
 }
 
 export type QmdEmbedResult =
   | { state: "complete"; embeddingCoverage: { state: "complete" }; embedded: { docsProcessed: number; chunksEmbedded: number; errors: number } }
   | { state: "failed"; code: "conflict" | "unavailable"; embeddingCoverage: QmdEmbeddingCoverage; embedded?: { docsProcessed: number; chunksEmbedded: number; errors: number }; diagnostics: QmdDiagnostic[] };
 
-/** One search sync --embed request: synchronize text and embed under one session lock.
- * embed is absent when the text update was unavailable (embedding did not run). */
-export async function syncAndEmbedQmd(root: string, inventory: QmdInventory, options: QmdSyncOptions, models: QmdReadyModels<"embed">, env: QmdEnvironment, signal?: AbortSignal): Promise<{ sync: QmdSyncResult; embed?: QmdEmbedResult }> {
-  return inSession(root, options.models, env, async (session): Promise<{ sync: QmdSyncResult; embed?: QmdEmbedResult }> => {
+/** A sync-led embedding: embedding ran exactly when the text update was available. */
+export type QmdSyncedEmbed = { sync: QmdUnavailableSync } | { sync: QmdAvailableSync; embed: QmdEmbedResult };
+/** One search sync --embed request: synchronize text and embed under one session lock. */
+export async function syncAndEmbedQmd(root: string, inventory: QmdInventory, options: QmdSyncOptions, models: QmdReadyModels<"embed">, env: QmdEnvironment, signal?: AbortSignal): Promise<QmdSyncedEmbed> {
+  return inSession(root, options.models, env, async (session): Promise<QmdSyncedEmbed> => {
     const sync = await session.sync(inventory, options);
     return sync.state === "unavailable" ? { sync } : { sync, embed: await session.embed(models, signal) };
-  }, (o, release) => releasedSync(o.sync, o.embed?.state === "failed" ? o.embed.diagnostics : [], release));
+  }, (o, release) => releasedSync(o.sync, "embed" in o && o.embed.state === "failed" ? o.embed.diagnostics : [], release));
 }
 
 // Doctor inspection of a disposable copy. Database file names and QMD 2.8.3 tables stay in this module.
