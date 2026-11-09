@@ -63,7 +63,7 @@ test("wiki:11 fast find forwards one typed lex/vec request without expansion or 
   assert.equal(result.calls[1]?.request?.rerank, false);
   assert.equal(result.data.mode, "fast"); assert.equal(result.data.rerank, false);
   assert.deepEqual(result.data.matches.map((m: { path: string }) => m.path), [star]);
-  assert.equal(result.data.textCoverage.state, "complete"); assert.equal(result.data.textCoverage.inventory.length, 2);
+  assert.equal(result.data.textCoverage.state, "complete"); assert.equal(result.data.textCoverage.inventoryCount, 2);
   assert.deepEqual(result.data.embeddingCoverage, { state: "incomplete", contentHashes: 2 }, "Pending embeddings are reported separately from text coverage");
   const terms = cli(vault, ["find", question, "--terms", "garden tomatoes"], "fake-inference");
   assert.equal(terms.status, 0); assert.deepEqual(ops(terms.calls), ["createStore", "search"]);

@@ -22,6 +22,11 @@ after(() => {
 });
 let counter = 0;
 function digest(bytes: string) { return "sha256:" + createHash("sha256").update(bytes).digest("hex"); }
+/** Complete text coverage per the README JSON contract: count plus the digest of the path-sorted inventory. */
+function complete(entries: { path: string; digest: string }[]) {
+  const sorted = [...entries].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+  return { state: "complete", inventoryCount: sorted.length, inventoryDigest: digest(JSON.stringify(sorted)) };
+}
 function cli(vault: string, args: string[], mode = "", json = true) {
   const result = spawnSync(process.execPath, ["--import", GUARD, BIN, "--vault", vault, ...(json ? ["--json"] : []), ...args], {
     encoding: "utf8", timeout: 15000,
@@ -47,7 +52,7 @@ test("wiki:10 CLI sync captures registry-valid full Markdown with separate pendi
   fs.writeFileSync(path.join(vault, relative), bytes);
   const result = succeeds(vault, ["search", "sync"]);
   assert.equal(result.ok, true); assert.equal(result.coverageBasis, "captured-inventory");
-  assert.deepEqual(result.textCoverage, { state: "complete", inventory: [{ path: relative, digest: digest(bytes) }] });
+  assert.deepEqual(result.textCoverage, complete([{ path: relative, digest: digest(bytes) }]));
   assert.deepEqual(result.embeddingCoverage, { state: "incomplete", contentHashes: 1 });
   const found = await searchQmdLex(vault, "quasar"); assert.equal(found.state, "successful", JSON.stringify(found));
   assert.equal(found.matches[0]?.markdown, bytes); assert.equal(found.matches[0]?.path, relative);
@@ -63,13 +68,13 @@ test("wiki:10 CLI sync tracks equal-size/equal-mtime edits, add, rename, delete 
   succeeds(vault, ["search", "sync"]);
   const changed = bytes.replace("Violet", "Yellow"); fs.writeFileSync(file, changed); fs.utimesSync(file, time, time);
   const second = note(vault, "Garden");
-  let result = succeeds(vault, ["search", "sync"]); assert.equal(result.textCoverage.inventory.find((n: { path: string }) => n.path === relative).digest, digest(changed));
+  let result = succeeds(vault, ["search", "sync"]); assert.deepEqual(result.textCoverage, complete([{ path: relative, digest: digest(changed) }, { path: second, digest: digest(read(vault, second)) }]));
   const renamed = "personal/notes/renamed.md"; fs.renameSync(file, path.join(vault, renamed)); fs.unlinkSync(path.join(vault, second));
-  result = succeeds(vault, ["search", "sync"]); assert.deepEqual(result.textCoverage.inventory, [{ path: renamed, digest: digest(changed) }]);
+  result = succeeds(vault, ["search", "sync"]); assert.deepEqual(result.textCoverage, complete([{ path: renamed, digest: digest(changed) }]));
   let found = await searchQmdLex(vault, "Yellow"); assert.equal(found.state, "successful"); assert.deepEqual(found.matches.map(m => m.path), [renamed]);
   fs.rmSync(path.join(vault, ".wiki/search"), { recursive: true });
   assert.deepEqual(succeeds(vault, ["search", "sync"]).textCoverage, result.textCoverage);
-  fs.unlinkSync(path.join(vault, renamed)); assert.deepEqual(succeeds(vault, ["search", "sync"]).textCoverage.inventory, []);
+  fs.unlinkSync(path.join(vault, renamed)); assert.deepEqual(succeeds(vault, ["search", "sync"]).textCoverage, complete([]));
   found = await searchQmdLex(vault, "photon"); assert.equal(found.state, "successful"); assert.deepEqual(found.matches, []);
 });
 
@@ -90,7 +95,7 @@ test("wiki:10 CLI sync excludes navigation, assets and operations and diagnoses 
 test("wiki:10 CLI inventory indexes the validated read, never an unvalidated later reread", async () => {
   const vault = fresh(), relative = note(vault), captured = read(vault, relative);
   const result = cli(vault, ["search", "sync"], "replace-after-read"); assert.equal(result.status, 0);
-  assert.deepEqual(result.data.textCoverage.inventory, [{ path: relative, digest: digest(captured) }]);
+  assert.deepEqual(result.data.textCoverage, complete([{ path: relative, digest: digest(captured) }]));
   assert.notEqual(read(vault, relative), captured);
   const found = await searchQmdLex(vault, "telescope"); assert.equal(found.state, "successful"); assert.equal(found.matches[0]?.markdown, captured);
 });
@@ -135,7 +140,7 @@ test("wiki:10 CLI registry-specific folders and valid vendor/build identities st
   const relative = succeeds(vault, ["new", "building", "--project", "vendor", "--title", "Canonical", "--description", "Canonical quasar"]).path;
   assert.equal(relative, "projects/vendor/build/canonical.md");
   const result = succeeds(vault, ["search", "sync"]); assert.equal(result.textCoverage.state, "complete");
-  assert.deepEqual(result.textCoverage.inventory, [{ path: relative, digest: digest(read(vault, relative)) }]);
+  assert.deepEqual(result.textCoverage, complete([{ path: relative, digest: digest(read(vault, relative)) }]));
   const found = await searchQmdLex(vault, "quasar"); assert.equal(found.state, "successful"); assert.equal(found.matches[0]?.path, relative);
 });
 
