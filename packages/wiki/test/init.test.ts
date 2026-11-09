@@ -107,9 +107,14 @@ test("wiki:01 refuses symlink roots, managed files, and write directories", asyn
 });
 
 test("wiki:01 requires explicit selection and honors flag precedence over environment", async () => {
+  // Refusals run as the real process inside temp, so the snapshot proves nothing is written in the working directory.
   const before = snapshot(temp);
-  await rejected(["init"], 2, "usage", /no default vault/i);
-  await rejected(["init", ""], 2, "usage", /select a vault/i);
+  for (const [args, message] of [[["init"], /no default vault/i], [["init", ""], /select a vault/i]] as const) {
+    const result = spawnCli(["--json", ...args], { cwd: temp, env: { HOME: temp } });
+    assert.equal(result.status, 2, result.stdout + result.stderr);
+    const data = JSON.parse(result.stdout);
+    assert.equal(data.ok, false); assert.equal(data.error.code, "usage"); assert.match(data.error.message, message);
+  }
   assert.deepEqual(snapshot(temp), before);
   const selected = freshPath();
   const ignored = freshPath();
