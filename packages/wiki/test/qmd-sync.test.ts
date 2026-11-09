@@ -10,7 +10,8 @@ import tls from "node:tls";
 import { syncBuiltinESMExports } from "node:module";
 import { createHash } from "node:crypto";
 import "./qmd-cleanup-guard.js";
-import { syncQmdText, searchQmdLex } from "../src/qmd.ts";
+import { DatabaseSync } from "node:sqlite";
+import { syncQmdText, searchQmdLex, findQmd } from "../src/qmd.ts";
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-qmd-"));
 // Importing the adapter does not import QMD. Sandbox all SDK defaults before first use.
@@ -159,6 +160,34 @@ test("wiki:10 SDK-skipped empty content cannot pass indexed-body verification", 
   const result = await syncQmdText(root, inventory([note("empty", "")]));
   assert.equal(result.state, "unavailable", JSON.stringify(result));
   assert.match(JSON.stringify(result), /Indexed Markdown differs/);
+  assert.equal(fs.existsSync(receipt(root)), false);
+});
+
+/** Rewrites one indexed body in place under its unchanged content hash: only an exact body comparison can see it. */
+function tamperIndexedBody(root: string, markdown: string, replacement: string) {
+  const db = new DatabaseSync(path.join(root, ".wiki/search/qmd.sqlite"));
+  try {
+    const hash = createHash("sha256").update(markdown).digest("hex");
+    assert.equal(db.prepare("UPDATE content SET doc = ? WHERE hash = ?").run(replacement, hash).changes, 1);
+  } finally { db.close(); }
+}
+
+test("wiki:10 an indexed body that differs from the captured Markdown under the same content hash is a find index mismatch and fails sync", async () => {
+  const root = fresh();
+  const good = inventory([note("star", "# Star\nGalaxy\n"), note("nova", "# Nova\nFlare\n")]);
+  fs.mkdirSync(path.join(root, "personal/notes"), { recursive: true });
+  for (const concept of good.concepts) fs.writeFileSync(path.join(root, concept.path), concept.markdown);
+  assert.equal((await syncQmdText(root, good)).state, "successful");
+  tamperIndexedBody(root, "# Star\nGalaxy\n", "# Star\nGalaxx\n");
+  const found = await findQmd(root, { mode: "lexical", requested: "fast", question: "flare", reason: [] }, good.concepts);
+  assert.equal(found.state, "successful", JSON.stringify(found));
+  assert.deepEqual(found.indexMismatch.map(d => d.path), ["personal/notes/star.md"]);
+  assert.match(found.indexMismatch[0]?.message ?? "", /different revision than this request captured/);
+  assert.deepEqual(found.matches.map(m => m.path), ["personal/notes/nova.md"]);
+  // QMD keeps the tampered row because the file hash is unchanged; the sync body check must catch it.
+  const resync = await syncQmdText(root, good);
+  assert.equal(resync.state, "unavailable", JSON.stringify(resync));
+  assert.match(JSON.stringify(resync), /Indexed Markdown differs from captured concept: personal\/notes\/star.md/);
   assert.equal(fs.existsSync(receipt(root)), false);
 });
 
