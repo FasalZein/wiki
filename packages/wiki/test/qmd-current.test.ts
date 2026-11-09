@@ -148,7 +148,9 @@ test("wiki:12 a deep expansion failure swallowed by QMD falls back to labelled d
 
 /** FIFO under the test temp directory; opening it blocks until the peer opens it (a source event, not polling). */
 function fifos(dir: string) { fs.mkdirSync(dir); for (const name of ["b-captured", "b-go", "a-go"]) assert.equal(spawnSync("mkfifo", [path.join(dir, name)]).status, 0); }
-for (const [query, label] of [["betaword", "term only in the newer revision"], ["photon", "term in both revisions"]] as const) test("wiki:12 another sync cannot replace the index between this find's sync and query; it conflicts and find renders the captured revision: " + label, async () => {
+// A's first index-lock release is the event. Before S5 it came between A's sync and A's query, so B's
+// R0 sync replaced A's index before the query; with one session lock it comes after the query.
+for (const [query, label] of [["betaword", "term only in the newer revision"], ["photon", "term in both revisions"]] as const) test("wiki:12 another sync waiting for the index lock replaces the index only after this find has queried: " + label, async () => {
   const vault = fresh(), relative = note(vault, "Observatory", "Observatory telescope", "Photon alphaword");
   const file = path.join(vault, relative), dir = path.join(temp, "fifo-" + counter); fifos(dir);
   const env = { WIKI_QMD_FIFO_DIR: dir };
@@ -158,9 +160,9 @@ for (const [query, label] of [["betaword", "term only in the newer revision"], [
   const bExit = new Promise<number | null>(resolve => b.on("close", resolve));
   assert.equal(fs.readFileSync(path.join(dir, "b-captured"), "utf8"), "captured R0");
   const r1 = fs.readFileSync(file, "utf8").replace("alphaword", "betaword"); fs.writeFileSync(file, r1);
-  // A captures R1 and takes its lock; B attempts its lock while A holds it; A then syncs and queries.
+  // A captures R1 and runs to its first lock release; B then syncs R0 and releases; A finishes.
   const a = cli(vault, ["find", query], "fake-inference-stale-a", env);
-  assert.equal(await bExit, 3, bOut + bErr); assert.equal(JSON.parse(bOut).error.code, "conflict", "B never replaced A's index");
+  assert.equal(await bExit, 0, bOut + bErr); assert.equal(JSON.parse(bOut).textCoverage.inventory[0].digest, sha(r1.replace("betaword", "alphaword")), "B indexed R0 after A released");
   assert.equal(a.status, 0, JSON.stringify(a.data));
   assert.equal(a.data.textCoverage.state, "complete", JSON.stringify(a.data));
   assert.deepEqual(a.data.matches.map((m: Match) => m.digest), [sha(r1)], "Only the captured revision is rendered");

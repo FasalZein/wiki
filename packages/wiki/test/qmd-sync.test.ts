@@ -191,6 +191,21 @@ test("wiki:10 an indexed body that differs from the captured Markdown under the 
   assert.equal(fs.existsSync(receipt(root)), false);
 });
 
+test("wiki:12 a query hit whose indexed body differs from the captured revision is omitted, never rendered as current", async () => {
+  const root = fresh();
+  const good = inventory([note("star", "# Star\nGalaxy\n"), note("nova", "# Nova\nFlare\n")]);
+  fs.mkdirSync(path.join(root, "personal/notes"), { recursive: true });
+  for (const concept of good.concepts) fs.writeFileSync(path.join(root, concept.path), concept.markdown);
+  assert.equal((await syncQmdText(root, good)).state, "successful");
+  // The stale indexed body still matches the query, so the hit reaches rendering.
+  tamperIndexedBody(root, "# Star\nGalaxy\n", "# Star\nGalaxy old\n");
+  const found = await findQmd(root, { mode: "lexical", requested: "fast", question: "galaxy", reason: [] }, good.concepts);
+  assert.equal(found.state, "successful", JSON.stringify(found));
+  assert.deepEqual(found.matches, [], "The stale indexed excerpt never leaks as current");
+  assert.deepEqual(found.omitted.map(d => d.path), ["personal/notes/star.md"]);
+  assert.match(found.omitted[0]?.message ?? "", /Indexed content differs from the captured revision/);
+});
+
 test("wiki:10 exclusive writer lock rejects competing sync and lexical reads without taking the mutation lock", async () => {
   const root = fresh();
   fs.mkdirSync(path.join(root, ".wiki"));

@@ -176,6 +176,25 @@ test("wiki:11 find and search sync --embed hold one index lock from text sync th
   }
 });
 
+test("wiki:12 a failed index-lock release after a successful text sync never reports complete coverage for find or search sync --embed", () => {
+  const vault = fresh(); note(vault, "Observatory", "Observatory telescope");
+  configure(vault, ["embed"]);
+  for (const args of [["find", "telescope"], ["search", "sync", "--embed"]]) {
+    const lock = path.join(vault, ".wiki/search/writer.lock"); fs.rmSync(lock, { force: true });
+    const result = cli(vault, args, "fake-inference-release-fail");
+    assert.equal(result.status, 7, JSON.stringify(result.data)); assert.equal(result.data.error.code, "unavailable");
+    assert.equal(result.data.error.message, "Search synchronization unavailable");
+    assert.equal(result.data.textCoverage.state, "unavailable", JSON.stringify(result.data));
+    assert.match(JSON.stringify(result.data.diagnostics), /Writer lock removal failed: Injected writer lock removal failure/);
+    assert.equal(fs.existsSync(lock), true, "The lock is reported retained, not removed");
+    assert.equal(fs.existsSync(path.join(vault, ".wiki/search/coverage.json")), false, "No receipt survives a retained lock");
+    assert.equal(result.data.matches, undefined); assert.equal(result.data.embedding, undefined);
+    fs.rmSync(lock); // Explicit operator recovery between runs.
+    const human = cli(vault, args, "fake-inference-release-fail", false); assert.equal(human.status, 7); assert.match(human.stderr, /^unavailable: Search synchronization unavailable/);
+    fs.rmSync(lock);
+  }
+});
+
 test("wiki:11 SDK model cache binds to vault-local derived state, never an absent or unwritable user cache", () => {
   const vault = fresh(); note(vault, "Observatory", "Observatory telescope");
   configure(vault, ["embed", "generate", "rerank"]);

@@ -158,7 +158,7 @@ export async function doctorVault(selected: string) {
   const node = nodeCheck(problem);
   const extractors = { pandoc: extractor("pandoc", diagnostics), pdftotext: extractor("pdftotext", diagnostics) };
   const modelReadiness = doctorModelReadiness(root, diagnostics);
-  const { qmd, database, textCoverage, embeddingCoverage } = await inspectQmdIndex(root, profile.state === "ready" ? inventory : undefined, modelReadiness.models, problem, diagnostics);
+  const { qmd, database, textCoverage, embeddingCoverage } = await inspectQmdIndex(root, profile.state === "ready" ? inventory : undefined, modelReadiness.models, problem);
   if (diagnostics.length) failure ??= "unavailable";
   return {
     ok: failure === undefined,
