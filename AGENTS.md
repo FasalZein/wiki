@@ -7,15 +7,14 @@
 - The historical wiki vault (`/Users/tothemoon/Knowledge`, `/Users/tothemoon/Knowledge-archive`) and Linear are read-only archives. Search them for older decisions; never create, update, migrate, or delete content there.
 - Do not change global agent guidance, global qmd storage, Pi settings, or installed binaries from this repository's work.
 
-## Live legacy binary trap
+## Live command trap
 
-- The globally installed `wiki` command resolves to this repository's `dist/cli.js`.
-- Do not run `bun run build` or write anything into the root `dist/` during development. That replaces the live executable.
-- New packages under `packages/` run from their own sources under Node and never write to the root `dist/`.
+- The global `wiki` command is a `bun link` (run in `packages/wiki`) of the main checkout's `packages/wiki/bin/wiki.js`. Landing on the main checkout changes the live command.
+- The main checkout must keep `packages/wiki/node_modules` installed: `heavy -- npm ci --prefix packages/wiki`.
 
 ## Verification scope
 
-- Legacy CLI (`src/`, `tests/`): `bun run typecheck` and `bun test tests/`. Run `tests/`, not the whole tree; `reference/` and `archive/` hold non-product code.
+- `reference/` and `archive/` hold non-product code. Do not build or test them.
 - Node packages (`packages/wiki-core`, `packages/wiki-cli`, `packages/wiki`): `bun run verify:next` covers source and tests at the batch gate (Node typecheck plus `node --test` CLI integration tests, Node >= 22.18).
 - Boot check for `packages/wiki`: `heavy -- bun run boot:wiki` (source CLI in a temp vault; exits nonzero on any failed step). Runtime support and operating limits: `docs/wiki-foundation.md`.
 - Root dependencies: `package-lock.json` is the only root lock. Install with `heavy -- npm ci`; never run `bun install` at the root, because it writes a second lock (`bun.lock`). `bun run <script>` is fine.

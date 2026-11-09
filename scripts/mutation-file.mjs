@@ -19,7 +19,6 @@ const testCommands = new Map([
   // searchQmdLex, and the writer lock. findQmd, embedQmd, and model readiness
   // need the CLI test files; widen this plan before claiming those ranges.
   ["packages/wiki/src/qmd.ts", "node --test --test-concurrency=1 packages/wiki/test/qmd-sync.test.ts"],
-  ["src/cli/output.ts", "bun test tests/cli-links.test.ts tests/cli-search.test.ts"],
   ["packages/wiki-cli/src/cli.ts", "node --test --test-concurrency=1 packages/wiki-cli/test/cli.test.ts packages/wiki-cli/test/capture-sources.test.ts"],
 ]);
 
@@ -55,7 +54,7 @@ export function mutationOptions(target, env) {
     jsonReporter: { fileName: outputDir + "/mutation.json" },
     htmlReporter: { fileName: outputDir + "/mutation.html" },
     inPlace: false,
-    // The .git worktree file and installed legacy dist must not enter sandboxes.
+    // The .git worktree file and untracked local state (old build output, loop state) must not enter sandboxes.
     ignorePatterns: ["/dist", "/archive", "/reference", "/.ralph", "/.wiki"],
   };
 }
