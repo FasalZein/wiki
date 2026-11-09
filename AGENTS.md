@@ -15,7 +15,7 @@
 ## Verification scope
 
 - `reference/` and `archive/` hold non-product code. Do not build or test them.
-- `packages/wiki`: `bun run verify:next` covers source and tests at the batch gate (Node typecheck plus `node --test` CLI integration tests, Node >= 22.18).
+- `packages/wiki`: `heavy --slots 2 -- bun run verify:next` covers source and tests at the batch gate (Node typecheck plus `node --test` CLI integration tests, Node >= 22.18). It and `test:wiki` run four test files at once; the slot claim must match (`docs/wiki-foundation.md`, Proof commands).
 - Boot check for `packages/wiki`: `heavy -- bun run boot:wiki` (source CLI in a temp vault; exits nonzero on any failed step). Runtime support and operating limits: `docs/wiki-foundation.md`.
 - Root dependencies: `package-lock.json` is the only root lock. Install with `heavy -- npm ci`; never run `bun install` at the root, because it writes a second lock (`bun.lock`). `bun run <script>` is fine.
 - Tests use disposable temp vaults and Git repositories only. Never point a test or a manual run at the archive vault.
