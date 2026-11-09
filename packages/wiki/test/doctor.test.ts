@@ -108,6 +108,23 @@ test("wiki:17 unreadable concepts are named, never silently omitted from text co
   assert.ok(result.data.diagnostics.some((d: { path: string; message: string }) => d.path === relative && /unreadable/.test(d.message)));
 });
 
+test("wiki:17 Node runtime readiness starts at 22.18 and names the actual unsupported version", () => {
+  const vault = fresh();
+  for (const version of ["22.18.0", "23.0.0"]) {
+    const result = doctor(vault, { WIKI_DOCTOR_GUARD: "node-version:" + version });
+    assert.deepEqual(result.data.runtime.node, { state: "ready", version });
+    assert.ok(!result.data.diagnostics.some((d: { path: string }) => d.path === "node"));
+  }
+  for (const version of ["22.17.9", "21.99.0"]) {
+    const result = doctor(vault, { WIKI_DOCTOR_GUARD: "node-version:" + version });
+    assert.equal(result.status, 7); assert.equal(result.data.ok, false);
+    assert.deepEqual(result.data.runtime.node, { state: "unavailable", version });
+    const diagnostic = result.data.diagnostics.find((d: { path: string }) => d.path === "node");
+    assert.equal(diagnostic.message, "Node >=22.18 is required; actual " + version);
+    assert.match(diagnostic.fix, /supported Node runtime/);
+  }
+});
+
 test("wiki:17 missing extractors name Pandoc and pdftotext without installation or fallback", () => {
   const vault = fresh(); configureModels(vault); succeeds(vault, ["search", "sync"]);
   const result = doctor(vault, { PATH: "" }); assert.equal(result.status, 7);

@@ -22,7 +22,7 @@ test("uses serial native Node tests for the Node CLI plan", () => {
   assert.notEqual(options.incrementalFile, mutationOptions("src/cli/output.ts", { HEAVY_CPUS: "15" }).incrementalFile);
 });
 
-test("supports all eleven wiki capture/update risk boundaries with serial sandbox-relative tests", () => {
+test("supports all twelve wiki capture/update risk boundaries with serial sandbox-relative tests", () => {
   const plans = {
     "capture.ts": ["capture-text", "capture-cli", "capture-pdf", "capture-web", "concurrent-writers"],
     "update.ts": ["update", "concurrent-writers"],
@@ -35,6 +35,7 @@ test("supports all eleven wiki capture/update risk boundaries with serial sandbo
     "mutation.ts": ["concurrent-writers", "write-boundaries", "update", "capture-cli"],
     "vault.ts": ["init", "write-boundaries", "capture-cli", "update"],
     "create.ts": ["create", "write-boundaries", "capture-cli", "update"],
+    "qmd.ts": ["qmd-sync"],
   };
   const caches = new Set();
   for (const [file, tests] of Object.entries(plans)) {
@@ -45,7 +46,7 @@ test("supports all eleven wiki capture/update risk boundaries with serial sandbo
     assert.equal(options.commandRunner.command, "node --test --test-concurrency=1 " + filter + tests.map(name => "packages/wiki/test/" + name + ".test.ts").join(" "));
     caches.add(options.incrementalFile);
   }
-  assert.equal(caches.size, 11);
+  assert.equal(caches.size, 12);
 });
 
 test("the command rejects extra arguments and insufficient outer admission without starting Stryker", () => {

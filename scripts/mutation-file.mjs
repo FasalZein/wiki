@@ -15,6 +15,10 @@ const testCommands = new Map([
   ["packages/wiki/src/mutation.ts", "node --test --test-concurrency=1 packages/wiki/test/concurrent-writers.test.ts packages/wiki/test/write-boundaries.test.ts packages/wiki/test/update.test.ts packages/wiki/test/capture-cli.test.ts"],
   ["packages/wiki/src/vault.ts", "node --test --test-concurrency=1 packages/wiki/test/init.test.ts packages/wiki/test/write-boundaries.test.ts packages/wiki/test/capture-cli.test.ts packages/wiki/test/update.test.ts"],
   ["packages/wiki/src/create.ts", "node --test --test-concurrency=1 packages/wiki/test/create.test.ts packages/wiki/test/write-boundaries.test.ts packages/wiki/test/capture-cli.test.ts packages/wiki/test/update.test.ts"],
+  // Narrow plan: qmd-sync imports src/qmd.ts in-process and drives syncQmdText,
+  // searchQmdLex, and the writer lock. findQmd, embedQmd, and model readiness
+  // need the CLI test files; widen this plan before claiming those ranges.
+  ["packages/wiki/src/qmd.ts", "node --test --test-concurrency=1 packages/wiki/test/qmd-sync.test.ts"],
   ["src/cli/output.ts", "bun test tests/cli-links.test.ts tests/cli-search.test.ts"],
   ["packages/wiki-cli/src/cli.ts", "node --test --test-concurrency=1 packages/wiki-cli/test/cli.test.ts packages/wiki-cli/test/capture-sources.test.ts"],
 ]);

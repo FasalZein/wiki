@@ -53,20 +53,127 @@ function doctorModelReadiness(root: string, problems: Problem[]) {
   return { models, checks };
 }
 
-function extractor(command: "pandoc" | "pdftotext", problems: Problem[]): VersionCheck {
-  const result = spawnSync(command, command === "pandoc" ? ["--version"] : ["-v"], { encoding: "utf8", timeout: 5000, maxBuffer: 1024 * 1024, windowsHide: true });
+const EXTRACTOR_PROBES = {
+  pandoc: { args: ["--version"], version: /^pandoc\s+(\S+)/m },
+  pdftotext: { args: ["-v"], version: /pdftotext version\s+(\S+)/ },
+} as const;
+
+function extractor(command: keyof typeof EXTRACTOR_PROBES, problems: Problem[]): VersionCheck {
+  const probe = EXTRACTOR_PROBES[command];
+  const result = spawnSync(command, probe.args, { encoding: "utf8", timeout: 5000, maxBuffer: 1024 * 1024, windowsHide: true });
   const output = result.stdout + "\n" + result.stderr;
-  const version = (command === "pandoc" ? /^pandoc\s+(\S+)/m : /pdftotext version\s+(\S+)/).exec(output)?.[1];
+  const version = probe.version.exec(output)?.[1];
   if (!result.error && result.status === 0 && version) return { state: "ready", version };
   problems.push({ path: command, message: command + " unavailable: " + (result.error?.message ?? "No successful version response"), fix: "Supply a working " + command + " on PATH; doctor does not install or run extraction" });
   return { state: "unavailable" };
+}
+
+type ReportProblem = (file: string, text: string, fix: string, code?: ErrorCode) => void;
+const REQUIRED_LAYOUT = [["", "directory"], [".wiki", "directory"], [".wiki/config.json", "file"], [".wiki/types", "directory"], [".wiki/tmp", "directory"], [".wiki/locks", "directory"], ["index.md", "file"], ["log.md", "file"], [".gitignore", "file"]] as const;
+
+const HAS_KIND = { directory: (stat: fs.Stats) => stat.isDirectory(), file: (stat: fs.Stats) => stat.isFile() };
+
+function layoutEntryProblem(root: string, relative: string, kind: keyof typeof HAS_KIND): string | undefined {
+  try {
+    const item = inspectContainedPath(root, relative);
+    if (!item.ok) return item.problem.message;
+    if (!item.stat || !HAS_KIND[kind](item.stat)) return "Missing or not a " + kind;
+    return undefined;
+  } catch (error) { return message(error); }
+}
+
+/** Reports every missing or wrong-kind layout entry; ready only when none is reported. */
+function layoutCheck(root: string, problem: ReportProblem): Check {
+  let ready = true;
+  for (const [relative, kind] of REQUIRED_LAYOUT) {
+    const text = layoutEntryProblem(root, relative, kind);
+    if (text !== undefined) { ready = false; problem(relative, text, "Inspect incomplete layout and retained files before explicit repair; doctor changes nothing"); }
+  }
+  return { state: ready ? "ready" : "unavailable" };
+}
+
+function retainedLockProblems(root: string, problem: ReportProblem): void {
+  for (const relative of [".wiki/locks/mutation.lock", SEARCH + "/writer.lock"]) {
+    // throwIfNoEntry suppresses only ENOENT: an absent lock is the healthy state.
+    try { if (fs.lstatSync(checked(root, relative), { throwIfNoEntry: false })) problem(relative, "Retained writer lock; inspection cannot certify a stable inventory", "Inspect ownership and verify no cooperating owner is active before explicit removal; never remove based on age", "conflict"); }
+    catch (error) { problem(relative, message(error), "Inspect retained lock without reclaiming it"); }
+  }
+}
+
+function retainedTemporaryProblems(root: string, problem: ReportProblem): void {
+  try {
+    const temporary = fs.readdirSync(checked(root, ".wiki/tmp"));
+    for (const name of temporary.sort()) problem(".wiki/tmp/" + name, "Retained temporary entry; a previous operation may be partial", "Inspect retained bytes, published paths, log.md and generated indexes before explicit cleanup; do not blindly retry publication");
+  } catch (error) { problem(".wiki/tmp", message(error), "Inspect retained temporary state manually"); }
+}
+
+function nodeCheck(problem: ReportProblem): VersionCheck {
+  const version = process.versions.node;
+  const [major = 0, minor = 0] = version.split(".").map(Number);
+  if (major > 22 || major === 22 && minor >= 18) return { state: "ready", version };
+  problem("node", "Node >=22.18 is required; actual " + version, "Run the source CLI under a supported Node runtime", "unavailable");
+  return { state: "unavailable", version };
+}
+
+function indexReadProblems(root: string, indexes: Iterable<[string, string]>): ReturnType<typeof indexFreshnessDiagnostics> {
+  const problems: ReturnType<typeof indexFreshnessDiagnostics> = [];
+  for (const [relative, bytes] of indexes) {
+    try { problems.push(...indexFreshnessDiagnostics(root, new Map([[relative, bytes]]))); }
+    catch (error) {
+      problems.push({ path: relative, rule: "index.unreadable", message: message(error), fix: "Restore readable regular generated-index files, then run index explicitly if needed; doctor does not regenerate navigation" });
+    }
+  }
+  return problems;
+}
+
+/** Navigation freshness is judged only over a clean inventory. */
+function navigationCheck(root: string, inventory: ReturnType<typeof inspectVault> | undefined, problem: ReportProblem): Check {
+  if (!inventory || inventory.diagnostics.length) return { state: "unavailable" };
+  const problems = indexReadProblems(root, inventory.indexes);
+  for (const d of problems) problem(d.path, d.rule + ": " + d.message, d.fix);
+  return { state: problems.length ? "unavailable" : "ready" };
+}
+
+/** Throws unless the retained search state shows no active or interrupted writer. */
+function assertQuiescentSearch(root: string): void {
+  if (fs.existsSync(checked(root, SEARCH + "/writer.lock"))) throw new Error("Index writer lock retained; do not trust previous coverage");
+  for (const suffix of ["-wal", "-shm", "-journal"]) {
+    if (fs.existsSync(checked(root, DATABASE + suffix))) throw new Error("Retained SQLite sidecar " + DATABASE + suffix + "; index may be active or interrupted. Inspect the writer before explicit recovery");
+  }
+}
+
+function isWithin(base: string, target: string): boolean {
+  const relative = path.relative(base, target);
+  return !relative || relative !== ".." && !relative.startsWith(".." + path.sep) && !path.isAbsolute(relative);
+}
+
+/** Throws when the diagnostic scratch directory lies inside the vault or HOME/XDG roots. */
+function assertIsolatedScratch(root: string, scratch: string): void {
+  for (const protectedRoot of [root, process.env.HOME, process.env.XDG_CACHE_HOME, process.env.XDG_CONFIG_HOME, process.env.XDG_DATA_HOME]) {
+    if (!protectedRoot) continue;
+    const base = fs.existsSync(protectedRoot) ? fs.realpathSync(protectedRoot) : path.resolve(protectedRoot);
+    if (isWithin(base, scratch)) throw new Error("Diagnostic scratch directory must be outside the vault and HOME/XDG; set TMPDIR to an isolated temporary directory");
+  }
+}
+
+/** Embedding metadata is healthy only when every active chunk has a physical vector row. */
+function embeddingVectorsHealthy(db: QMDStore["internal"]["db"], embedded: { hash: string; seq: number }[], problem: ReportProblem): boolean {
+  if (!embedded.length) return true;
+  try {
+    const vectors = new Set(db.prepare("SELECT hash_seq FROM inspected.vectors_vec").all<{ hash_seq: string }>().map(row => row.hash_seq));
+    if (embedded.some(row => !vectors.has(row.hash + "_" + row.seq))) throw new Error("Embedding metadata has missing physical vector rows");
+    return true;
+  } catch (error) {
+    problem(DATABASE, "Embedding vector storage is incomplete: " + message(error), "Inspect the interrupted embedding operation and retained local database before explicit search sync --embed; metadata alone does not prove vector coverage");
+    return false;
+  }
 }
 
 /** Inspect only. No writer lock, synchronization, note publication, or SDK model resolution. */
 export async function doctorVault(selected: string) {
   const root = path.resolve(selected), diagnostics: Problem[] = [];
   let failure: ErrorCode | undefined;
-  const problem = (file: string, text: string, fix: string, code: ErrorCode = "damaged") => {
+  const problem: ReportProblem = (file, text, fix, code = "damaged") => {
     diagnostics.push({ path: file, message: text, fix }); failure ??= code;
   };
   const rootEntry = inspectContainedPath(root, "");
@@ -80,15 +187,7 @@ export async function doctorVault(selected: string) {
     if (config.profile !== "wiki-okf" || config.version !== 1) problem(".wiki/config.json", "Unsupported profile/version; expected wiki-okf version 1", "Select a compatible explicit vault; no conversion or reinitialization performed", "unsupported");
     else profile = { state: "ready" };
   } catch (error) { problem(".wiki/config.json", message(error), "Inspect retained configuration and restore valid wiki-okf version 1 JSON explicitly; do not reinitialize over retained files"); }
-  const layoutStart = diagnostics.length;
-  for (const [relative, kind] of [["", "directory"], [".wiki", "directory"], [".wiki/config.json", "file"], [".wiki/types", "directory"], [".wiki/tmp", "directory"], [".wiki/locks", "directory"], ["index.md", "file"], ["log.md", "file"], [".gitignore", "file"]] as const) {
-    try {
-      const item = inspectContainedPath(root, relative);
-      if (!item.ok) throw new Error(item.problem.message);
-      if (!item.stat || (kind === "directory" ? !item.stat.isDirectory() : !item.stat.isFile())) throw new Error("Missing or not a " + kind);
-    } catch (error) { problem(relative, message(error), "Inspect incomplete layout and retained files before explicit repair; doctor changes nothing"); }
-  }
-  const layout: Check = { state: diagnostics.length === layoutStart ? "ready" : "unavailable" };
+  const layout = layoutCheck(root, problem);
   let inventory: ReturnType<typeof inspectVault> | undefined;
   let registry: Check = { state: "unavailable" };
   if (profile.state === "ready") {
@@ -102,28 +201,10 @@ export async function doctorVault(selected: string) {
       for (const d of issues) problem(d.path, d.rule + ": " + d.message, d.fix);
     } catch (error) { problem(".wiki/types", message(error), "Restore readable compatible registry records and files; no scaffolds are installed"); }
   }
-  const navigationProblems: ReturnType<typeof indexFreshnessDiagnostics> = [];
-  if (inventory && inventory.diagnostics.length === 0) {
-    for (const [relative, bytes] of inventory.indexes) {
-      try { navigationProblems.push(...indexFreshnessDiagnostics(root, new Map([[relative, bytes]]))); }
-      catch (error) {
-        navigationProblems.push({ path: relative, rule: "index.unreadable", message: message(error), fix: "Restore readable regular generated-index files, then run index explicitly if needed; doctor does not regenerate navigation" });
-      }
-    }
-  }
-  for (const d of navigationProblems) problem(d.path, d.rule + ": " + d.message, d.fix);
-  const navigation: Check = { state: inventory && !inventory.diagnostics.length && !navigationProblems.length ? "ready" : "unavailable" };
-  for (const relative of [".wiki/locks/mutation.lock", SEARCH + "/writer.lock"]) {
-    try { if (fs.lstatSync(checked(root, relative))) problem(relative, "Retained writer lock; inspection cannot certify a stable inventory", "Inspect ownership and verify no cooperating owner is active before explicit removal; never remove based on age", "conflict"); }
-    catch (error) { if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) problem(relative, message(error), "Inspect retained lock without reclaiming it"); }
-  }
-  try {
-    const temporary = fs.readdirSync(checked(root, ".wiki/tmp"));
-    for (const name of temporary.sort()) problem(".wiki/tmp/" + name, "Retained temporary entry; a previous operation may be partial", "Inspect retained bytes, published paths, log.md and generated indexes before explicit cleanup; do not blindly retry publication");
-  } catch (error) { problem(".wiki/tmp", message(error), "Inspect retained temporary state manually"); }
-  const [major = 0, minor = 0] = process.versions.node.split(".").map(Number);
-  const node: VersionCheck = major > 22 || major === 22 && minor >= 18 ? { state: "ready", version: process.versions.node } : { state: "unavailable", version: process.versions.node };
-  if (node.state === "unavailable") problem("node", "Node >=22.18 is required; actual " + process.versions.node, "Run the source CLI under a supported Node runtime", "unavailable");
+  const navigation = navigationCheck(root, inventory, problem);
+  retainedLockProblems(root, problem);
+  retainedTemporaryProblems(root, problem);
+  const node = nodeCheck(problem);
   const extractors = { pandoc: extractor("pandoc", diagnostics), pdftotext: extractor("pdftotext", diagnostics) };
   const modelReadiness = doctorModelReadiness(root, diagnostics);
   let qmd: VersionCheck = { state: "unavailable" };
@@ -144,20 +225,12 @@ export async function doctorVault(selected: string) {
     await probe.searchLex("doctor", { collection: "concepts", limit: 1 });
     qmd = { state: "ready", version: metadata.version };
     if (profile.state !== "ready" || !inventory) throw new Error("Compatible profile and readable concept inventory required");
-    if (fs.existsSync(checked(root, SEARCH + "/writer.lock"))) throw new Error("Index writer lock retained; do not trust previous coverage");
-    for (const suffix of ["-wal", "-shm", "-journal"]) {
-      if (fs.existsSync(checked(root, DATABASE + suffix))) throw new Error("Retained SQLite sidecar " + DATABASE + suffix + "; index may be active or interrupted. Inspect the writer before explicit recovery");
-    }
+    assertQuiescentSearch(root);
     // Even a read-only SQLite connection can create WAL/SHM. Capture bytes into
     // a disposable snapshot instead. Never open the retained database with SQLite.
     const bytes = fs.readFileSync(checked(root, DATABASE));
     const scratch = fs.realpathSync(os.tmpdir());
-    for (const protectedRoot of [root, process.env.HOME, process.env.XDG_CACHE_HOME, process.env.XDG_CONFIG_HOME, process.env.XDG_DATA_HOME]) {
-      if (!protectedRoot) continue;
-      const base = fs.existsSync(protectedRoot) ? fs.realpathSync(protectedRoot) : path.resolve(protectedRoot);
-      const relative = path.relative(base, scratch);
-      if (!relative || relative !== ".." && !relative.startsWith(".." + path.sep) && !path.isAbsolute(relative)) throw new Error("Diagnostic scratch directory must be outside the vault and HOME/XDG; set TMPDIR to an isolated temporary directory");
-    }
+    assertIsolatedScratch(root, scratch);
     temporary = fs.mkdtempSync(path.join(scratch, "wiki-doctor-db-"));
     const copied = path.join(temporary, "qmd.sqlite");
     fs.writeFileSync(copied, bytes, { flag: "wx" });
@@ -182,16 +255,7 @@ export async function doctorVault(selected: string) {
     const indexedInventoryMatches = active.length === capturedById.size && active.every(doc => doc.collection === "concepts" && capturedById.get(doc.path) === doc.doc);
     if (!indexedInventoryMatches) problem(DATABASE, "Indexed document set/content differs from the captured inventory", "Inspect current notes and run search sync explicitly; no completeness is inferred from timestamps");
     const embedded = probe.internal.db.prepare("SELECT DISTINCT v.hash, v.seq FROM inspected.content_vectors v JOIN inspected.documents d ON d.hash = v.hash WHERE d.active = 1").all<{ hash: string; seq: number }>();
-    let vectorsHealthy = true;
-    if (embedded.length) {
-      try {
-        const vectors = new Set(probe.internal.db.prepare("SELECT hash_seq FROM inspected.vectors_vec").all<{ hash_seq: string }>().map(row => row.hash_seq));
-        if (embedded.some(row => !vectors.has(row.hash + "_" + row.seq))) throw new Error("Embedding metadata has missing physical vector rows");
-      } catch (error) {
-        vectorsHealthy = false;
-        problem(DATABASE, "Embedding vector storage is incomplete: " + message(error), "Inspect the interrupted embedding operation and retained local database before explicit search sync --embed; metadata alone does not prove vector coverage");
-      }
-    }
+    const vectorsHealthy = embeddingVectorsHealthy(probe.internal.db, embedded, problem);
     probe.internal.db.exec("DETACH DATABASE inspected");
     snapshotStore = await createStore({ dbPath: copied, config: { collections: {}, models: modelReadiness.models } });
     const status = await snapshotStore.getStatus();
