@@ -9,7 +9,7 @@ import { readUpdateCandidate, updateTopic, UpdateConflictError, UpdateTemporaryE
 import { createTopic, CreatePartialError, CreateValidationError, type CreateRequest } from "./create.ts";
 import { withMutationLock, MutationReleaseError } from "./mutation.ts";
 import { inspectVault, lintVault } from "./lint.ts";
-import { syncQmdText, findQmd, embedQmd, qmdModelReadiness, FAST_ROLES, DEEP_ROLES, QMD_DEFAULT_LIMIT, type QmdFindFilters, type QmdInventory, type QmdDiagnostic, type QmdEmbeddingCoverage, type QmdReadyModels, type QmdTextCoverage } from "./qmd.ts";
+import { syncQmdText, syncAndFindQmd, syncAndEmbedQmd, qmdModelReadiness, FAST_ROLES, DEEP_ROLES, QMD_DEFAULT_LIMIT, type QmdFindFilters, type QmdInventory, type QmdDiagnostic, type QmdEmbeddingCoverage, type QmdReadyModels, type QmdTextCoverage } from "./qmd.ts";
 import { prepareCapture, publishTextCapture, CaptureValidationError, CapturePublicationError, type TextCaptureRequest, type TextCaptureCandidate } from "./capture.ts";
 import { indexDestinationDiagnostics, indexFreshnessDiagnostics } from "./navigation.ts";
 import { doctorVault, doctorText } from "./doctor.ts";
@@ -117,7 +117,17 @@ try {
             // An incomplete scan cannot reuse an earlier successful receipt.
             captured = { concepts: [], diagnostics: [{ path: "", message: error instanceof Error ? error.message : String(error) }] };
           }
-          const result = await syncQmdText(root, captured, { signal: controller.signal, ...(measured.state === "ready" ? { models: measured.models } : {}) });
+          const syncOptions = { signal: controller.signal, ...(measured.state === "ready" ? { models: measured.models } : {}) };
+          const question = arg, terms = values.terms;
+          const requested = values.deep ? "deep" as const : "fast" as const;
+          const filters: QmdFindFilters = { ...(values.personal ? { scope: "personal" as const } : values.project !== undefined ? { scope: `projects/${values.project}` as const } : {}), ...(values.type !== undefined ? { type: values.type } : {}), ...(values.limit !== undefined ? { limit: Number(values.limit) } : {}) };
+          // One session: find and --embed synchronize text and then query or embed under one index lock.
+          const request = find && question !== undefined ? await syncAndFindQmd(root, captured, syncOptions, readiness.state === "unavailable" ? { ...filters, mode: "lexical", requested, question, terms, reason: readiness.diagnostics }
+            : values.deep ? { ...filters, mode: "deep", question, terms, models: readiness.models as QmdReadyModels<"embed" | "generate" | "rerank"> } // --deep preflighted DEEP_ROLES
+            : { ...filters, mode: "fast", question, terms, models: readiness.models }, controller.signal)
+            : values.embed && readiness.state === "ready" ? await syncAndEmbedQmd(root, captured, syncOptions, readiness.models, controller.signal)
+            : { sync: await syncQmdText(root, captured, syncOptions) };
+          const result = request.sync;
           const diagnostics = result.textCoverage.state === "complete" ? [] : result.textCoverage.diagnostics;
           const embeddingCoverage = result.embeddingCoverage.state === "pending"
             ? { state: "incomplete", contentHashes: result.embeddingCoverage.contentHashes } : result.embeddingCoverage;
@@ -132,13 +142,8 @@ try {
               human, (failure ? failure.code + ": " + failure.message + "\n" : "") + problems.map(d => d.path + ": " + d.message).join("\n") + (problems.length ? "\n" : ""));
           };
           if (error || !(find || values.embed)) report(error, {}, coverageText(result.embeddingCoverage), diagnostics);
-          else if (find && arg !== undefined) {
-            const question = arg, terms = values.terms;
-            const requested = values.deep ? "deep" as const : "fast" as const;
-            const filters: QmdFindFilters = { ...(values.personal ? { scope: "personal" as const } : values.project !== undefined ? { scope: `projects/${values.project}` as const } : {}), ...(values.type !== undefined ? { type: values.type } : {}), ...(values.limit !== undefined ? { limit: Number(values.limit) } : {}) };
-            const found = readiness.state === "unavailable" ? await findQmd(root, { ...filters, mode: "lexical", requested, question, terms, reason: readiness.diagnostics }, captured.concepts, controller.signal)
-              : values.deep ? await findQmd(root, { ...filters, mode: "deep", question, terms, models: readiness.models as QmdReadyModels<"embed" | "generate" | "rerank"> }, captured.concepts, controller.signal) // --deep preflighted DEEP_ROLES
-              : await findQmd(root, { ...filters, mode: "fast", question, terms, models: readiness.models }, captured.concepts, controller.signal);
+          else if ("find" in request && request.find) {
+            const found = request.find;
             if (found.state === "unavailable") report({ code: found.code, message: found.code === "conflict" ? "Search index writer is busy" : "Search find unavailable" }, { mode: requested }, coverageText(result.embeddingCoverage), [...diagnostics, ...found.diagnostics]);
             else {
               // Omitted candidates (deleted, renamed, stale index, moving target) make text coverage incomplete for this request.
@@ -153,8 +158,8 @@ try {
                 (found.matches.length ? found.matches.map(m => m.path + " " + (m.score === null ? "literal" : m.score.toFixed(4)) + " " + m.digest + (m.literal.length ? " [literal: " + m.literal.join(" ") + "]" : "") + "\n  " + m.title + ": " + m.description + "\n  " + m.excerpt).join("\n") + "\n" : found.degraded ? "No degraded lexical matches (not exhaustive)\n" : "No matches\n"),
                 [...diagnostics, ...coverageProblems, ...(found.degraded?.diagnostics ?? [])], coverage);
             }
-          } else if (readiness.state === "ready") { // Non-find readiness failures were reported above.
-            const embedded = await embedQmd(root, readiness.models, controller.signal);
+          } else if ("embed" in request && request.embed) { // Non-find readiness failures were reported above.
+            const embedded = request.embed;
             const coverage = embedded.embeddingCoverage.state === "pending" ? { state: "incomplete", contentHashes: embedded.embeddingCoverage.contentHashes } : embedded.embeddingCoverage;
             if (embedded.state === "failed") report({ code: embedded.code, message: embedded.code === "conflict" ? "Search index writer is busy" : "Embedding synchronization failed" }, { embedding: "failed", ...(embedded.embedded ? { embedded: embedded.embedded } : {}) }, coverageText(embedded.embeddingCoverage), [...diagnostics, ...embedded.diagnostics], coverage);
             else report(undefined, { embedding: "complete", embedded: embedded.embedded }, coverageText(embedded.embeddingCoverage), diagnostics, coverage);

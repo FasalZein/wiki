@@ -10,7 +10,7 @@ import { inspectVault } from "./lint.ts";
 import { isMapping } from "./frontmatter.ts";
 import { indexFreshnessDiagnostics } from "./navigation.ts";
 import type { ErrorCode } from "./vault.ts";
-import { qmdModelReadiness, DEEP_ROLES, type QmdModels, type QmdModelRole } from "./qmd.ts";
+import { qmdModelReadiness, DEEP_ROLES, activeDocuments, indexedBodies, stagedId, type QmdModels, type QmdModelRole } from "./qmd.ts";
 
 type Problem = { path: string; message: string; fix: string };
 type Check = { state: "ready" } | { state: "unavailable" };
@@ -239,7 +239,7 @@ export async function doctorVault(selected: string) {
     if (integrity.length !== 1 || integrity[0]?.quick_check !== "ok") throw new Error("SQLite integrity check failed: " + JSON.stringify(integrity));
     if (probe.internal.db.prepare("PRAGMA inspected.foreign_key_check").all().length) throw new Error("SQLite foreign-key check failed");
     // Pin the required 2.8.3 metadata schema before the SDK can migrate its copy.
-    const active = probe.internal.db.prepare("SELECT d.id, d.collection, d.path, d.title, c.doc FROM inspected.documents d JOIN inspected.content c ON c.hash = d.hash WHERE d.active = 1").all<{ id: number; collection: string; path: string; title: string; doc: string }>();
+    const active = activeDocuments(probe.internal.db, "inspected");
     probe.internal.db.prepare("SELECT hash, seq, model, embed_fingerprint, total_chunks FROM inspected.content_vectors").all();
     probe.internal.db.exec("INSERT INTO inspected.documents_fts(documents_fts) VALUES('integrity-check')");
     // Internal FTS integrity permits missing/stale standalone rows. Check the
@@ -251,7 +251,7 @@ export async function doctorVault(selected: string) {
       return row?.filepath === qmdFtsText(doc.collection + "/" + doc.path) && row.title === qmdFtsText(doc.title) && row.body === qmdFtsText(doc.doc);
     });
     if (!lexicalHealthy) problem(DATABASE, "Lexical index rows do not equal active document identities and content", "Inspect the retained database and run search sync explicitly; FTS internal integrity and timestamps do not prove text coverage");
-    const capturedById = new Map(inventory.concepts.map(concept => [createHash("sha256").update(concept.path).digest("hex") + ".md", concept.markdown]));
+    const capturedById = new Map(inventory.concepts.map(concept => [stagedId(concept.path), concept.markdown]));
     const indexedInventoryMatches = active.length === capturedById.size && active.every(doc => doc.collection === "concepts" && capturedById.get(doc.path) === doc.doc);
     if (!indexedInventoryMatches) problem(DATABASE, "Indexed document set/content differs from the captured inventory", "Inspect current notes and run search sync explicitly; no completeness is inferred from timestamps");
     const embedded = probe.internal.db.prepare("SELECT DISTINCT v.hash, v.seq FROM inspected.content_vectors v JOIN inspected.documents d ON d.hash = v.hash WHERE d.active = 1").all<{ hash: string; seq: number }>();
@@ -268,15 +268,15 @@ export async function doctorVault(selected: string) {
       problem(SEARCH + "/coverage.json", "Successful coverage receipt does not match captured path/content digests", "Run search sync explicitly after inspecting earlier failures");
     }
     const identities = readJson(root, SEARCH + "/identities.json");
-    const expectedIdentities = inventory.concepts.map(c => ({ id: createHash("sha256").update(c.path).digest("hex") + ".md", path: c.path }));
+    const expectedIdentities = inventory.concepts.map(c => ({ id: stagedId(c.path), path: c.path }));
     const identityFormat = isMapping(identities) && identities.version === 1 && Array.isArray(identities.paths);
     const actualIdentities: unknown[] = isMapping(identities) && Array.isArray(identities.paths) ? identities.paths : [];
     if (!identityFormat || actualIdentities.length !== expectedIdentities.length || expectedIdentities.some(expected => !actualIdentities.some(row => isMapping(row) && row.id === expected.id && row.path === expected.path))) {
       complete = false; problem(SEARCH + "/identities.json", "Missing or incompatible canonical identity mapping", "Inspect retained search state, then run search sync explicitly");
     }
+    const bodies = indexedBodies(snapshotStore);
     for (const concept of inventory.concepts) {
-      const id = createHash("sha256").update(concept.path).digest("hex") + ".md";
-      if (await snapshotStore.getDocumentBody("qmd://concepts/" + id) !== concept.markdown) {
+      if ((bodies.get(stagedId(concept.path)) ?? null) !== concept.markdown) {
         complete = false; problem(concept.path, "Indexed text differs from captured note bytes", "Run search sync explicitly; timestamps do not establish coverage");
       }
     }
