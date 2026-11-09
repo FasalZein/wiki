@@ -1,6 +1,6 @@
 import { checkVault, searchConcepts } from "./lint.ts";
 import type { Registry } from "./registry.ts";
-import { syncQmdText, syncAndFindQmd, syncAndEmbedQmd, qmdModelReadiness, FAST_ROLES, DEEP_ROLES, type QmdDegraded, type QmdDiagnostic, type QmdEmbedResult, type QmdEmbeddingCoverage, type QmdFindFilters, type QmdFindResult, type QmdInventory, type QmdReadyModels, type QmdSyncResult, type QmdTextCoverage } from "./qmd.ts";
+import { syncQmdText, syncAndFindQmd, syncAndEmbedQmd, qmdModelReadiness, FAST_ROLES, DEEP_ROLES, type QmdDegraded, type QmdDiagnostic, type QmdEmbedResult, type QmdEmbeddingCoverage, type QmdEnvironment, type QmdFindFilters, type QmdFindResult, type QmdInventory, type QmdReadyModels, type QmdSyncResult, type QmdTextCoverage } from "./qmd.ts";
 
 /** One search command's complete report. failure: the error code that sets the exit status.
  * value: the JSON document; human and stderr: the text output. The CLI only prints it. */
@@ -72,8 +72,8 @@ export function searchReport(outcome: SearchOutcome): SearchReport {
 }
 
 /** Runs one search command against an opened vault and returns its report. Explicit local models
- * are preflighted before any index effect or SDK model use. */
-export async function runSearch(root: string, command: SearchCommand, signal: AbortSignal, registry?: Registry): Promise<SearchReport> {
+ * are preflighted before any index effect or SDK model use. env: the request environment the SDK reads. */
+export async function runSearch(root: string, command: SearchCommand, env: QmdEnvironment, signal: AbortSignal, registry?: Registry): Promise<SearchReport> {
   const find = command.kind === "find" ? command : undefined;
   const embed = command.kind === "sync" && command.embed;
   const roles = find ? (find.deep ? DEEP_ROLES : FAST_ROLES) : embed ? FAST_ROLES : [];
@@ -97,9 +97,9 @@ export async function runSearch(root: string, command: SearchCommand, signal: Ab
     const requested = find.deep ? "deep" as const : "fast" as const;
     const outcome = await syncAndFindQmd(root, captured, syncOptions, readiness.state === "unavailable" ? { ...filters, mode: "lexical", requested, question, terms, reason: readiness.diagnostics }
       : find.deep ? { ...filters, mode: "deep", question, terms, models: readiness.models as QmdReadyModels<"embed" | "generate" | "rerank"> } // --deep preflighted DEEP_ROLES
-      : { ...filters, mode: "fast", question, terms, models: readiness.models }, signal);
+      : { ...filters, mode: "fast", question, terms, models: readiness.models }, env, signal);
     return searchReport({ kind: "find", ...outcome, requested, filters });
   }
-  if (embed && readiness.state === "ready") return searchReport({ kind: "embed", ...await syncAndEmbedQmd(root, captured, syncOptions, readiness.models, signal) });
-  return searchReport({ kind: "sync", sync: await syncQmdText(root, captured, syncOptions) });
+  if (embed && readiness.state === "ready") return searchReport({ kind: "embed", ...await syncAndEmbedQmd(root, captured, syncOptions, readiness.models, env, signal) });
+  return searchReport({ kind: "sync", sync: await syncQmdText(root, captured, syncOptions, env) });
 }
