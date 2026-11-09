@@ -22,19 +22,19 @@ The command accepts exactly one literal production path. Supported affected-test
 | `src/cli/output.ts` | `bun test tests/cli-links.test.ts tests/cli-search.test.ts` |
 | `packages/wiki-cli/src/cli.ts` | `node --test --test-concurrency=1 packages/wiki-cli/test/cli.test.ts packages/wiki-cli/test/capture-sources.test.ts` |
 
-| `packages/okf-wiki/src/capture.ts` | `node --test --test-concurrency=1 packages/okf-wiki/test/capture-text.test.ts packages/okf-wiki/test/capture-cli.test.ts packages/okf-wiki/test/capture-pdf.test.ts packages/okf-wiki/test/capture-web.test.ts packages/okf-wiki/test/concurrent-writers.test.ts` |
-| `packages/okf-wiki/src/update.ts` | `node --test --test-concurrency=1 packages/okf-wiki/test/update.test.ts packages/okf-wiki/test/concurrent-writers.test.ts` |
-| `packages/okf-wiki/src/charset.ts` | `node --test --test-concurrency=1 packages/okf-wiki/test/capture-web.test.ts` |
-| `packages/okf-wiki/src/extract-process.ts` | `node --test --test-concurrency=1 packages/okf-wiki/test/capture-pdf.test.ts packages/okf-wiki/test/capture-web.test.ts` |
-| `packages/okf-wiki/src/html.ts` | `node --test --test-concurrency=1 packages/okf-wiki/test/html.test.ts packages/okf-wiki/test/capture-web.test.ts` |
-| `packages/okf-wiki/src/pdf.ts` | `node --test --test-concurrency=1 --test-name-pattern='okf:15|PDF|pdftotext' packages/okf-wiki/test/capture-pdf.test.ts packages/okf-wiki/test/capture-web.test.ts` |
-| `packages/okf-wiki/src/web.ts` | `node --test --test-concurrency=1 packages/okf-wiki/test/capture-web.test.ts` |
-| `packages/okf-wiki/src/paths.ts` | `node --test --test-concurrency=1 packages/okf-wiki/test/links-paths.test.ts packages/okf-wiki/test/update.test.ts packages/okf-wiki/test/capture-cli.test.ts` |
-| `packages/okf-wiki/src/mutation.ts` | `node --test --test-concurrency=1 packages/okf-wiki/test/concurrent-writers.test.ts packages/okf-wiki/test/write-boundaries.test.ts packages/okf-wiki/test/update.test.ts packages/okf-wiki/test/capture-cli.test.ts` |
-| `packages/okf-wiki/src/vault.ts` | `node --test --test-concurrency=1 packages/okf-wiki/test/init.test.ts packages/okf-wiki/test/write-boundaries.test.ts packages/okf-wiki/test/capture-cli.test.ts packages/okf-wiki/test/update.test.ts` |
-| `packages/okf-wiki/src/create.ts` | `node --test --test-concurrency=1 packages/okf-wiki/test/create.test.ts packages/okf-wiki/test/write-boundaries.test.ts packages/okf-wiki/test/capture-cli.test.ts packages/okf-wiki/test/update.test.ts` |
+| `packages/wiki/src/capture.ts` | `node --test --test-concurrency=1 packages/wiki/test/capture-text.test.ts packages/wiki/test/capture-cli.test.ts packages/wiki/test/capture-pdf.test.ts packages/wiki/test/capture-web.test.ts packages/wiki/test/concurrent-writers.test.ts` |
+| `packages/wiki/src/update.ts` | `node --test --test-concurrency=1 packages/wiki/test/update.test.ts packages/wiki/test/concurrent-writers.test.ts` |
+| `packages/wiki/src/charset.ts` | `node --test --test-concurrency=1 packages/wiki/test/capture-web.test.ts` |
+| `packages/wiki/src/extract-process.ts` | `node --test --test-concurrency=1 packages/wiki/test/capture-pdf.test.ts packages/wiki/test/capture-web.test.ts` |
+| `packages/wiki/src/html.ts` | `node --test --test-concurrency=1 packages/wiki/test/html.test.ts packages/wiki/test/capture-web.test.ts` |
+| `packages/wiki/src/pdf.ts` | `node --test --test-concurrency=1 --test-name-pattern='wiki:15|PDF|pdftotext' packages/wiki/test/capture-pdf.test.ts packages/wiki/test/capture-web.test.ts` |
+| `packages/wiki/src/web.ts` | `node --test --test-concurrency=1 packages/wiki/test/capture-web.test.ts` |
+| `packages/wiki/src/paths.ts` | `node --test --test-concurrency=1 packages/wiki/test/links-paths.test.ts packages/wiki/test/update.test.ts packages/wiki/test/capture-cli.test.ts` |
+| `packages/wiki/src/mutation.ts` | `node --test --test-concurrency=1 packages/wiki/test/concurrent-writers.test.ts packages/wiki/test/write-boundaries.test.ts packages/wiki/test/update.test.ts packages/wiki/test/capture-cli.test.ts` |
+| `packages/wiki/src/vault.ts` | `node --test --test-concurrency=1 packages/wiki/test/init.test.ts packages/wiki/test/write-boundaries.test.ts packages/wiki/test/capture-cli.test.ts packages/wiki/test/update.test.ts` |
+| `packages/wiki/src/create.ts` | `node --test --test-concurrency=1 packages/wiki/test/create.test.ts packages/wiki/test/write-boundaries.test.ts packages/wiki/test/capture-cli.test.ts packages/wiki/test/update.test.ts` |
 
-The PDF plan selects all local PDF tests (`okf:15`) and all web tests named `PDF` or `pdftotext`.
+The PDF plan selects all local PDF tests (`wiki:15`) and all web tests named `PDF` or `pdftotext`.
 This retains real nonempty/empty extraction, exact bytes and arguments, provenance, corrupt input,
 missing tools, version/status/UTF-8 errors, and cancellation/child cleanup in both entry paths.
 HTML/Pandoc, charset sniffing, and HTTP-only URL/redirect/body tests remain in their other plans;
@@ -50,7 +50,7 @@ This is scoped proof, not a survivor waiver or a completed hardening gate.
 
 Other targets, globs, ranges, directories, and runtime JSON-schema files fail before Stryker starts.
 Add a reviewed affected-test plan before using another production target. A plan is not a claim that its target was mutation-tested.
-The Node plans need their package-local dependencies (`heavy -- npm ci --prefix packages/okf-wiki` for OKF)
+The Node plans need their package-local dependencies (`heavy -- npm ci --prefix packages/wiki` for the wiki package)
 and existing external test prerequisites, including Git, pandoc, and pdftotext.
 
 Stryker's supported command runner bases kills on command exit status. It reports the whole command as one synthetic test,
@@ -80,7 +80,7 @@ Do not label them tested based on TypeScript tests or schema validation.
 ## Tooling checks and security
 
 Run `heavy -- bun run test:tooling`, `heavy -- bun run typecheck:tooling`, and `heavy -- bun run typecheck`.
-The focused tooling tests cover exact scoping, legacy and all eleven OKF runner plans, worker derivation, cache separation, and rejected inputs.
+The focused tooling tests cover exact scoping, legacy and all eleven wiki runner plans, worker derivation, cache separation, and rejected inputs.
 
 Root overrides pin Stryker's transitive `minimatch` to 11.0.5 and `typed-rest-client`'s `qs` to 6.17.1.
 These avoid GHSA-g3hv-75wg-m249 and the qs advisories reported by `npm audit` with the original Stryker graph.
