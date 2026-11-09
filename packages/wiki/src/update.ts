@@ -1,25 +1,15 @@
 import * as fs from "node:fs";
-import { createHash, randomUUID } from "node:crypto";
 import { canonicalPathProblem } from "./paths.ts";
-import { containedEntry, WikiError } from "./vault.ts";
-import { inspectVault } from "./lint.ts";
-import { indexDestinationDiagnostics } from "./navigation.ts";
-import { completeTopicPublication, CreateValidationError } from "./create.ts";
+import { containedEntry, sha256 as digest, WikiError } from "./vault.ts";
 import { parseNoteText } from "./frontmatter.ts";
+import type { HeldLock } from "./mutation.ts";
+import { publish, topicLog, validateProspective } from "./publication.ts";
 
-function digest(bytes: Buffer): string { return "sha256:" + createHash("sha256").update(bytes).digest("hex"); }
 export class UpdateConflictError extends WikiError {
   readonly path: string; readonly expected: string; readonly current: string;
   constructor(path: string, expected: string, current: string) {
     super("conflict", "Stale base at " + path + "; expected " + expected + "; current " + current + "; re-read and reconsider the candidate; do not retry automatically");
     this.path = path; this.expected = expected; this.current = current;
-  }
-}
-export class UpdateTemporaryError extends WikiError {
-  readonly temporaryPath: string; readonly primary: unknown;
-  constructor(temporaryPath: string, primary: unknown, cause: unknown) {
-    super("damaged", "Unpublished update temporary-file cleanup failed at " + temporaryPath + "; inspect and remove the retained temporary file before retrying");
-    this.temporaryPath = temporaryPath; this.primary = primary; this.cause = cause;
   }
 }
 export interface UpdateCandidate { bytes: Buffer; markdown: string; digest: string }
@@ -71,40 +61,18 @@ function difference(before: Buffer, after: UpdateCandidate) {
   return { summary: { beforeBytes: before.length, candidateBytes: after.bytes.length, removedLines: oldEnd - start, addedLines: newEnd - start },
     diff: { startLine: start + 1, removed: oldLines.slice(start, oldEnd), added: newLines.slice(start, newEnd) } };
 }
-function replaceTopic(root: string, relative: string, expected: string, candidate: UpdateCandidate, mode: number): void {
-  const temporaryPath = ".wiki/tmp/" + randomUUID(), tmp = containedEntry(root, temporaryPath).full;
-  let primary: unknown, renamed = false;
-  try {
-    // Stage privately from creation, then retain the actual target access bits, not candidate/umask defaults.
-    fs.writeFileSync(tmp, candidate.bytes, { flag: "wx", mode: 0o600 });
-    fs.chmodSync(tmp, mode);
-    // Last full-byte read after validation and temp preparation, immediately before rename.
-    compare(root, relative, expected);
-    fs.renameSync(tmp, containedEntry(root, relative).full);
-    renamed = true;
-  } catch (error) { primary = error; throw error; }
-  finally {
-    // Rename consumes the temporary name; no post-publication cleanup can mask a write.
-    try { if (!renamed) fs.rmSync(tmp, { force: true }); }
-    catch (error) { throw new UpdateTemporaryError(temporaryPath, primary, error); }
-  }
-}
-
-/** Apply caller holds the mutation lock; dry-run never acquires it or writes. */
-export function updateTopic(root: string, relative: string, expected: string, candidate: UpdateCandidate, dryRun: boolean) {
+/** Apply needs the held mutation lock; dry-run never acquires it or writes. */
+export function updateTopic(root: string, relative: string, expected: string, candidate: UpdateCandidate, apply: { dryRun: true } | { dryRun: false; lock: HeldLock }) {
   const before = compare(root, relative, expected);
-  const inventory = inspectVault(root, undefined, { path: relative, markdown: candidate.markdown, replace: true });
-  if (inventory.diagnostics.some(d => d.path === relative && d.rule === "title.duplicate")) throw new WikiError("conflict", "Duplicate normalized title at " + relative);
-  inventory.diagnostics.push(...indexDestinationDiagnostics(root, inventory.indexes.keys()));
-  if (inventory.diagnostics.length) throw new CreateValidationError(inventory.diagnostics);
+  const plan = validateProspective(root, { path: relative, markdown: candidate.markdown, replace: true }, "Duplicate normalized title at " + relative);
   const result = { path: relative, digest: candidate.digest, candidateDigest: candidate.digest, ...difference(before.bytes, candidate) };
-  if (dryRun) return { ...result, outcome: "dry-run" as const, navigation: "unchanged", log: "unchanged" };
+  if (apply.dryRun) return { ...result, outcome: "dry-run" as const, navigation: "unchanged", log: "unchanged" };
   if (before.bytes.equals(candidate.bytes)) {
     compare(root, relative, expected);
     return { ...result, outcome: "unchanged" as const, navigation: "unchanged", log: "unchanged" };
   }
   const title = parseNoteText(candidate.markdown).frontmatter.title;
-  replaceTopic(root, relative, expected, candidate, before.mode);
-  completeTopicPublication(root, relative, String(title), candidate.digest, inventory.indexes, "updated");
+  publish(apply.lock, { kind: "replace", path: relative, bytes: candidate.bytes, digest: candidate.digest, mode: before.mode,
+    recheck: () => { compare(root, relative, expected); }, plan, log: topicLog("updated", String(title), relative) });
   return { ...result, outcome: "updated" as const, written: true as const, navigation: "updated", log: "appended" };
 }

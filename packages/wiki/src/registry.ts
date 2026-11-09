@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import type { Ajv2020, Options } from "ajv/dist/2020.js";
 import type { AnySchema, ErrorObject, ValidateFunction } from "ajv";
-import { containedEntry, createExclusive, WikiError } from "./vault.ts";
+import { containedEntry, WikiError } from "./vault.ts";
 import { isMapping } from "./frontmatter.ts";
 import { inspectContainedPath } from "./paths.ts";
 import { missingHeadings, parseMarkdown } from "./markdown.ts";
@@ -248,16 +248,6 @@ export function declaresProperty(schema: unknown, key: string): boolean {
     isMapping(s.properties) && Object.hasOwn(s.properties, key) ||
     isMapping(s.patternProperties) && Object.keys(s.patternProperties).some(pattern => new RegExp(pattern, "u").test(key)));
 }
-export class RegistryWriteError extends WikiError {
-  readonly written = true;
-  readonly paths: string[];
-  readonly digest: string;
-  constructor(relative: string, bytes: string) {
-    super("damaged", "Registry scaffold was published but its log entry failed; inspect log.md before adding the missing entry manually");
-    this.paths = [relative];
-    this.digest = "sha256:" + createHash("sha256").update(bytes).digest("hex");
-  }
-}
 function typeScaffoldDestination(root: string, name: string, folder: string): string {
   if (!safeName(name) || !safeName(folder)) throw new WikiError("usage", "Use safe, non-reserved lowercase hyphenated type and folder names");
   const relative = ".wiki/types/" + name + ".json";
@@ -269,24 +259,13 @@ function typeScaffoldDestination(root: string, name: string, folder: string): st
   if (registry.types.some(t => t.record.folder === folder)) throw new WikiError("usage", "Folder conflicts with an existing type: " + folder);
   return relative;
 }
-export function addType(root: string, name: string, folder: string): { path: string; digest: string } {
+/** Returns the scaffold to publish; the caller publishes it under the held mutation lock. */
+export function typeScaffold(root: string, name: string, folder: string): { path: string; bytes: string; digest: string } {
   const relative = typeScaffoldDestination(root, name, folder);
   const scaffold: TypeRecord = { name, folder, frontmatterSchema: { ...COMMON_SCHEMA,
     properties: { ...COMMON_SCHEMA.properties, type: { const: name } }, additionalProperties: false }, requiredHeadings: [], template: "" };
   const bytes = JSON.stringify(scaffold, null, 2) + "\n";
-  try { createExclusive(root, relative, bytes); }
-  catch (error) {
-    if (isMapping(error) && error.code === "EEXIST") throw new WikiError("conflict", "Existing registry destination: " + relative);
-    throw error;
-  }
-  try {
-    const log = containedEntry(root, "log.md").full;
-    const previous = fs.readFileSync(log, "utf8");
-    const heading = "## " + new Date().toISOString().slice(0, 10) + "\n\n";
-    const entry = "**type-added** [" + name + "](" + relative + ")\n\n";
-    fs.writeFileSync(log, heading + entry + (previous.startsWith(heading) ? previous.slice(heading.length) : previous));
-  } catch { throw new RegistryWriteError(relative, bytes); }
-  return { path: relative, digest: "sha256:" + createHash("sha256").update(bytes).digest("hex") };
+  return { path: relative, bytes, digest: "sha256:" + createHash("sha256").update(bytes).digest("hex") };
 }
 export function schemaDiagnostics(file: string, errors: ErrorObject[] | null | undefined): Diagnostic[] {
   return (errors ?? []).map(e => issue(file, "frontmatter.schema", (e.instancePath || "/") + " " + e.message + " " + JSON.stringify(e.params), "Correct the field to satisfy the common profile and registered type schema"));

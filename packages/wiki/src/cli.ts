@@ -1,18 +1,18 @@
 import * as fs from "node:fs";
-import { createHash } from "node:crypto";
 import { parseArgs } from "node:util";
 import * as path from "node:path";
-import { initVault, WikiError, ExclusiveCleanupError, ExclusiveTemporaryError, type ErrorCode } from "./vault.ts";
-import { addType, listTypes, loadRegistry, openVault, RegistryWriteError, safeName, sortDiagnostics } from "./registry.ts";
+import { initVault, PublicationError, WikiError, type ErrorCode, type Written } from "./vault.ts";
+import { listTypes, loadRegistry, openVault, safeName, sortDiagnostics } from "./registry.ts";
 import { readNote } from "./read.ts";
-import { readUpdateCandidate, updateTopic, UpdateConflictError, UpdateTemporaryError } from "./update.ts";
-import { createTopic, CreatePartialError, CreateValidationError, type CreateRequest } from "./create.ts";
-import { withMutationLock, MutationReleaseError } from "./mutation.ts";
+import { readUpdateCandidate, updateTopic, UpdateConflictError } from "./update.ts";
+import { createTopic, type CreateRequest } from "./create.ts";
+import { withMutationLock, MutationReleaseError, type HeldLock } from "./mutation.ts";
+import { addType, publish, validateCurrent, ValidationError } from "./publication.ts";
 import { inspectVault, lintVault } from "./lint.ts";
 import { QMD_DEFAULT_LIMIT, type QmdFindFilters } from "./qmd.ts";
 import { runSearch } from "./search.ts";
-import { prepareCapture, publishTextCapture, CaptureValidationError, CapturePublicationError, type TextCaptureRequest, type TextCaptureCandidate } from "./capture.ts";
-import { indexDestinationDiagnostics, indexFreshnessDiagnostics } from "./navigation.ts";
+import { prepareCapture, publishTextCapture, type TextCaptureRequest, type TextCaptureCandidate } from "./capture.ts";
+import { indexFreshnessDiagnostics } from "./navigation.ts";
 import { doctorVault, doctorText } from "./doctor.ts";
 
 const EXIT: Record<ErrorCode, number> = { usage: 2, conflict: 3, not_found: 4, unsupported: 5, damaged: 6, unavailable: 7 };
@@ -80,7 +80,7 @@ function rejectUnaccepted(group: RejectionGroup, selection: Selection, values: O
     if (!accepted) throw new WikiError("usage", (selection.complete ? spec?.refusals?.[option] : undefined) ?? REJECTIONS[group].message);
   }
 }
-type PublishedResult = { written: true; paths: string[] } & ({ digest: string } | { digests: Record<string, string> });
+type PublishedResult = { written: true } & Written;
 /** Subscribes a listener to user interrupts and returns the unsubscribe function. The command subscribes only while
  * a search or a capture extraction runs, so outside those windows an interrupt keeps its default effect on the host. */
 export type Interrupts = (listener: () => void) => () => void;
@@ -91,6 +91,31 @@ export interface RunOptions {
 }
 /** One command result: the exit code and the complete stdout and stderr text. */
 export interface RunResult { code: number; stdout: string; stderr: string }
+
+function writtenLines(written: Written): string {
+  return "Written: " + written.paths.join(", ") + "\n" + ("digest" in written ? written.digest : JSON.stringify(written.digests)) + "\n";
+}
+/** The one failure-record mapper. It reads the publication record and the reported failure, never the error class chain.
+ * The JSON key order is part of the documented output: partial fields, then (in run) lock cleanup and outcome, then details. */
+function failureReport(actionFailure: unknown, published: PublishedResult | undefined) {
+  const record = actionFailure instanceof PublicationError ? actionFailure.record : undefined;
+  // A failure with a primary reports the primary's code and message (the refusal that preceded a cleanup failure).
+  const failure = actionFailure instanceof PublicationError && actionFailure.primary !== undefined ? actionFailure.primary : actionFailure;
+  const known = failure instanceof WikiError;
+  const argumentError = failure instanceof Error && "code" in failure && typeof failure.code === "string" && failure.code.startsWith("ERR_PARSE_ARGS_");
+  const code = known ? failure.code : argumentError ? "usage" : "internal";
+  const written = record?.state === "written" || record?.state === "capture" ? record.written : undefined;
+  const capture = record?.state === "capture" ? record : undefined;
+  const partial = capture ? { retainedDirectory: capture.retainedDirectory, ...(written ? { written: true, ...written } : {}) } : written ? { written: true, ...written } : published ?? {};
+  const unwrittenCleanup = record?.state === "unwritten" ? record.temporaryCleanup : undefined;
+  const temporaryCleanup = capture?.temporaryCleanup ?? unwrittenCleanup;
+  const diagnostics = failure instanceof ValidationError ? failure.diagnostics : undefined;
+  // A capture failure never has stale-base fields, so one temporaryCleanup position after them serves both forms.
+  const details = { ...(record?.state === "written" && record.temporaryPath !== undefined ? { temporaryPath: record.temporaryPath } : {}), ...(diagnostics ? { diagnostics } : {}),
+    ...(failure instanceof UpdateConflictError ? { path: failure.path, expected: failure.expected, current: failure.current } : {}), ...(temporaryCleanup ? { temporaryCleanup } : {}) };
+  return { code, message: failure instanceof Error ? failure.message : String(failure), exitCode: known ? EXIT[failure.code] : argumentError ? 2 : 1,
+    partial, details, written, unwrittenCleanup, captureCleanup: capture?.temporaryCleanup, diagnostics };
+}
 
 /** Runs one wiki command. It does not touch process state; bin/wiki.js owns argv, env, signals, exit code and streams. */
 export async function run(argv: readonly string[], options: RunOptions): Promise<RunResult> {
@@ -186,32 +211,36 @@ export async function run(argv: readonly string[], options: RunOptions): Promise
             try { preparedCapture = await prepareCapture(root, captureRequest, controller.signal); }
             finally { unsubscribe?.(); }
           }
-          const execute = () => {
+          const execute = (lock?: HeldLock) => {
+            const held = () => { if (!lock) throw new Error("Write path reached without the mutation lock"); return lock; };
             if (preparedCapture) {
-              const result = publishTextCapture(root, preparedCapture);
+              const result = publishTextCapture(held(), preparedCapture);
               publishedResult = { written: true, paths: result.paths, digests: result.digests };
               output({ ok: true, ...result }, "Captured source: " + result.path + "\n" + Object.entries(result).filter(([key, value]) => typeof value === "string" || key === "limitations").map(([key, value]) => key + ": " + (Array.isArray(value) ? value.join("; ") : value)).join("\n") + "\n");
             } else if (update && arg !== undefined && values.expect !== undefined && candidate) {
-              const result = updateTopic(root, arg, values.expect, candidate, values["dry-run"] === true);
+              const result = updateTopic(root, arg, values.expect, candidate, values["dry-run"] === true ? { dryRun: true } : { dryRun: false, lock: held() });
               if (result.outcome === "updated") publishedResult = { written: true, paths: [result.path], digest: result.digest };
               output({ ok: true, ...result }, (result.outcome === "updated" ? "Updated topic: " : result.outcome === "dry-run" ? "Dry-run topic: " : "Unchanged topic: ") + result.path + "\n" + result.digest + "\n" + JSON.stringify(result.summary) + "\n" + JSON.stringify(result.diff) + "\nNavigation: " + result.navigation + "; log: " + result.log + "\n");
             } else if (request) {
-              const result = createTopic(root, request);
+              const result = createTopic(held(), request);
               publishedResult = { written: true, paths: [result.path], digest: result.digest };
               output({ ok: true, ...result }, "Created topic: " + result.path + "\nTitle: " + result.title + "\nDescription: " + result.description + "\n" + result.digest + "\n");
             } else if (show && arg !== undefined) {
               const note = readNote(root, arg, values.section);
               output({ ok: true, ...note }, note.markdown);
             } else if (add && extra[0] !== undefined && values.folder !== undefined) {
-              const added = addType(root, extra[0], values.folder);
+              const added = addType(held(), extra[0], values.folder);
               publishedResult = { written: true, paths: [added.path], digest: added.digest };
               output({ ok: true, path: added.path }, "Created registry scaffold: " + added.path + "; review and run whole-vault lint before commit\n");
             } else {
               const registry = list ? loadRegistry(root) : undefined;
-              const inventory = index ? inspectVault(root) : undefined;
+              // Regeneration validates through the publication module; --check only compares current bytes.
+              const current = index && !values.check ? validateCurrent(root) : undefined;
+              const checked = index && values.check ? inspectVault(root) : undefined;
+              const inventory = checked ?? current;
               const diagnostics = registry ? registry.diagnostics : inventory ? inventory.diagnostics : lintVault(root, arg);
-              if (inventory && !diagnostics.length) {
-                diagnostics.push(...(values.check ? indexFreshnessDiagnostics(root, inventory.indexes) : indexDestinationDiagnostics(root, inventory.indexes.keys())));
+              if (checked && !diagnostics.length) {
+                diagnostics.push(...indexFreshnessDiagnostics(root, checked.indexes));
                 sortDiagnostics(diagnostics);
               }
               if (diagnostics.length) {
@@ -219,14 +248,9 @@ export async function run(argv: readonly string[], options: RunOptions): Promise
                 const error = { code: "lint", message: "Wiki validation failed" };
                 output({ ok: false, error, diagnostics }, "", diagnostics.map(d => d.path + ": " + d.rule + ": " + d.message + "; fix: " + d.fix).join("\n") + "\n");
               } else if (inventory) {
-                if (!values.check) {
-                  const paths: string[] = [], digests: Record<string, string> = {};
-                  for (const [relative, bytes] of inventory.indexes) {
-                    fs.writeFileSync(path.join(root, relative), bytes);
-                    paths.push(relative);
-                    digests[relative] = "sha256:" + createHash("sha256").update(bytes).digest("hex");
-                    publishedResult = { written: true, paths, digests };
-                  }
+                if (current?.plan) {
+                  const published = publish(held(), { kind: "index", plan: current.plan });
+                  if (published.written.paths.length) publishedResult = { written: true, ...published.written };
                 }
                 const paths = [...inventory.indexes.keys()].sort();
                 output({ ok: true, paths, checks: ["registry", "frontmatter", "layout", "body", "lifecycle", "scoped-titles", "links", "generated-index"] }, values.check ? "Generated indexes are current\n" : "Generated navigation: " + paths.join(", ") + "\n");
@@ -236,7 +260,7 @@ export async function run(argv: readonly string[], options: RunOptions): Promise
               } else output({ ok: true, diagnostics: [], checks: ["registry", "frontmatter", "layout", "body", "lifecycle", "scoped-titles", "links", ...(arg === undefined ? ["generated-index"] : [])] }, "Wiki lint passed (registry, frontmatter, layout, body, lifecycle, scoped titles, links; generated-index freshness " + (arg === undefined ? "checked" : "not checked for selected paths") + ")\n");
             }
           };
-          if (update && !values["dry-run"] || create || capture || add || index && !values.check) withMutationLock(root, execute);
+          if (update && !values["dry-run"] || create || capture || add || index && !values.check) withMutationLock(root, lock => execute(lock));
           else execute();
         }
       }
@@ -247,29 +271,20 @@ export async function run(argv: readonly string[], options: RunOptions): Promise
     const pending = outputBuffer.pending;
     delete outputBuffer.pending;
     const actionFailure = release?.outcome.kind === "failed" ? release.outcome.error : error;
-    const temporaryCleanup = actionFailure instanceof UpdateTemporaryError || actionFailure instanceof ExclusiveTemporaryError ? { path: actionFailure.temporaryPath, retained: true, message: actionFailure.message + (actionFailure.cause instanceof Error ? ": " + actionFailure.cause.message : "") } : undefined;
-    const failure = (actionFailure instanceof UpdateTemporaryError || actionFailure instanceof ExclusiveTemporaryError) && actionFailure.primary !== undefined ? actionFailure.primary : actionFailure;
     if (release?.outcome.kind === "completed" && pending && "ok" in pending.value && pending.value.ok === false) {
       output({ ...pending.value, cleanup }, pending.human, pending.stderr + release.message + "\n");
     } else {
-      const known = failure instanceof WikiError;
-      const argumentError = failure instanceof Error && "code" in failure && typeof failure.code === "string" && failure.code.startsWith("ERR_PARSE_ARGS_");
-      const code = known ? failure.code : argumentError ? "usage" : "internal";
-      const message = failure instanceof Error ? failure.message : String(failure);
-      exitCode = known ? EXIT[failure.code] : argumentError ? 2 : 1;
-      const partial = failure instanceof CapturePublicationError ? { retainedDirectory: failure.retainedDirectory, ...(failure.paths.length ? { written: true, paths: failure.paths, digests: failure.digests } : {}) } : failure instanceof RegistryWriteError || failure instanceof CreatePartialError || failure instanceof ExclusiveCleanupError ? { written: failure.written, paths: failure.paths, digest: failure.digest } : publishedResult ?? {};
-      output({ ok: false, error: { code, message }, ...partial, ...(cleanup ? { cleanup } : {}), ...(release?.outcome.kind === "completed" && publishedResult ? { outcome: "completed" } : {}), ...(failure instanceof ExclusiveCleanupError ? { temporaryPath: failure.temporaryPath } : {}), ...(failure instanceof CreateValidationError || failure instanceof CaptureValidationError ? { diagnostics: failure.diagnostics } : {}), ...(failure instanceof CapturePublicationError && failure.temporaryCleanup ? { temporaryCleanup: failure.temporaryCleanup } : {}), ...(failure instanceof UpdateConflictError ? { path: failure.path, expected: failure.expected, current: failure.current } : {}), ...(temporaryCleanup ? { temporaryCleanup } : {}) }, "");
+      const report = failureReport(actionFailure, publishedResult);
+      exitCode = report.exitCode;
+      output({ ok: false, error: { code: report.code, message: report.message }, ...report.partial, ...(cleanup ? { cleanup } : {}), ...(release?.outcome.kind === "completed" && publishedResult ? { outcome: "completed" } : {}), ...report.details }, "");
       if (!json) {
-        stderr += code + ": " + message + "\n";
-        if (temporaryCleanup) stderr += "Temporary cleanup: " + temporaryCleanup.message + "\n";
+        stderr += report.code + ": " + report.message + "\n";
+        if (report.unwrittenCleanup) stderr += "Temporary cleanup: " + report.unwrittenCleanup.message + "\n";
         if (cleanup) stderr += "Lock cleanup: " + cleanup.message + "; retained " + cleanup.path + "\n";
-        if (publishedResult) stderr += "Written: " + publishedResult.paths.join(", ") + "\n" + ("digest" in publishedResult ? publishedResult.digest : JSON.stringify(publishedResult.digests)) + "\n";
-        if (failure instanceof RegistryWriteError || failure instanceof CreatePartialError || failure instanceof ExclusiveCleanupError) stderr += "Written: " + failure.paths.join(", ") + "\n" + failure.digest + "\n";
-        if (failure instanceof CapturePublicationError) {
-          if (failure.paths.length) stderr += "Written: " + failure.paths.join(", ") + "\n" + JSON.stringify(failure.digests) + "\n";
-          if (failure.temporaryCleanup) stderr += "Temporary cleanup: " + failure.temporaryCleanup.message + "\n";
-        }
-        if (failure instanceof CreateValidationError || failure instanceof CaptureValidationError) stderr += failure.diagnostics.map(d => d.path + ": " + d.rule + ": " + d.message + "; fix: " + d.fix).join("\n") + "\n";
+        if (publishedResult) stderr += writtenLines(publishedResult);
+        if (report.written) stderr += writtenLines(report.written);
+        if (report.captureCleanup) stderr += "Temporary cleanup: " + report.captureCleanup.message + "\n";
+        if (report.diagnostics) stderr += report.diagnostics.map(d => d.path + ": " + d.rule + ": " + d.message + "; fix: " + d.fix).join("\n") + "\n";
       }
     }
   }
