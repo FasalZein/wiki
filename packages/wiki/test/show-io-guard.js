@@ -35,8 +35,14 @@ for (const name of ["writeFileSync", "appendFileSync", "mkdirSync", "renameSync"
   fs[name] = () => { throw new Error("Show attempted a write: " + name); };
 }
 const open = fs.openSync;
+const WRITE_FLAGS = fs.constants.O_WRONLY | fs.constants.O_RDWR | fs.constants.O_CREAT | fs.constants.O_TRUNC | fs.constants.O_APPEND;
 fs.openSync = function(file, flags, ...args) {
-  if (flags !== "r" && flags !== 0) throw new Error("Show attempted a writable open");
+  if (flags !== "r" && !(typeof flags === "number" && (flags & WRITE_FLAGS) === 0)) throw new Error("Show attempted a writable open");
+  // The protected note read opens a descriptor and reads it; count the open of the note itself.
+  if (typeof file !== "number" && path.resolve(file instanceof URL ? fileURLToPath(file) : String(file)) === note) {
+    reads++;
+    if (reads > 1) throw new Error("Requested note read more than once");
+  }
   return open.call(this, file, flags, ...args);
 };
 syncBuiltinESMExports();
