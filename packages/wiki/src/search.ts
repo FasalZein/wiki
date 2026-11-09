@@ -1,4 +1,4 @@
-import { inspectVault } from "./lint.ts";
+import { checkVault, searchConcepts } from "./lint.ts";
 import type { Registry } from "./registry.ts";
 import { syncQmdText, syncAndFindQmd, syncAndEmbedQmd, qmdModelReadiness, FAST_ROLES, DEEP_ROLES, type QmdDegraded, type QmdDiagnostic, type QmdEmbedResult, type QmdEmbeddingCoverage, type QmdFindFilters, type QmdFindResult, type QmdInventory, type QmdReadyModels, type QmdSyncResult, type QmdTextCoverage } from "./qmd.ts";
 
@@ -84,8 +84,8 @@ export async function runSearch(root: string, command: SearchCommand, signal: Ab
   if (readiness.state === "unavailable" && !find) return searchReport({ kind: "models-unavailable", diagnostics: readiness.diagnostics });
   let captured: QmdInventory;
   try {
-    const inventory = inspectVault(root, undefined, undefined, registry);
-    captured = { concepts: inventory.concepts, diagnostics: inventory.diagnostics };
+    const validated = checkVault(root, registry);
+    captured = { concepts: searchConcepts(validated), diagnostics: validated.diagnostics };
   } catch (error) {
     // An incomplete scan cannot reuse an earlier successful receipt.
     captured = { concepts: [], diagnostics: [{ path: "", message: error instanceof Error ? error.message : String(error) }] };

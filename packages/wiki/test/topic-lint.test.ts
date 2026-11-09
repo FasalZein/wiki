@@ -5,7 +5,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { after, test } from "node:test";
 import { runCli, runJson as cli } from "./cli-helper.ts";
-import { inspectVault } from "../src/lint.ts";
+import { checkVault, navigationIndexes, selectedDiagnostics } from "../src/lint.ts";
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-topic-"));
 after(() => fs.rmSync(temp, { recursive: true, force: true }));
@@ -36,15 +36,15 @@ test("wiki:03 selected inventory hides unrelated diagnostics but never renders a
   const vault = await fresh();
   const selected = note(vault, "personal/notes/selected.md", "", "", "note", "Selected");
   const other = note(vault, "projects/wiki/notes/other.md", "status: deprecated\nsuperseded_by: missing.md\n", "", "note", "Other");
-  const inventory = inspectVault(vault, selected);
-  assert.deepEqual(inventory.diagnostics, []);
-  assert.equal(inventory.indexes.size, 0, "an invalid unselected topic blocks all planned navigation");
-  assert.deepEqual(inspectVault(vault).diagnostics.map(d => [d.path, d.rule]), [[other, "lifecycle.target"]]);
+  const inventory = checkVault(vault);
+  assert.deepEqual(selectedDiagnostics(inventory, selected), []);
+  assert.equal(navigationIndexes(inventory).size, 0, "an invalid unselected topic blocks all planned navigation");
+  assert.deepEqual(inventory.diagnostics.map(d => [d.path, d.rule]), [[other, "lifecycle.target"]]);
   fs.unlinkSync(path.join(vault, other));
-  const repaired = inspectVault(vault, selected);
-  assert.deepEqual(repaired.diagnostics, []);
-  assert.match(repaired.indexes.get("personal/notes/index.md")!, /Selected/);
-  assert.ok(repaired.indexes.has("index.md"));
+  const repaired = checkVault(vault);
+  assert.deepEqual(selectedDiagnostics(repaired, selected), []);
+  assert.match(navigationIndexes(repaired).get("personal/notes/index.md")!, /Selected/);
+  assert.ok(navigationIndexes(repaired).has("index.md"));
 });
 
 test("wiki:03 canonical placement requires scope, registered folder, safe project and exact slug depth", async () => {

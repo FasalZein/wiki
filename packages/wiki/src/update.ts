@@ -1,9 +1,8 @@
 import * as fs from "node:fs";
 import { canonicalPathProblem } from "./paths.ts";
 import { readNoteRevision, readRevisionAt, WikiError, type NoteRevision, type Vault } from "./vault.ts";
-import { parseNoteText } from "./frontmatter.ts";
 import type { HeldLock } from "./mutation.ts";
-import { publish, topicLog, validateProspective } from "./publication.ts";
+import { publish, validatePending } from "./publication.ts";
 
 export class UpdateConflictError extends WikiError {
   readonly path: string; readonly expected: string; readonly current: string;
@@ -53,15 +52,16 @@ export type UpdateMode = { dryRun: true; vault: Vault } | { dryRun: false; lock:
 export function updateTopic(apply: UpdateMode, relative: string, expected: string, candidate: UpdateCandidate) {
   const root = apply.dryRun ? apply.vault.root : apply.lock.root;
   const before = compare(root, relative, expected);
-  const plan = validateProspective(root, { path: relative, markdown: candidate.markdown, replace: true }, "Duplicate normalized title at " + relative);
+  const duplicate = "Duplicate normalized title at " + relative;
   const result = { path: relative, digest: candidate.digest, candidateDigest: candidate.digest, ...difference(before.bytes, candidate) };
+  // A dry-run or a no-op publishes nothing, so it validates here; an apply validates inside publish under the lock.
+  if (apply.dryRun || before.bytes.equals(candidate.bytes)) validatePending(root, { path: relative, markdown: candidate.markdown }, duplicate);
   if (apply.dryRun) return { ...result, outcome: "dry-run" as const, navigation: "unchanged", log: "unchanged" };
   if (before.bytes.equals(candidate.bytes)) {
     compare(root, relative, expected);
     return { ...result, outcome: "unchanged" as const, navigation: "unchanged", log: "unchanged" };
   }
-  const title = parseNoteText(candidate.markdown).frontmatter.title;
-  publish(apply.lock, { kind: "replace", path: relative, bytes: candidate.bytes, digest: candidate.digest, mode: before.mode,
-    recheck: () => { compare(root, relative, expected); }, plan, log: topicLog("updated", String(title), relative) });
+  publish(apply.lock, { kind: "replace", path: relative, markdown: candidate.markdown, bytes: candidate.bytes, digest: candidate.digest, mode: before.mode,
+    recheck: () => { compare(root, relative, expected); }, duplicate });
   return { ...result, outcome: "updated" as const, written: true as const, navigation: "updated", log: "appended" };
 }

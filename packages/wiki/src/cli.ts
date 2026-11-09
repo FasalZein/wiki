@@ -7,8 +7,8 @@ import { readNote } from "./read.ts";
 import { readUpdateCandidate, updateTopic, UpdateConflictError } from "./update.ts";
 import { createTopic, type CreateRequest } from "./create.ts";
 import { withMutationLock, MutationReleaseError, type HeldLock } from "./mutation.ts";
-import { addType, publish, validateCurrent, ValidationError } from "./publication.ts";
-import { inspectVault, lintVault } from "./lint.ts";
+import { addType, publish, ValidationError } from "./publication.ts";
+import { checkVault, lintVault, navigationIndexes } from "./lint.ts";
 import { QMD_DEFAULT_LIMIT, type QmdFindFilters } from "./qmd.ts";
 import { runSearch } from "./search.ts";
 import { prepareCapture, publishTextCapture, type TextCaptureRequest, type TextCaptureCandidate } from "./capture.ts";
@@ -208,7 +208,7 @@ export async function run(argv: readonly string[], options: RunOptions): Promise
             const controller = new AbortController();
             const abort = () => controller.abort();
             const unsubscribe = options.interrupts?.(abort);
-            try { preparedCapture = await prepareCapture(root, captureRequest, controller.signal); }
+            try { preparedCapture = await prepareCapture(vault, captureRequest, controller.signal); }
             finally { unsubscribe?.(); }
           }
           const updateOutput = (result: ReturnType<typeof updateTopic>) => output({ ok: true, ...result }, (result.outcome === "updated" ? "Updated topic: " : result.outcome === "dry-run" ? "Dry-run topic: " : "Unchanged topic: ") + result.path + "\n" + result.digest + "\n" + JSON.stringify(result.summary) + "\n" + JSON.stringify(result.diff) + "\nNavigation: " + result.navigation + "; log: " + result.log + "\n");
@@ -240,15 +240,12 @@ export async function run(argv: readonly string[], options: RunOptions): Promise
               publishedResult = { written: true, paths: [added.path], digest: added.digest };
               output({ ok: true, path: added.path }, "Created registry scaffold: " + added.path + "; review and run whole-vault lint before commit\n");
             } else if (index) {
-              // Regeneration validates through the publication module.
-              const current = validateCurrent(root);
-              if (current.diagnostics.length) lintFailure(current.diagnostics);
+              // Regeneration validates inside the publication module, under the held lock.
+              const published = publish(lock, { kind: "index" });
+              if (published.state === "refused") lintFailure(published.diagnostics);
               else {
-                if (current.plan) {
-                  const published = publish(lock, { kind: "index", plan: current.plan });
-                  if (published.written.paths.length) publishedResult = { written: true, ...published.written };
-                }
-                indexOutput(current.indexes);
+                if (published.written.paths.length) publishedResult = { written: true, ...published.written };
+                indexOutput(published.indexes);
               }
             } else throw new Error("Write dispatcher reached a read-only command");
           };
@@ -262,14 +259,15 @@ export async function run(argv: readonly string[], options: RunOptions): Promise
             } else {
               const registry = list ? loadRegistry(root) : undefined;
               // --check only compares current bytes.
-              const checked = index ? inspectVault(root) : undefined;
-              const diagnostics = registry ? registry.diagnostics : checked ? checked.diagnostics : lintVault(root, arg);
-              if (checked && !diagnostics.length) {
-                diagnostics.push(...indexFreshnessDiagnostics(root, checked.indexes));
+              const checked = index ? checkVault(root) : undefined;
+              const indexes = checked ? navigationIndexes(checked) : undefined;
+              const diagnostics = registry ? registry.diagnostics : checked ? checked.diagnostics : lintVault(vault, arg);
+              if (indexes && !diagnostics.length) {
+                diagnostics.push(...indexFreshnessDiagnostics(root, indexes));
                 sortDiagnostics(diagnostics);
               }
               if (diagnostics.length) lintFailure(diagnostics);
-              else if (checked) indexOutput(checked.indexes);
+              else if (indexes) indexOutput(indexes);
               else if (registry) {
                 const types = listTypes(registry.types);
                 output({ ok: true, types }, types.map(t => t.name + " folder=" + t.folder + " required=" + t.requiredFields.join(",") + " headings=" + t.requiredHeadings.map(h => h.level + ":" + h.text).join(",") + " scopes=" + (t.scopes?.join(",") ?? "all")).join("\n") + "\n");

@@ -6,10 +6,10 @@ import { extractPdf } from "./pdf.ts";
 import { assertCaptureActive } from "./extract-process.ts";
 import { fetchResource, extractWeb } from "./web.ts";
 import { loadRegistry, safeName, schemaDiagnostics, type Diagnostic } from "./registry.ts";
-import { containedEntry, openVault, WikiError } from "./vault.ts";
+import { containedEntry, WikiError, type Vault } from "./vault.ts";
 import { parseNoteText } from "./frontmatter.ts";
 import type { HeldLock } from "./mutation.ts";
-import { publish, topicLog, validateProspective, ValidationError } from "./publication.ts";
+import { publish, ValidationError } from "./publication.ts";
 import { missingHeadings, parseMarkdown } from "./markdown.ts";
 
 export interface TextCaptureRequest {
@@ -38,16 +38,15 @@ function validateCaptureLocation(request: TextCaptureRequest, source: ReturnType
 /** Read-only preparation. The publisher must recheck under the mutation lock before effects.
  * No implicit size limit: the selected document and rendered source are held in memory.
  */
-function planCapture(vault: string, request: TextCaptureRequest) {
-  const { root } = openVault(vault);
-  const registry = loadRegistry(root);
+function planCapture(vault: Vault, request: TextCaptureRequest) {
+  const registry = loadRegistry(vault.root);
   if (registry.diagnostics.length) throw new CaptureValidationError(registry.diagnostics);
   const source = registry.types.find(type => type.record.name === "source");
   if (!source) throw new WikiError("usage", "Capture requires a registered source type; explicitly register source before capture; no registry repair performed");
   validateCaptureLocation(request, source);
   const relative = request.scope + "/" + source.record.folder + "/" + request.slug + ".md";
   const assetDirectory = request.scope + "/assets/" + request.slug;
-  for (const destination of [relative, assetDirectory]) if (containedEntry(root, destination).stat) throw new WikiError("conflict", "Existing capture destination: " + destination);
+  for (const destination of [relative, assetDirectory]) if (vault.entry(destination).stat) throw new WikiError("conflict", "Existing capture destination: " + destination);
   return { request, source, relative, assetDirectory };
 }
 
@@ -72,7 +71,7 @@ function localMediaType(extension: string): string {
   return [".md", ".markdown"].includes(extension) ? "text/markdown" : "text/plain";
 }
 
-function readCapture(vault: string, request: TextCaptureRequest, pdf = false): ReturnType<typeof planCapture> & CapturedResource {
+function readCapture(vault: Vault, request: TextCaptureRequest, pdf = false): ReturnType<typeof planCapture> & CapturedResource {
   const planned = planCapture(vault, request);
   const extension = path.extname(request.input).toLowerCase();
   if (!(pdf ? [".pdf"] : [".txt", ".text", ".md", ".markdown"]).includes(extension)) throw new WikiError("unsupported", "Unsupported text capture extension: " + (extension || "<none>") + "; use .txt, .text, .md, or .markdown");
@@ -83,7 +82,7 @@ function readCapture(vault: string, request: TextCaptureRequest, pdf = false): R
     mediaType: localMediaType(extension) };
 }
 
-export function prepareTextCapture(vault: string, request: TextCaptureRequest): TextCaptureCandidate {
+export function prepareTextCapture(vault: Vault, request: TextCaptureRequest): TextCaptureCandidate {
   const captured = readCapture(vault, request);
   let text: string;
   try { text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(captured.original); }
@@ -92,7 +91,7 @@ export function prepareTextCapture(vault: string, request: TextCaptureRequest): 
 }
 
 /** The same captured buffer feeds retention and extraction; never reopen or refetch. */
-export async function prepareCapture(vault: string, request: TextCaptureRequest, signal: AbortSignal): Promise<TextCaptureCandidate> {
+export async function prepareCapture(vault: Vault, request: TextCaptureRequest, signal: AbortSignal): Promise<TextCaptureCandidate> {
   assertCaptureActive(signal);
   if (/^[a-z][a-z0-9+.-]*:/i.test(request.input)) {
     const planned = planCapture(vault, request);
@@ -145,10 +144,9 @@ export function publishTextCapture(lock: HeldLock, candidate: TextCaptureCandida
   const { frontmatter } = parseNoteText(candidate.sourceMarkdown);
   const directory = path.posix.dirname(candidate.assets[0].path);
   for (const destination of [candidate.path, directory]) if (containedEntry(root, destination).stat) throw new WikiError("conflict", "Existing capture destination: " + destination);
-  const plan = validateProspective(root, { path: candidate.path, markdown: candidate.sourceMarkdown, assets: candidate.assets }, "Duplicate normalized title at " + candidate.path);
   const files = [...candidate.assets, { path: candidate.path, bytes: Buffer.from(candidate.sourceMarkdown, "utf8"), digest: candidate.digest }];
-  const { paths, digests } = publish(lock, { kind: "capture", directory, files, path: candidate.path, digest: candidate.digest, plan,
-    log: topicLog("captured", String(frontmatter.title), candidate.path) }).written as { paths: string[]; digests: Record<string, string> };
+  const { paths, digests } = publish(lock, { kind: "capture", directory, files, path: candidate.path, markdown: candidate.sourceMarkdown, assets: candidate.assets, digest: candidate.digest,
+    duplicate: "Duplicate normalized title at " + candidate.path }).written;
   return { ...frontmatter, path: candidate.path, digest: candidate.digest, written: true as const, paths, digests,
     assets: candidate.assets.map(asset => ({ path: asset.path, digest: asset.digest })) };
 }
