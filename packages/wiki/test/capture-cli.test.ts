@@ -55,7 +55,7 @@ test("wiki:14 CLI captures exact source assets and provenance with clean lint/in
   assert.equal(result.extracted, "personal/assets/captured-topic/extracted.txt");
   assert.equal(result.original_sha256, digest(bytes)); assert.equal(result.extracted_sha256, digest(bytes));
   assert.equal(result.resource, pathToFileURL(input).href);
-  assert.equal(result.media_type, "text/markdown"); assert.equal(result.extractor, "okf-wiki:utf8"); assert.equal(result.extractor_version, "1");
+  assert.equal(result.media_type, "text/markdown"); assert.equal(result.extractor, "wiki:utf8"); assert.equal(result.extractor_version, "1");
   assert.match(result.retrieved, /^\d{4}-\d\d-\d\dT.*Z$/);
   for (const file of [result.original, result.extracted]) assert.deepEqual(fs.readFileSync(path.join(root, file)), bytes);
   const markdown = read(root, result.path); assert.equal(result.digest, digest(markdown));
@@ -170,7 +170,7 @@ test("wiki:14 CLI reads input exactly once before lock acquisition and returns h
   assert.equal(result.error, undefined); assert.equal(result.status, 0, result.stderr); assert.equal(result.stderr, "");
   assert.match(result.stdout, /Captured source: personal\/references\/captured-topic.md/);
   assert.match(result.stdout, /original_sha256: sha256:[0-9a-f]{64}/);
-  assert.match(result.stdout, /extractor: okf-wiki:utf8/); assert.match(result.stdout, /retrieved: /);
+  assert.match(result.stdout, /extractor: wiki:utf8/); assert.match(result.stdout, /retrieved: /);
 });
 
 const original = "personal/assets/captured-topic/original.txt", extracted = "personal/assets/captured-topic/extracted.txt", note = "personal/references/captured-topic.md";

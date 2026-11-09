@@ -93,7 +93,7 @@ export function prepareTextCapture(vault: string, request: TextCaptureRequest): 
   let text: string;
   try { text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(captured.original); }
   catch { throw new WikiError("unsupported", "Text capture input is not valid UTF-8; no source note published"); }
-  return renderCapture(captured, { text, bytes: Buffer.from(text, "utf8"), extractor: "okf-wiki:utf8", version: "1" });
+  return renderCapture(captured, { text, bytes: Buffer.from(text, "utf8"), extractor: "wiki:utf8", version: "1" });
 }
 
 /** The same captured buffer feeds retention and extraction; never reopen or refetch. */

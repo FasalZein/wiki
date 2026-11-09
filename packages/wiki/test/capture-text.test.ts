@@ -44,7 +44,7 @@ test("wiki:14 prepares exact retained bytes and canonical source provenance with
   assert.deepEqual(data, { type: "source", title: request.title, description: request.description, created: data.retrieved,
     resource: pathToFileURL(request.input).href, retrieved: data.retrieved,
     original: result.assets[0].path, original_sha256: digest(bytes), extracted: result.assets[1].path, extracted_sha256: digest(bytes),
-    extractor: "okf-wiki:utf8", extractor_version: "1", media_type: "text/markdown" });
+    extractor: "wiki:utf8", extractor_version: "1", media_type: "text/markdown" });
   assert.equal(typeof data.retrieved, "string");
   assert.ok(Date.parse(String(data.retrieved)) >= started && Date.parse(String(data.retrieved)) <= Date.now());
   assert.equal(result.digest, digest(result.sourceMarkdown));

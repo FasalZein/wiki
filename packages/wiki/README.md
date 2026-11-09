@@ -419,7 +419,7 @@ log entry. Normal completion passes whole-vault lint and index --check.
 Success JSON includes path, title, description, the full source-note digest,
 resource (the selected absolute file URL or requested web URL), retrieved, original, original_sha256,
 extracted, extracted_sha256, extractor, extractor_version, and media_type. The
-UTF-8 extractor is okf-wiki:utf8 version 1. It also returns written: true, paths,
+UTF-8 extractor is wiki:utf8 version 1. It also returns written: true, paths,
 per-path digests, and an assets list with canonical paths/digests, never file
 buffers. Digests use the sha256: prefix. Human output names the source path and
 prints the same scalar provenance and digests. Retained reads never refetch input.
