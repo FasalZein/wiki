@@ -17,26 +17,33 @@ const ROOT_INDEX = '---\nokf_version: "0.2"\n---\n# Wiki\n';
 // Retain old-location rules as compatibility protection alongside current derived state.
 const IGNORES = "/.wiki/tmp/\n/.wiki/locks/\n/.wiki/search/\n/.wiki/qmd.sqlite\n/.wiki/qmd.sqlite-*\n";
 
-export class ExclusiveCleanupError extends WikiError {
-  readonly written = true;
-  readonly paths: string[];
-  readonly digest: string;
-  readonly temporaryPath: string;
-  constructor(relative: string, data: string | Buffer, temporaryPath: string, cause: unknown) {
-    super("damaged", "File published at " + relative + " but temporary-name cleanup failed at " + temporaryPath + "; inspect retained names, run index for navigation, and inspect log.md before any manual historical entry; do not retry publication");
-    this.paths = [relative];
-    this.digest = "sha256:" + createHash("sha256").update(data).digest("hex");
-    this.temporaryPath = temporaryPath;
-    this.cause = cause;
+export interface TemporaryCleanup { path: string; retained: true; message: string }
+/** Files a publication wrote. One digest for a single file, or one per path. */
+export type Written = { paths: string[]; digest: string } | { paths: string[]; digests: Record<string, string> };
+/** What a failed publication left on disk. The CLI failure mapper reads only this record.
+ * unwritten: nothing was published; a temporary file is retained.
+ * written: the files in written were published, then a later step failed; temporaryPath names a retained temporary name.
+ * capture: the capture directory was reserved; written lists the files published inside it, if any. */
+export type PublicationRecord =
+  | { state: "unwritten"; temporaryCleanup: TemporaryCleanup }
+  | { state: "written"; written: Written; temporaryPath?: string }
+  | { state: "capture"; retainedDirectory: string; written?: Written; temporaryCleanup?: TemporaryCleanup };
+/** The one error shape for a publication that failed after it could change vault bytes.
+ * The error message is the repair hint. primary, when set, is the failure to report instead of this error
+ * (for example the refusal that ran before a temporary-file cleanup also failed). */
+export class PublicationError extends WikiError {
+  readonly record: PublicationRecord;
+  readonly primary: unknown;
+  constructor(code: ErrorCode, message: string, record: PublicationRecord, cause?: unknown, primary?: unknown) {
+    super(code, message);
+    this.record = record; this.cause = cause; this.primary = primary;
   }
 }
-
-export class ExclusiveTemporaryError extends WikiError {
-  readonly temporaryPath: string; readonly primary: unknown;
-  constructor(temporaryPath: string, primary: unknown, cause: unknown) {
-    super("damaged", "Unpublished exclusive-file cleanup failed at " + temporaryPath + "; inspect the retained temporary file before explicit cleanup");
-    this.temporaryPath = temporaryPath; this.primary = primary; this.cause = cause;
-  }
+export function sha256(data: string | Buffer): string { return "sha256:" + createHash("sha256").update(data).digest("hex"); }
+export function causeSuffix(error: unknown): string { return error instanceof Error ? ": " + error.message : ""; }
+/** A temporary-file cleanup failure that ran before anything was published. */
+export function unwrittenTemporary(message: string, temporaryPath: string, primary: unknown, cause: unknown): PublicationError {
+  return new PublicationError("damaged", message, { state: "unwritten", temporaryCleanup: { path: temporaryPath, retained: true, message: message + causeSuffix(cause) } }, cause, primary);
 }
 
 function exclusivePublicationFailure(error: unknown, relative: string): unknown {
@@ -67,8 +74,8 @@ export function createExclusive(root: string, relative: string, data: string | B
   } finally {
     try { fs.rmSync(tmp, { force: true }); }
     catch (error) {
-      if (published) throw new ExclusiveCleanupError(relative, data, temporaryPath, error);
-      throw new ExclusiveTemporaryError(temporaryPath, primary, error);
+      if (published) throw new PublicationError("damaged", "File published at " + relative + " but temporary-name cleanup failed at " + temporaryPath + "; inspect retained names, run index for navigation, and inspect log.md before any manual historical entry; do not retry publication", { state: "written", written: { paths: [relative], digest: sha256(data) }, temporaryPath }, error);
+      throw unwrittenTemporary("Unpublished exclusive-file cleanup failed at " + temporaryPath + "; inspect the retained temporary file before explicit cleanup", temporaryPath, primary, error);
     }
   }
 }

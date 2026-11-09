@@ -11,6 +11,11 @@ export class MutationReleaseError extends Error {
   }
 }
 
+const HELD = Symbol("held mutation lock");
+/** Proof that the caller runs inside withMutationLock. Only withMutationLock creates one, so a publication
+ * function that takes a HeldLock cannot run unlocked. */
+export interface HeldLock { readonly root: string; readonly [HELD]: true }
+
 function acquireMutationLock(root: string) {
   const directory = containedEntry(root, ".wiki/locks");
   if (!directory.stat?.isDirectory()) throw new WikiError("damaged", "Missing .wiki/locks directory");
@@ -36,12 +41,12 @@ function releaseMutationLock(fd: number, full: string, owned: fs.Stats, token: s
   if (current?.isFile() && current.dev === owned.dev && current.ino === owned.ino && ownsMutationToken(full, token)) fs.unlinkSync(full);
 }
 /** Single-host, non-stealing coordination for cooperating CLI writers only. */
-export function withMutationLock<T>(root: string, action: () => T): T {
+export function withMutationLock<T>(root: string, action: (lock: HeldLock) => T): T {
   const { fd, full, token, owned } = acquireMutationLock(root);
   let outcome: { ok: true; value: T } | { ok: false; error: unknown };
   try {
     fs.writeFileSync(fd, JSON.stringify({ token, pid: process.pid, hostname: os.hostname(), started: new Date().toISOString() }) + "\n");
-    outcome = { ok: true, value: action() };
+    outcome = { ok: true, value: action({ root, [HELD]: true }) };
   } catch (error) { outcome = { ok: false, error }; }
   try { releaseMutationLock(fd, full, owned, token); }
   catch (error) {

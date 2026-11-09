@@ -6,11 +6,10 @@ import { extractPdf } from "./pdf.ts";
 import { assertCaptureActive } from "./extract-process.ts";
 import { fetchResource, extractWeb } from "./web.ts";
 import { loadRegistry, openVault, safeName, schemaDiagnostics, type Diagnostic } from "./registry.ts";
-import { containedEntry, createExclusive, ExclusiveCleanupError, ExclusiveTemporaryError, WikiError } from "./vault.ts";
-import { inspectVault } from "./lint.ts";
+import { containedEntry, WikiError } from "./vault.ts";
 import { parseNoteText } from "./frontmatter.ts";
-import { completeTopicPublication, CreateValidationError } from "./create.ts";
-import { indexDestinationDiagnostics } from "./navigation.ts";
+import type { HeldLock } from "./mutation.ts";
+import { publish, topicLog, validateProspective, ValidationError } from "./publication.ts";
 import { missingHeadings, parseMarkdown } from "./markdown.ts";
 
 export interface TextCaptureRequest {
@@ -21,12 +20,8 @@ export interface TextCaptureCandidate {
   path: string; sourceMarkdown: string; digest: string;
   assets: [CaptureAsset, CaptureAsset];
 }
-export class CaptureValidationError extends WikiError {
-  readonly diagnostics: Diagnostic[];
-  constructor(diagnostics: Diagnostic[]) {
-    super("usage", "Source capture validation failed; inspect diagnostics and repair the registry or request explicitly");
-    this.diagnostics = diagnostics;
-  }
+export class CaptureValidationError extends ValidationError {
+  constructor(diagnostics: Diagnostic[]) { super(diagnostics, "Source capture validation failed; inspect diagnostics and repair the registry or request explicitly"); }
 }
 const digest = (bytes: Buffer | string) => "sha256:" + createHash("sha256").update(bytes).digest("hex");
 
@@ -144,72 +139,16 @@ function renderCapture(captured: ReturnType<typeof readCapture>, extraction: { t
 }
 
 
-function captureFailureDescription(failure: unknown): string {
-  const detail = failure instanceof Error ? failure.message : String(failure);
-  const cause = failure instanceof Error && failure.cause instanceof Error ? ": " + failure.cause.message : "";
-  return detail + cause;
-}
-
-function capturePrimaryFailure(primary: unknown) {
-  const failure = primary instanceof ExclusiveTemporaryError && primary.primary !== undefined ? primary.primary : primary;
-  return { code: failure instanceof WikiError ? failure.code : "damaged" as const, detail: captureFailureDescription(failure) };
-}
-
-export class CapturePublicationError extends WikiError {
-  readonly retainedDirectory: string;
-  readonly paths: string[]; readonly digests: Record<string, string>;
-  readonly temporaryCleanup?: { path: string; retained: true; message: string };
-  constructor(directory: string, paths: string[], digests: Record<string, string>, primary: unknown) {
-    const failure = capturePrimaryFailure(primary);
-    super(failure.code, "Capture publication incomplete: " + failure.detail + "; retain published files, inspect " + directory + ", the reported paths and temporary files; run index to repair navigation if a source note exists and inspect log.md before any manual historical entry; do not retry or roll back automatically");
-    this.retainedDirectory = directory;
-    this.paths = [...paths]; this.digests = { ...digests }; this.cause = primary;
-    if (primary instanceof ExclusiveCleanupError || primary instanceof ExclusiveTemporaryError) this.temporaryCleanup = { path: primary.temporaryPath, retained: true, message: primary.message + (primary.cause instanceof Error ? ": " + primary.cause.message : "") };
-  }
-}
-
-function capturePublicationIndexes(root: string, candidate: TextCaptureCandidate, directory: string): Map<string, string> {
-  for (const destination of [candidate.path, directory]) if (containedEntry(root, destination).stat) throw new WikiError("conflict", "Existing capture destination: " + destination);
-  const inventory = inspectVault(root, undefined, { path: candidate.path, markdown: candidate.sourceMarkdown, assets: candidate.assets });
-  if (inventory.diagnostics.some(d => d.path === candidate.path && d.rule === "title.duplicate")) throw new WikiError("conflict", "Duplicate normalized title at " + candidate.path);
-  inventory.diagnostics.push(...indexDestinationDiagnostics(root, inventory.indexes.keys()));
-  if (inventory.diagnostics.length) throw new CreateValidationError(inventory.diagnostics);
-  return inventory.indexes;
-}
-
-function retainCaptureFiles(root: string, files: CaptureAsset[], ledger: { paths: string[]; digests: Record<string, string> }): void {
-  const { paths, digests } = ledger;
-  for (const file of files) {
-    try { createExclusive(root, file.path, file.bytes); }
-    catch (error) {
-      if (error instanceof ExclusiveCleanupError) { paths.push(file.path); digests[file.path] = file.digest; }
-      throw error;
-    }
-    paths.push(file.path); digests[file.path] = file.digest;
-  }
-}
-
-/** Caller holds the mutation lock. Revalidate the current registry and whole prospective vault. */
-export function publishTextCapture(root: string, candidate: TextCaptureCandidate) {
+/** Revalidate the current registry and whole prospective vault, then publish under the held lock. */
+export function publishTextCapture(lock: HeldLock, candidate: TextCaptureCandidate) {
+  const root = lock.root;
   const { frontmatter } = parseNoteText(candidate.sourceMarkdown);
-  const paths: string[] = [], digests: Record<string, string> = {};
   const directory = path.posix.dirname(candidate.assets[0].path);
-  const indexes = capturePublicationIndexes(root, candidate, directory);
+  for (const destination of [candidate.path, directory]) if (containedEntry(root, destination).stat) throw new WikiError("conflict", "Existing capture destination: " + destination);
+  const plan = validateProspective(root, { path: candidate.path, markdown: candidate.sourceMarkdown, assets: candidate.assets }, "Duplicate normalized title at " + candidate.path);
   const files = [...candidate.assets, { path: candidate.path, bytes: Buffer.from(candidate.sourceMarkdown, "utf8"), digest: candidate.digest }];
-  let reserved = false;
-  try {
-    fs.mkdirSync(containedEntry(root, path.posix.dirname(directory)).full, { recursive: true });
-    // Reserve the selected capture directory exclusively; never reuse another capture's assets.
-    fs.mkdirSync(containedEntry(root, directory).full);
-    reserved = true;
-    fs.mkdirSync(containedEntry(root, path.posix.dirname(candidate.path)).full, { recursive: true });
-    retainCaptureFiles(root, files, { paths, digests });
-    completeTopicPublication(root, candidate.path, String(frontmatter.title), candidate.digest, indexes, "captured");
-  } catch (error) {
-    if (reserved) throw new CapturePublicationError(directory, paths, digests, error);
-    if (error instanceof Error && "code" in error && error.code === "EEXIST") throw new WikiError("conflict", "Existing capture destination; no overwrite or suffix performed");
-    throw error;
-  }
+  const { paths, digests } = publish(lock, { kind: "capture", directory, files, path: candidate.path, digest: candidate.digest, plan,
+    log: topicLog("captured", String(frontmatter.title), candidate.path) }).written as { paths: string[]; digests: Record<string, string> };
   return { ...frontmatter, path: candidate.path, digest: candidate.digest, written: true as const, paths, digests,
     assets: candidate.assets.map(asset => ({ path: asset.path, digest: asset.digest })) };
 }
