@@ -5,7 +5,8 @@ import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import type { QMDStore, UpdateProgress, UpdateResult } from "@tobilu/qmd";
 import { canonicalPathProblem, inspectContainedPath } from "./paths.ts";
-import { isMapping, parseNoteText } from "./frontmatter.ts";
+import { isMapping } from "./frontmatter.ts";
+import { noteDigest, planFind, selectMatches, type CurrentNoteReader, type FindHit } from "./find.ts";
 
 /** Caller supplies a complete capture of validated concepts, not a selected subset.
  * Report every invalid/unreadable concept in diagnostics; never silently omit it. */
@@ -367,40 +368,22 @@ class SearchIndexSession {
       }
       found ??= (await store.searchLex(lexical.query, { collection: COLLECTION, limit: Math.max(identities.size, 1) })).map(hit => ({ file: hit.filepath, score: hit.score }));
       signal?.throwIfAborted();
-      const matches: QmdRenderedMatch[] = [], omitted: QmdDiagnostic[] = [];
-      // Literal tokens are plain substrings of canonical paths and captured note text. Mentioned
-      // paths are never opened; a regex, shell or FTS reading of the token never happens.
-      const literals = literalTokens(request.question + (request.terms === undefined ? "" : "\n" + request.terms));
-      type Candidate = { path: string; file: string; score: number | null; rank: number; literal: string[] };
-      const candidates = new Map<string, Candidate>();
-      const ranked: { path: string; file: string; score: number }[] = [];
+      const hits: FindHit[] = [], unmapped: string[] = [];
       for (const match of found) {
         if (!match.file.startsWith(PREFIX)) throw new Error("Unexpected indexed collection identity");
         const relative = identities.get(match.file.slice(PREFIX.length));
-        if (relative === undefined) render(this.root, relative, match.file, match.score, [], null, concepts, queries, omitted);
-        else ranked.push({ path: relative, file: match.file, score: match.score });
+        if (relative === undefined) unmapped.push(match.file);
+        else hits.push({ path: relative, score: match.score });
       }
-      // qmd order by score, canonical path breaks ties; a path keeps its best-ranked entry.
-      ranked.sort((a, b) => b.score - a.score || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-      for (const [rank, match] of ranked.entries()) if (!candidates.has(match.path)) candidates.set(match.path, { ...match, rank, literal: [] });
-      if (literals.length) for (const [relative, markdown] of concepts) {
-        const literal = literals.filter(token => relative.includes(token) || markdown.includes(token));
-        if (!literal.length) continue;
-        const existing = candidates.get(relative);
-        if (existing) existing.literal = literal;
-        else candidates.set(relative, { path: relative, file: PREFIX + stagedId(relative), score: null, rank: Infinity, literal });
+      // readIdentities pins each id to stagedId(path), so a path's body is found by its staged id.
+      const indexedByPath = new Map<string, string>();
+      for (const relative of [...concepts.keys(), ...indexed]) {
+        const body = bodies.get(stagedId(relative));
+        if (body !== undefined) indexedByPath.set(relative, body);
       }
-      const inScope = (relative: string) => request.scope === undefined || relative.startsWith(request.scope + "/");
-      // A candidate outside the captured inventory has no type; render reports its omission.
-      const ofType = (relative: string) => request.type === undefined || !concepts.has(relative) || typeOf(concepts.get(relative) ?? "") === request.type;
-      const ordered = [...candidates.values()].filter(c => inScope(c.path) && ofType(c.path))
-        .sort((a, b) => Number(!a.literal.length) - Number(!b.literal.length) || a.rank - b.rank || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-      for (const candidate of ordered) {
-        if (matches.length === limit) break;
-        signal?.throwIfAborted();
-        const rendered = render(this.root, candidate.path, candidate.file, candidate.score, candidate.literal, bodies.get(candidate.file.slice(PREFIX.length)) ?? null, concepts, queries, omitted);
-        if (rendered) matches.push(rendered);
-      }
+      const plan = planFind({ hits, unmapped, captured: concepts, indexed: indexedByPath, question: request.question, terms: request.terms, queries, scope: request.scope, type: request.type });
+      const { matches, omitted } = selectMatches(plan, limit, currentNotes(this.root), () => signal?.throwIfAborted());
+      const literals = plan.literals;
       const rerank = request.mode === "deep" && !degraded;
       return { state: "successful", mode: request.mode === "lexical" ? request.requested : request.mode, queries, rerank, ...(degraded ? { degraded } : {}), literals, limit, matches, omitted, indexMismatch } satisfies QmdFindResult;
     });
@@ -434,34 +417,32 @@ class SearchIndexSession {
     return { state: "complete", embeddingCoverage: { state: "complete" }, embedded };
   }
 }
-/** What one request reports: sync-led requests (sync, find, --embed) or a single test-seam operation. */
-type SessionOutcome = { sync?: QmdSyncResult; find?: QmdFindResult; embed?: QmdEmbedResult; lex?: QmdLexResult };
-/** Runs one request in one session, then releases the lock and folds a failed release into the result.
- * A failed release retains the lock, and close() has invalidated every receipt this session's sync
- * published. A request that synchronized therefore reports an unavailable synchronization and drops
- * its follow-on result (keeping that result's failures as diagnostics), as before one session held
- * the lock across sync and query. A request without sync reports its operation unavailable. */
-async function inSession<O extends SessionOutcome>(root: string, models: QmdModels | undefined, run: (session: SearchIndexSession) => Promise<O>): Promise<O> {
+/** Runs one request in one session, then releases the lock. A failed release retains the lock, and
+ * close() has invalidated every receipt this session's sync published. Each entry point passes its
+ * own fold for that case, so the choice is explicit per entry point: a request that synchronized
+ * reports an unavailable synchronization and drops its follow-on result (keeping that result's
+ * failures as diagnostics), as before one session held the lock across sync and query. A request
+ * without sync reports its operation unavailable. */
+async function inSession<O>(root: string, models: QmdModels | undefined, run: (session: SearchIndexSession) => Promise<O>, released: (outcome: O, release: QmdDiagnostic[]) => O): Promise<O> {
   const session = new SearchIndexSession(root, models);
   const outcome = await run(session);
   const release = session.close();
-  if (!release.length) return outcome;
-  const { sync, find, embed, lex } = outcome;
-  const operation = [...(find?.state === "unavailable" ? find.diagnostics : []), ...(embed?.state === "failed" ? embed.diagnostics : []), ...(lex?.state === "unavailable" ? lex.diagnostics : [])];
-  // Each branch keeps the key the caller reads (sync, find or lex); follow-on keys are optional.
-  if (sync) return { sync: sync.state === "unavailable" ? unavailable([...sync.textCoverage.diagnostics, ...release], sync.code) : unavailable([...operation, ...release]) } as O;
-  if (find) return { find: { state: "unavailable", code: find.state === "unavailable" ? find.code : "unavailable", diagnostics: [...operation, ...release] } } as O;
-  return { lex: { state: "unavailable", diagnostics: [...operation, ...release] } } as O;
+  return release.length ? released(outcome, release) : outcome;
+}
+/** The fold of a sync-led request. operation: the failures of its follow-on find or embed. */
+function releasedSync(sync: QmdSyncResult, operation: QmdDiagnostic[], release: QmdDiagnostic[]): { sync: QmdSyncResult } {
+  return { sync: sync.state === "unavailable" ? unavailable([...sync.textCoverage.diagnostics, ...release], sync.code) : unavailable([...operation, ...release]) };
 }
 
 /** Model-free text update in its own session. The entire .wiki/search directory is derived. */
 export async function syncQmdText(root: string, inventory: QmdInventory, options: QmdSyncOptions = {}): Promise<QmdSyncResult> {
-  return (await inSession(root, options.models, async session => ({ sync: await session.sync(inventory, options) }))).sync;
+  return (await inSession(root, options.models, async session => ({ sync: await session.sync(inventory, options) }), (o, release) => releasedSync(o.sync, [], release))).sync;
 }
 
 /** Lexical oracle for tests and diagnostics: synchronize the full current inventory first. */
 export async function searchQmdLex(root: string, query: string, limit = 10): Promise<QmdLexResult> {
-  return (await inSession(root, undefined, async session => ({ lex: await session.searchLex(query, limit) }))).lex;
+  return inSession(root, undefined, session => session.searchLex(query, limit),
+    (lex, release) => ({ state: "unavailable", diagnostics: [...(lex.state === "unavailable" ? lex.diagnostics : []), ...release] }));
 }
 
 /** Explicit local model files from .wiki/config.json search.models. Initialization leaves them unset. */
@@ -536,56 +517,14 @@ export type QmdFindResult =
       indexMismatch: QmdDiagnostic[] }
   | { state: "unavailable"; code: "conflict" | "unavailable"; diagnostics: QmdDiagnostic[] };
 
-// Surrounding quotes, brackets and sentence punctuation are not part of a path-like token.
-const TOKEN_EDGES = /^["'`([{<]+|["'`)\]}>.,;:!?]+$/g;
-// Version strings (v1.2, 1.2.3, v2.0.1-beta) look dotted but are not filenames.
-const VERSION = /^[vV]?\d+(?:\.\d+)+(?:[-+][\w.+-]*)?$/;
-/** A filename-like stem (empty for dotfiles such as .env) and one or more nonempty extension
- * segments of any characters: README.md, printf.3, libssl.so.3, main.c++. */
-function dottedFilename(token: string): boolean {
-  const segments = token.split(".");
-  return segments.length > 1 && segments.slice(1).every(Boolean) && /\p{L}/u.test(token) && !VERSION.test(token);
-}
-/** Path-like tokens (containing "/" or a dotted filename form), in first-appearance order. */
-export function literalTokens(text: string): string[] {
-  const tokens = text.split(/\s+/).map(token => token.replace(TOKEN_EDGES, ""))
-    .filter(token => /[\p{L}\p{N}]/u.test(token) && (token.includes("/") || dottedFilename(token)));
-  return [...new Set(tokens)];
-}
-/** The first line containing a matched literal token, else the first line containing a lexical term. */
-function excerptOf(body: string, queries: readonly QmdQuery[], literal: readonly string[]): string {
-  const lines = body.split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith("#"));
-  const terms = queries.filter(q => q.type === "lex").flatMap(q => q.query.toLowerCase().split(/\s+/)).filter(Boolean);
-  return lines.find(line => literal.some(token => line.includes(token)))
-    ?? lines.find(line => terms.some(term => line.toLowerCase().includes(term))) ?? lines[0] ?? "";
-}
-function typeOf(markdown: string): unknown {
-  try { return parseNoteText(markdown).frontmatter.type; } catch { return undefined; }
-}
-/** Render from the captured revision and revalidate the current file before emitting.
- * Only vault files are reread; captured sources are never refetched. */
-function render(root: string, relative: string | undefined, file: string, score: number | null, literal: string[], indexed: string | null, captured: ReadonlyMap<string, string>, queries: readonly QmdQuery[], omitted: QmdDiagnostic[]): QmdRenderedMatch | undefined {
-  const markdown = relative === undefined ? undefined : captured.get(relative);
-  if (relative === undefined || markdown === undefined) { omitted.push({ path: relative ?? file, message: "Indexed candidate is not in the current captured inventory (deleted, renamed or out of scope); omitted" }); return undefined; }
-  if (indexed !== markdown) { omitted.push({ path: relative, message: "Indexed content differs from the captured revision; omitted rather than attaching an old excerpt" }); return undefined; }
-  const expected = digest(markdown);
-  let current: string | undefined;
-  try {
-    const stat = fs.lstatSync(checked(root, relative), { throwIfNoEntry: false });
-    if (stat?.isFile()) current = "sha256:" + createHash("sha256").update(fs.readFileSync(checked(root, relative))).digest("hex");
-  } catch { current = undefined; }
-  if (current !== expected) { omitted.push({ path: relative, message: (current === undefined ? "Note disappeared" : "Note changed") + " after capture (moving target); omitted, not retried. Search again for its current revision" }); return undefined; }
-  let title = "", description = "", type = "", body = markdown;
-  try {
-    const parsed = parseNoteText(markdown);
-    body = parsed.body;
-    if (typeof parsed.frontmatter.title === "string") title = parsed.frontmatter.title;
-    if (typeof parsed.frontmatter.description === "string") description = parsed.frontmatter.description;
-    if (typeof parsed.frontmatter.type === "string") type = parsed.frontmatter.type;
-  } catch { /* Captured concepts are lint-valid; keep raw text if not. */ }
-  // Captured concepts are validated personal/<folder> or projects/<project>/<folder> paths.
-  const scope = relative.startsWith("personal/") ? "personal" : relative.split("/").slice(0, 2).join("/");
-  return { path: relative, scope, type, score, literal, digest: expected, title, description, excerpt: excerptOf(body, queries, literal) };
+/** Step (c)'s read port over the vault: rereads only vault files, never captured sources. */
+function currentNotes(root: string): CurrentNoteReader {
+  return { digest(relative) {
+    try {
+      const stat = fs.lstatSync(checked(root, relative), { throwIfNoEntry: false });
+      return stat?.isFile() ? noteDigest(fs.readFileSync(checked(root, relative))) : undefined;
+    } catch { return undefined; }
+  } };
 }
 /** QMD 2.8.3 swallows expansion grammar/context/prompt failures, returns the unchanged
  * question, then filters it out: an expansion with no usable entry is a failed stage. */
@@ -596,7 +535,8 @@ function vectorFailure(error: unknown, signal: AbortSignal | undefined): boolean
 
 /** Find in its own session against an index synchronized earlier (test seam for index mismatch). */
 export async function findQmd(root: string, request: QmdFindRequest, captured: QmdInventory["concepts"], signal?: AbortSignal): Promise<QmdFindResult> {
-  return (await inSession(root, undefined, async session => ({ find: await session.find(request, captured, signal) }))).find;
+  return inSession(root, undefined, session => session.find(request, captured, signal),
+    (find, release) => ({ state: "unavailable", code: find.state === "unavailable" ? find.code : "unavailable", diagnostics: [...(find.state === "unavailable" ? find.diagnostics : []), ...release] }));
 }
 /** One find request: synchronize text and query under one session lock. find is absent when the
  * text update was unavailable (find did not run). */
@@ -604,7 +544,7 @@ export async function syncAndFindQmd(root: string, inventory: QmdInventory, opti
   return inSession(root, options.models, async (session): Promise<{ sync: QmdSyncResult; find?: QmdFindResult }> => {
     const sync = await session.sync(inventory, options);
     return sync.state === "unavailable" ? { sync } : { sync, find: await session.find(request, inventory.concepts, signal) };
-  });
+  }, (o, release) => releasedSync(o.sync, o.find?.state === "unavailable" ? o.find.diagnostics : [], release));
 }
 
 export type QmdEmbedResult =
@@ -617,7 +557,7 @@ export async function syncAndEmbedQmd(root: string, inventory: QmdInventory, opt
   return inSession(root, options.models, async (session): Promise<{ sync: QmdSyncResult; embed?: QmdEmbedResult }> => {
     const sync = await session.sync(inventory, options);
     return sync.state === "unavailable" ? { sync } : { sync, embed: await session.embed(models, signal) };
-  });
+  }, (o, release) => releasedSync(o.sync, o.embed?.state === "failed" ? o.embed.diagnostics : [], release));
 }
 
 // Doctor inspection of a disposable copy. Database file names and QMD 2.8.3 tables stay in this module.

@@ -9,13 +9,12 @@ import { readUpdateCandidate, updateTopic, UpdateConflictError, UpdateTemporaryE
 import { createTopic, CreatePartialError, CreateValidationError, type CreateRequest } from "./create.ts";
 import { withMutationLock, MutationReleaseError } from "./mutation.ts";
 import { inspectVault, lintVault } from "./lint.ts";
-import { syncQmdText, syncAndFindQmd, syncAndEmbedQmd, qmdModelReadiness, FAST_ROLES, DEEP_ROLES, QMD_DEFAULT_LIMIT, type QmdFindFilters, type QmdInventory, type QmdDiagnostic, type QmdEmbeddingCoverage, type QmdReadyModels, type QmdTextCoverage } from "./qmd.ts";
+import { QMD_DEFAULT_LIMIT, type QmdFindFilters } from "./qmd.ts";
+import { runSearch } from "./search.ts";
 import { prepareCapture, publishTextCapture, CaptureValidationError, CapturePublicationError, type TextCaptureRequest, type TextCaptureCandidate } from "./capture.ts";
 import { indexDestinationDiagnostics, indexFreshnessDiagnostics } from "./navigation.ts";
 import { doctorVault, doctorText } from "./doctor.ts";
 
-/** The search command already buffered its structured failure output. */
-class SearchReported extends Error {}
 const EXIT: Record<ErrorCode, number> = { usage: 2, conflict: 3, not_found: 4, unsupported: 5, damaged: 6, unavailable: 7 };
 const USAGE = "wiki (Node source CLI)\nUsage: wiki init <dir> [--json]\n       wiki --vault <dir> init [--json]\n       wiki --vault <dir> type list [--json]\n       wiki --vault <dir> type add <name> --folder <folder> [--json]\n       wiki --vault <dir> lint [path] [--json]\n       wiki --vault <dir> index [--check] [--json]\n       wiki --vault <dir> new <type> (--project <p>|--personal) --title <t> --description <d> [--slug <s>] [--body-file <f>] [--tags <tag> ...] [--status <status>] [--json]\n       wiki --vault <dir> capture <file-or-url> (--project <p>|--personal) --title <t> --description <d> [--slug <s>] [--json]\n       wiki --vault <dir> update <canonical-path> --expect sha256:<64 lowercase hex digits> --file <complete-candidate-markdown> [--dry-run] [--json]\n       wiki --vault <dir> doctor [--json]\n       wiki --vault <dir> search sync [--embed] [--json]\n       wiki --vault <dir> find <question> [--terms <keywords>] [--deep] [--project <p>|--personal] [--type <type>] [--limit <n>] [--json]\nFast find sends one typed lex/vec qmd query without expansion or reranking; --deep explicitly expands and reranks. Path-like tokens (containing / or a dotted filename) also match canonical paths and captured note text literally; literal matches come first. Scope and type filters apply before --limit (default " + QMD_DEFAULT_LIMIT + ", the pinned qmd SDK default). Find synchronizes text but never embeds; search sync --embed fills missing embeddings. Models: explicit local GGUF paths in .wiki/config.json search.models (embed, generate, rerank). If models are not ready or vector search fails, find returns lexical results labelled degraded; a degraded miss is not exhaustive. Results render from current note bytes.\n       wiki --vault <dir> show <path> [--section <heading>] [--json]\nWhole-vault lint checks registry, frontmatter, layout, body, lifecycle, scoped titles, links, and generated-index freshness. Selected-path lint does not check generated-index freshness.\nVault: explicit directory, --vault, or WIKI_VAULT. No default vault.\n";
 let json = process.argv.slice(2).includes("--json");
@@ -97,73 +96,10 @@ try {
         const abort = () => controller.abort(new Error("Search " + (find ? "find" : "synchronization") + " interrupted"));
         process.on("SIGINT", abort); process.on("SIGTERM", abort);
         try {
-          // Preflight explicit local models before any index effect or SDK model use.
-          const roles = find ? (values.deep ? DEEP_ROLES : FAST_ROLES) : values.embed ? FAST_ROLES : [];
-          const readiness = qmdModelReadiness(root, roles);
-          // Plain sync measures pending embeddings against a configured embed model when one is ready.
-          const measured = roles.length ? readiness : qmdModelReadiness(root, FAST_ROLES);
-          // Find stays usable without models: model-free lexical retrieval, labelled degraded.
-          if (readiness.state === "unavailable" && !find) {
-            process.exitCode = EXIT.unavailable;
-            const error = { code: "unavailable", message: "Search models are not ready; configure existing local files (no download or hosted inference is attempted)" };
-            output({ ok: false, error, readiness: "unavailable", diagnostics: readiness.diagnostics }, "", error.code + ": " + error.message + "\n" + readiness.diagnostics.map(d => d.path + ": " + d.message).join("\n") + "\n");
-            throw new SearchReported();
-          }
-          let captured: QmdInventory;
-          try {
-            const inventory = inspectVault(root);
-            captured = { concepts: inventory.concepts, diagnostics: inventory.diagnostics };
-          } catch (error) {
-            // An incomplete scan cannot reuse an earlier successful receipt.
-            captured = { concepts: [], diagnostics: [{ path: "", message: error instanceof Error ? error.message : String(error) }] };
-          }
-          const syncOptions = { signal: controller.signal, ...(measured.state === "ready" ? { models: measured.models } : {}) };
-          const question = arg, terms = values.terms;
-          const requested = values.deep ? "deep" as const : "fast" as const;
           const filters: QmdFindFilters = { ...(values.personal ? { scope: "personal" as const } : values.project !== undefined ? { scope: `projects/${values.project}` as const } : {}), ...(values.type !== undefined ? { type: values.type } : {}), ...(values.limit !== undefined ? { limit: Number(values.limit) } : {}) };
-          // One session: find and --embed synchronize text and then query or embed under one index lock.
-          const request = find && question !== undefined ? await syncAndFindQmd(root, captured, syncOptions, readiness.state === "unavailable" ? { ...filters, mode: "lexical", requested, question, terms, reason: readiness.diagnostics }
-            : values.deep ? { ...filters, mode: "deep", question, terms, models: readiness.models as QmdReadyModels<"embed" | "generate" | "rerank"> } // --deep preflighted DEEP_ROLES
-            : { ...filters, mode: "fast", question, terms, models: readiness.models }, controller.signal)
-            : values.embed && readiness.state === "ready" ? await syncAndEmbedQmd(root, captured, syncOptions, readiness.models, controller.signal)
-            : { sync: await syncQmdText(root, captured, syncOptions) };
-          const result = request.sync;
-          const diagnostics = result.textCoverage.state === "complete" ? [] : result.textCoverage.diagnostics;
-          const embeddingCoverage = result.embeddingCoverage.state === "pending"
-            ? { state: "incomplete", contentHashes: result.embeddingCoverage.contentHashes } : result.embeddingCoverage;
-          const error = result.state === "unavailable" ? { code: result.code, message: result.code === "conflict" ? "Search index writer is busy" : "Search synchronization unavailable" } : undefined;
-          // Request-scoped: find can lower it to incomplete after omitting candidates.
-          let textCoverage: QmdTextCoverage = result.textCoverage;
-          const coverageText = (coverage: QmdEmbeddingCoverage | typeof embeddingCoverage) => "Text coverage: " + textCoverage.state + " (captured inventory, not a current-at-return guarantee)\nEmbedding coverage: " + (coverage.state === "pending" ? "incomplete" : coverage.state) +
-            ("contentHashes" in coverage ? " (" + coverage.contentHashes + " content hashes pending)" : "") + "\n";
-          const report = (failure: { code: "conflict" | "unavailable"; message: string } | undefined, extra: object, human: string, problems: QmdDiagnostic[], coverage: object = embeddingCoverage) => {
-            if (failure) process.exitCode = EXIT[failure.code];
-            output({ ok: !failure, ...(failure ? { error: failure } : {}), coverageBasis: "captured-inventory", textCoverage, embeddingCoverage: coverage, ...extra, diagnostics: problems },
-              human, (failure ? failure.code + ": " + failure.message + "\n" : "") + problems.map(d => d.path + ": " + d.message).join("\n") + (problems.length ? "\n" : ""));
-          };
-          if (error || !(find || values.embed)) report(error, {}, coverageText(result.embeddingCoverage), diagnostics);
-          else if ("find" in request && request.find) {
-            const found = request.find;
-            if (found.state === "unavailable") report({ code: found.code, message: found.code === "conflict" ? "Search index writer is busy" : "Search find unavailable" }, { mode: requested }, coverageText(result.embeddingCoverage), [...diagnostics, ...found.diagnostics]);
-            else {
-              // Omitted candidates (deleted, renamed, stale index, moving target) make text coverage incomplete for this request.
-              // A replaced index or omitted candidates make text coverage incomplete for this request.
-              const coverageProblems = [...found.indexMismatch, ...found.omitted];
-              if (coverageProblems.length) textCoverage = { state: "incomplete", diagnostics: [...diagnostics, ...coverageProblems] };
-              const coverage = found.degraded ? { state: "unavailable" as const } : embeddingCoverage;
-              const label = found.degraded ? " degraded: lexical only (" + ({ "models-unavailable": "search models not ready", "vector-failed": "vector search failed", "expansion-failed": "deep expansion failed; no reranking" } as const)[found.degraded.reason] + "); a miss is not an exhaustive absence claim"
-                : found.mode === "deep" ? " (explicit expansion and reranking)" : " (one typed lex/vec query, no expansion, no reranking)";
-              report(undefined, { mode: found.mode, queries: found.queries, rerank: found.rerank, ...(found.degraded ? { degraded: found.degraded } : {}), literals: found.literals, limit: found.limit, filters: { ...(filters.scope ? { scope: filters.scope } : {}), ...(filters.type ? { type: filters.type } : {}) }, matches: found.matches },
-                "Mode: " + found.mode + label + "\n" + coverageText(coverage) +
-                (found.matches.length ? found.matches.map(m => m.path + " " + (m.score === null ? "literal" : m.score.toFixed(4)) + " " + m.digest + (m.literal.length ? " [literal: " + m.literal.join(" ") + "]" : "") + "\n  " + m.title + ": " + m.description + "\n  " + m.excerpt).join("\n") + "\n" : found.degraded ? "No degraded lexical matches (not exhaustive)\n" : "No matches\n"),
-                [...diagnostics, ...coverageProblems, ...(found.degraded?.diagnostics ?? [])], coverage);
-            }
-          } else if ("embed" in request && request.embed) { // Non-find readiness failures were reported above.
-            const embedded = request.embed;
-            const coverage = embedded.embeddingCoverage.state === "pending" ? { state: "incomplete", contentHashes: embedded.embeddingCoverage.contentHashes } : embedded.embeddingCoverage;
-            if (embedded.state === "failed") report({ code: embedded.code, message: embedded.code === "conflict" ? "Search index writer is busy" : "Embedding synchronization failed" }, { embedding: "failed", ...(embedded.embedded ? { embedded: embedded.embedded } : {}) }, coverageText(embedded.embeddingCoverage), [...diagnostics, ...embedded.diagnostics], coverage);
-            else report(undefined, { embedding: "complete", embedded: embedded.embedded }, coverageText(embedded.embeddingCoverage), diagnostics, coverage);
-          }
+          const report = await runSearch(root, find ? { kind: "find", question: arg, terms: values.terms, deep: values.deep === true, filters } : { kind: "sync", embed: values.embed === true }, controller.signal);
+          if (report.failure) process.exitCode = EXIT[report.failure];
+          output(report.value, report.human, report.stderr);
         } finally { process.removeListener("SIGINT", abort); process.removeListener("SIGTERM", abort); }
       } else {
         // Extraction, including the only input read, finishes before acquiring the mutation lock.
@@ -231,7 +167,6 @@ try {
     }
   }
 } catch (error) {
-  if (!(error instanceof SearchReported)) {
   const release = error instanceof MutationReleaseError ? error : undefined;
   const cleanup = release ? { path: ".wiki/locks/mutation.lock", retained: true, message: release.cause instanceof Error ? release.cause.message : String(release.cause) } : undefined;
   const pending = outputBuffer.pending;
@@ -261,7 +196,6 @@ try {
       }
       if (failure instanceof CreateValidationError || failure instanceof CaptureValidationError) process.stderr.write(failure.diagnostics.map(d => d.path + ": " + d.rule + ": " + d.message + "; fix: " + d.fix).join("\n") + "\n");
     }
-  }
   }
 }
 const pending = outputBuffer.pending;
