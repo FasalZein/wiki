@@ -38,7 +38,7 @@ function snapshot(root: string): Record<string, string> {
   return files;
 }
 
-test("wiki:01 repeat init preserves authored notes, registry, config, indexes, and ignores", async () => {
+test("wiki:01 repeat init preserves authored notes, registry, config, indexes, and ignores", () => {
   const vault = freshPath();
   ok(["init", vault]);
   fs.mkdirSync(path.join(vault, "personal/notes"), { recursive: true });
@@ -52,7 +52,7 @@ test("wiki:01 repeat init preserves authored notes, registry, config, indexes, a
   assert.deepEqual(snapshot(vault), before);
 });
 
-test("wiki:01 refuses a nonempty foreign target without any mutation", async () => {
+test("wiki:01 refuses a nonempty foreign target without any mutation", () => {
   const vault = freshPath();
   fs.mkdirSync(vault);
   fs.writeFileSync(path.join(vault, "authored.md"), "Do not convert me.\n");
@@ -62,7 +62,7 @@ test("wiki:01 refuses a nonempty foreign target without any mutation", async () 
   assert.deepEqual(fs.readdirSync(vault), ["authored.md"]);
 });
 
-test("wiki:01 refuses unsupported and damaged configurations without mutation", async () => {
+test("wiki:01 refuses unsupported and damaged configurations without mutation", () => {
   for (const config of ['{"profile":"wiki-okf","version":99}', '{"profile":"foreign","version":1}', '{', '[]', '{}']) {
     const vault = freshPath();
     ok(["init", vault]);
@@ -74,7 +74,7 @@ test("wiki:01 refuses unsupported and damaged configurations without mutation", 
   }
 });
 
-test("wiki:01 reports missing initialization files instead of attempting repair", async () => {
+test("wiki:01 reports missing initialization files instead of attempting repair", () => {
   for (const missing of [".wiki/config.json", "index.md", "log.md", ".gitignore", ".wiki/types", ".wiki/tmp", ".wiki/locks"]) {
     const vault = freshPath();
     ok(["init", vault]);
@@ -87,7 +87,7 @@ test("wiki:01 reports missing initialization files instead of attempting repair"
   }
 });
 
-test("wiki:01 refuses symlink roots, managed files, and write directories", async () => {
+test("wiki:01 refuses symlink roots, managed files, and write directories", () => {
   const outside = freshPath();
   ok(["init", outside]);
   const link = freshPath();
@@ -107,7 +107,7 @@ test("wiki:01 refuses symlink roots, managed files, and write directories", asyn
   }
 });
 
-test("wiki:01 requires explicit selection and honors flag precedence over environment", async () => {
+test("wiki:01 requires explicit selection and honors flag precedence over environment", () => {
   const before = snapshot(temp);
   rejected(["init"], 2, "usage", /no default vault/i);
   rejected(["init", ""], 2, "usage", /select a vault/i);
@@ -128,7 +128,7 @@ test("wiki:01 requires explicit selection and honors flag precedence over enviro
   assert.equal(fs.existsSync(ignored), false);
 });
 
-test("wiki:01 accepts an explicitly selected empty relative directory with literal path characters", async () => {
+test("wiki:01 accepts an explicitly selected empty relative directory with literal path characters", () => {
   const relative = "empty vault ; literal";
   fs.mkdirSync(path.join(temp, relative));
   const result = ok(["init", relative]);
@@ -138,7 +138,7 @@ test("wiki:01 accepts an explicitly selected empty relative directory with liter
   assert.equal(human.stdout, "Initialized profile vault: " + result.vault.root + "\n");
 });
 
-test("wiki:01 CLI errors are JSON, while human errors go to stderr", async () => {
+test("wiki:01 CLI errors are JSON, while human errors go to stderr", () => {
   rejected(["--unknown"], 2, "usage", /unknown/i);
   rejected(["new"], 2, "usage", /usage/i);
   rejected(["init", freshPath(), "extra"], 2, "usage", /usage/i);
@@ -148,7 +148,7 @@ test("wiki:01 CLI errors are JSON, while human errors go to stderr", async () =>
   assert.match(human.stderr, /no default vault/i);
 });
 
-test("wiki:01 Node init seeds an isolated profile without Git or search state", async () => {
+test("wiki:01 Node init seeds an isolated profile without Git or search state", () => {
   const vault = freshPath();
   const result = ok(["init", vault]);
   assert.equal(result.vault.root, fs.realpathSync(vault));

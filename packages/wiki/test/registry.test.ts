@@ -224,7 +224,7 @@ test("wiki:02 list and validation retain required fields reached through a local
   assert.equal((await indexedLint(vault)).status, 0);
 });
 
-test("wiki:02 schema references resolve escaped pointers, arrays, root and named anchors without inventing properties", async () => {
+test("wiki:02 schema references resolve escaped pointers, arrays, root and named anchors without inventing properties", () => {
   const fields = { properties: { category: { type: "string" } } };
   for (const schema of [
     { $ref: "#", ...fields },

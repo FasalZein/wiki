@@ -4,19 +4,13 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { runCli, spawnJson } from "./cli-helper.ts";
 
-const BIN = fileURLToPath(new URL("../bin/wiki.js", import.meta.url));
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-index-"));
 after(() => fs.rmSync(temp, { recursive: true, force: true }));
 let counter = 0;
-function cli(vault: string, ...args: string[]) {
-  const result = spawnSync(process.execPath, [BIN, "--json", "--vault", vault, ...args], {
-    encoding: "utf8", cwd: temp, env: { ...process.env, HOME: temp, WIKI_VAULT: "", LC_ALL: "tr_TR.UTF-8" },
-  });
-  assert.equal(result.stderr, "");
-  return { status: result.status, data: JSON.parse(result.stdout) };
-}
+// A Turkish locale proves index ordering does not follow the process locale; the locale applies at process start.
+function cli(vault: string, ...args: string[]) { return spawnJson(["--vault", vault, ...args], { cwd: temp, env: { HOME: temp, LC_ALL: "tr_TR.UTF-8" } }); }
 function fresh() {
   const vault = path.join(temp, String(++counter));
   assert.equal(cli(vault, "init").status, 0);
@@ -194,20 +188,18 @@ test("wiki:05 child directories sort by registered type before path and custom m
 });
 
 
-test("wiki:05 human index diagnostics identify path, rule and fix, and command grammar is strict", () => {
+test("wiki:05 human index diagnostics identify path, rule and fix, and command grammar is strict", async () => {
   const vault = fresh();
   note(vault, "personal/notes/topic.md", "Topic");
-  function human(...args: string[]) {
-    return spawnSync(process.execPath, [BIN, "--vault", vault, ...args], { encoding: "utf8", cwd: temp, env: { ...process.env, HOME: temp, WIKI_VAULT: "" } });
-  }
-  const generated = human("index");
+  const human = (...args: string[]) => runCli(["--vault", vault, ...args]);
+  const generated = await human("index");
   assert.equal(generated.status, 0, generated.stderr);
   assert.match(generated.stdout, /^Generated navigation: index.md, personal\/index.md, personal\/notes\/index.md\n$/);
-  const checked = human("index", "--check");
+  const checked = await human("index", "--check");
   assert.equal(checked.status, 0, checked.stderr);
   assert.equal(checked.stdout, "Generated indexes are current\n");
   fs.unlinkSync(path.join(vault, "personal/notes/index.md"));
-  const before = snapshot(vault), missing = human("index", "--check");
+  const before = snapshot(vault), missing = await human("index", "--check");
   assert.equal(missing.status, 1);
   assert.equal(missing.stdout, "");
   assert.match(missing.stderr, /personal\/notes\/index.md: index.missing: Missing generated navigation index; fix: Run wiki --vault <dir> index/);
