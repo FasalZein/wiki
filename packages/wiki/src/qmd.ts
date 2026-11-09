@@ -82,6 +82,21 @@ async function cleanup(store: QMDStore | undefined, release: (() => QmdDiagnosti
 function unavailable(diagnostics: QmdDiagnostic[], code: "conflict" | "unavailable" = "unavailable"): Extract<QmdSyncResult, { state: "unavailable" }> {
   return { state: "unavailable", code, textCoverage: { state: "unavailable", diagnostics }, embeddingCoverage: { state: "unavailable" } };
 }
+function isErrorCode(error: unknown, code: string): boolean {
+  return error instanceof Error && "code" in error && error.code === code;
+}
+/** Creates one SDK cache level without following links; an existing symlink or file fails closed. */
+function ensureCacheLevel(root: string, relative: string): void {
+  const full = checked(root, DIRECTORY + "/" + relative);
+  try { fs.mkdirSync(full); } catch (error) { if (!isErrorCode(error, "EEXIST")) throw error; }
+  // lstat: a symlink created after the check is not a directory.
+  if (!fs.lstatSync(full).isDirectory()) throw new Error("Expected a directory for SDK cache: " + DIRECTORY + "/" + relative);
+}
+/** SDK config levels may be absent, but an existing one must be a real directory. */
+function assertConfigLevel(root: string, relative: string): void {
+  const stat = fs.lstatSync(checked(root, DIRECTORY + "/" + relative), { throwIfNoEntry: false });
+  if (stat && !stat.isDirectory()) throw new Error("Expected a directory for SDK config: " + DIRECTORY + "/" + relative);
+}
 async function open(root: string, models?: QmdModels): Promise<QMDStore> {
   const dbPath = checked(root, DIRECTORY + "/qmd.sqlite");
   for (const suffix of ["-wal", "-shm", "-journal"]) checked(root, DIRECTORY + "/qmd.sqlite" + suffix);
@@ -92,17 +107,9 @@ async function open(root: string, models?: QmdModels): Promise<QMDStore> {
   // follows symlinks. Validate every SDK-managed component and create the cache one
   // non-recursive level at a time, so an existing symlink or file fails closed.
   const cache = checked(root, DIRECTORY + "/sdk-cache");
-  for (const relative of ["sdk-cache", "sdk-cache/qmd", "sdk-cache/qmd/models"]) {
-    const full = checked(root, DIRECTORY + "/" + relative);
-    try { fs.mkdirSync(full); } catch (error) { if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error; }
-    // lstat: a symlink created after the check is not a directory.
-    if (!fs.lstatSync(full).isDirectory()) throw new Error("Expected a directory for SDK cache: " + DIRECTORY + "/" + relative);
-  }
+  for (const relative of ["sdk-cache", "sdk-cache/qmd", "sdk-cache/qmd/models"]) ensureCacheLevel(root, relative);
   const config = checked(root, DIRECTORY + "/sdk-config");
-  for (const relative of ["sdk-config", "sdk-config/qmd"]) {
-    const stat = fs.lstatSync(checked(root, DIRECTORY + "/" + relative), { throwIfNoEntry: false });
-    if (stat && !stat.isDirectory()) throw new Error("Expected a directory for SDK config: " + DIRECTORY + "/" + relative);
-  }
+  for (const relative of ["sdk-config", "sdk-config/qmd"]) assertConfigLevel(root, relative);
   process.env.XDG_CACHE_HOME = cache;
   process.env.XDG_CONFIG_HOME = config;
   // Lazy import keeps ordinary vault commands independent of native search dependencies.

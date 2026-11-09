@@ -8,6 +8,8 @@ import tls from "node:tls";
 import { registerHooks, syncBuiltinESMExports } from "node:module";
 const mode = process.env.WIKI_DOCTOR_GUARD;
 if (mode === "close-failure") { process.env.WIKI_QMD_FAIL_CLOSE = "yes"; await import("./qmd-cleanup-guard.js"); }
+// Simulated runtime version only; the process still runs on the real supported Node.
+if (mode?.startsWith("node-version:")) Object.defineProperty(process.versions, "node", { value: mode.slice("node-version:".length) });
 const root = path.resolve(process.argv[process.argv.indexOf("--vault") + 1]);
 const home = process.env.HOME;
 const protectedRoots = [root, home, process.env.XDG_CACHE_HOME, process.env.XDG_CONFIG_HOME, process.env.XDG_DATA_HOME].filter(Boolean);
