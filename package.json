@@ -13,9 +13,6 @@
     "boot:wiki": "node packages/wiki/scripts/boot.js",
     "verify:next": "tsc -p packages/tsconfig.json && node --test \"packages/*/test/*.test.ts\""
   },
-  "dependencies": {
-    "gray-matter": "^4.0.3"
-  },
   "devDependencies": {
     "@stryker-mutator/core": "10.1.1",
     "@types/node": "26.6.6",

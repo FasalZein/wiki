@@ -48,7 +48,8 @@ function exclusivePublicationFailure(error: unknown, relative: string): unknown 
   return error;
 }
 
-// Adapted from wiki-core's exclusive complete-file publication. No donor runtime imports.
+// Adapted from the exclusive complete-file publication of the former Node core
+// package (removed in #41; see git history). No donor runtime imports.
 export function createExclusive(root: string, relative: string, data: string | Buffer): void {
   const target = containedEntry(root, relative).full;
   const temporaryPath = ".wiki/tmp/" + randomUUID();
