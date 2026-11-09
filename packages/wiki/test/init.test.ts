@@ -1,27 +1,26 @@
-// Principal acceptance seam: a real Node subprocess with disposable filesystem state.
+// AC01: init through run() with disposable filesystem state. The relative-path and human-error tests are the
+// subprocess smoke: they run the real bin in the temp directory, because run() resolves relative paths against the process cwd.
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, test } from "node:test";
-import { spawnCli } from "./cli-helper.ts";
+import { runCli, spawnCli } from "./cli-helper.ts";
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-init-"));
 after(() => fs.rmSync(temp, { recursive: true, force: true }));
 let counter = 0;
 function freshPath(): string { return path.join(temp, "vault-" + ++counter); }
-// init resolves relative directories against the process working directory, and run() has no cwd option,
-// so these tests stay in a subprocess started in the temp directory.
-function cli(args: string[], env: NodeJS.ProcessEnv = {}) { return spawnCli(["--json", ...args], { cwd: temp, env: { HOME: temp, ...env } }); }
-function ok(args: string[], env?: NodeJS.ProcessEnv) {
-  const result = cli(args, env);
+async function cli(args: string[], env: NodeJS.ProcessEnv = {}) { return runCli(["--json", ...args], { env: { HOME: temp, ...env } }); }
+async function ok(args: string[], env?: NodeJS.ProcessEnv) {
+  const result = await cli(args, env);
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const data = JSON.parse(result.stdout);
   assert.equal(data.ok, true);
   return data;
 }
-function rejected(args: string[], status: number, code: string, message: RegExp, env?: NodeJS.ProcessEnv) {
-  const result = cli(args, env);
+async function rejected(args: string[], status: number, code: string, message: RegExp, env?: NodeJS.ProcessEnv) {
+  const result = await cli(args, env);
   assert.equal(result.status, status, result.stdout + result.stderr);
   const data = JSON.parse(result.stdout);
   assert.equal(data.ok, false);
@@ -38,9 +37,9 @@ function snapshot(root: string): Record<string, string> {
   return files;
 }
 
-test("wiki:01 repeat init preserves authored notes, registry, config, indexes, and ignores", () => {
+test("wiki:01 repeat init preserves authored notes, registry, config, indexes, and ignores", async () => {
   const vault = freshPath();
-  ok(["init", vault]);
+  await ok(["init", vault]);
   fs.mkdirSync(path.join(vault, "personal/notes"), { recursive: true });
   fs.writeFileSync(path.join(vault, "personal/notes/idea.md"), "Authored bytes\r\n");
   fs.writeFileSync(path.join(vault, "index.md"), "Authored navigation\n");
@@ -48,109 +47,111 @@ test("wiki:01 repeat init preserves authored notes, registry, config, indexes, a
   fs.writeFileSync(path.join(vault, ".wiki/config.json"), '{ "profile": "wiki-okf", "version": 1 }\n');
   fs.writeFileSync(path.join(vault, ".wiki/types/note.json"), '{"reviewed":"custom data"}\n');
   const before = snapshot(vault);
-  ok(["--vault", vault, "init"]);
+  await ok(["--vault", vault, "init"]);
   assert.deepEqual(snapshot(vault), before);
 });
 
-test("wiki:01 refuses a nonempty foreign target without any mutation", () => {
+test("wiki:01 refuses a nonempty foreign target without any mutation", async () => {
   const vault = freshPath();
   fs.mkdirSync(vault);
   fs.writeFileSync(path.join(vault, "authored.md"), "Do not convert me.\n");
   const before = snapshot(vault);
-  rejected(["init", vault], 5, "unsupported", /nonempty foreign/i);
+  await rejected(["init", vault], 5, "unsupported", /nonempty foreign/i);
   assert.deepEqual(snapshot(vault), before);
   assert.deepEqual(fs.readdirSync(vault), ["authored.md"]);
 });
 
-test("wiki:01 refuses unsupported and damaged configurations without mutation", () => {
+test("wiki:01 refuses unsupported and damaged configurations without mutation", async () => {
   for (const config of ['{"profile":"wiki-okf","version":99}', '{"profile":"foreign","version":1}', '{', '[]', '{}']) {
     const vault = freshPath();
-    ok(["init", vault]);
+    await ok(["init", vault]);
     fs.writeFileSync(path.join(vault, ".wiki/config.json"), config);
     const before = snapshot(vault);
     const unsupported = config.includes('99') || config.includes('foreign');
-    rejected(["init", vault], unsupported ? 5 : 6, unsupported ? "unsupported" : "damaged", /config|profile/i);
+    await rejected(["init", vault], unsupported ? 5 : 6, unsupported ? "unsupported" : "damaged", /config|profile/i);
     assert.deepEqual(snapshot(vault), before);
   }
 });
 
-test("wiki:01 reports missing initialization files instead of attempting repair", () => {
+test("wiki:01 reports missing initialization files instead of attempting repair", async () => {
   for (const missing of [".wiki/config.json", "index.md", "log.md", ".gitignore", ".wiki/types", ".wiki/tmp", ".wiki/locks"]) {
     const vault = freshPath();
-    ok(["init", vault]);
+    await ok(["init", vault]);
     fs.rmSync(path.join(vault, missing), { recursive: true });
     const before = snapshot(vault);
-    const result = rejected(["init", vault], 6, "damaged", /incomplete/i);
+    const result = await rejected(["init", vault], 6, "damaged", /incomplete/i);
     assert.ok(result.error.message.includes(missing), result.error.message);
     assert.deepEqual(snapshot(vault), before);
     assert.equal(fs.existsSync(path.join(vault, missing)), false);
   }
 });
 
-test("wiki:01 refuses symlink roots, managed files, and write directories", () => {
+test("wiki:01 refuses symlink roots, managed files, and write directories", async () => {
   const outside = freshPath();
-  ok(["init", outside]);
+  await ok(["init", outside]);
   const link = freshPath();
   fs.symlinkSync(outside, link);
   const outsideBefore = snapshot(outside);
-  rejected(["init", link], 2, "usage", /symlink/i);
+  await rejected(["init", link], 2, "usage", /symlink/i);
   assert.deepEqual(snapshot(outside), outsideBefore);
   for (const relative of [".wiki", ".wiki/config.json", ".wiki/types", ".wiki/tmp", ".wiki/locks", "index.md", "log.md", ".gitignore"]) {
     const vault = freshPath();
-    ok(["init", vault]);
+    await ok(["init", vault]);
     fs.rmSync(path.join(vault, relative), { recursive: true });
     fs.symlinkSync(path.join(outside, relative), path.join(vault, relative));
     const before = snapshot(vault);
-    rejected(["init", vault], 2, "usage", /symlink/i);
+    await rejected(["init", vault], 2, "usage", /symlink/i);
     assert.deepEqual(snapshot(vault), before);
     assert.deepEqual(snapshot(outside), outsideBefore);
   }
 });
 
-test("wiki:01 requires explicit selection and honors flag precedence over environment", () => {
+test("wiki:01 requires explicit selection and honors flag precedence over environment", async () => {
   const before = snapshot(temp);
-  rejected(["init"], 2, "usage", /no default vault/i);
-  rejected(["init", ""], 2, "usage", /select a vault/i);
+  await rejected(["init"], 2, "usage", /no default vault/i);
+  await rejected(["init", ""], 2, "usage", /select a vault/i);
   assert.deepEqual(snapshot(temp), before);
   const selected = freshPath();
   const ignored = freshPath();
-  ok(["--vault", selected, "init"], { WIKI_VAULT: ignored });
+  await ok(["--vault", selected, "init"], { WIKI_VAULT: ignored });
   assert.equal(fs.existsSync(ignored), false);
   const fromEnv = freshPath();
-  ok(["init"], { WIKI_VAULT: fromEnv });
+  await ok(["init"], { WIKI_VAULT: fromEnv });
   const positional = freshPath();
-  ok(["init", positional], { WIKI_VAULT: ignored });
+  await ok(["init", positional], { WIKI_VAULT: ignored });
   assert.equal(fs.existsSync(ignored), false);
   const other = freshPath();
-  rejected(["--vault", selected, "init", other], 2, "usage", /different|conflict/i);
+  await rejected(["--vault", selected, "init", other], 2, "usage", /different|conflict/i);
   assert.equal(fs.existsSync(other), false);
-  rejected(["--vault", "", "init"], 2, "usage", /select a vault/i, { WIKI_VAULT: ignored });
+  await rejected(["--vault", "", "init"], 2, "usage", /select a vault/i, { WIKI_VAULT: ignored });
   assert.equal(fs.existsSync(ignored), false);
 });
 
-test("wiki:01 accepts an explicitly selected empty relative directory with literal path characters", () => {
+test("wiki:01 accepts an explicitly selected empty relative directory with literal path characters", async () => {
   const relative = "empty vault ; literal";
   fs.mkdirSync(path.join(temp, relative));
-  const result = ok(["init", relative]);
+  const json = spawnCli(["--json", "init", relative], { cwd: temp });
+  assert.equal(json.status, 0, json.stderr);
+  const result = JSON.parse(json.stdout);
   assert.equal(result.vault.root, fs.realpathSync(path.join(temp, relative)));
   const human = spawnCli(["init", relative], { cwd: temp });
   assert.equal(human.status, 0, human.stderr);
   assert.equal(human.stdout, "Initialized profile vault: " + result.vault.root + "\n");
 });
 
-test("wiki:01 CLI errors are JSON, while human errors go to stderr", () => {
-  rejected(["--unknown"], 2, "usage", /unknown/i);
-  rejected(["new"], 2, "usage", /usage/i);
-  rejected(["init", freshPath(), "extra"], 2, "usage", /usage/i);
+test("wiki:01 CLI errors are JSON, while human errors go to stderr", async () => {
+  await rejected(["--unknown"], 2, "usage", /unknown/i);
+  await rejected(["new"], 2, "usage", /usage/i);
+  await rejected(["init", freshPath(), "extra"], 2, "usage", /usage/i);
   const human = spawnCli(["init"]);
   assert.equal(human.status, 2);
   assert.equal(human.stdout, "");
   assert.match(human.stderr, /no default vault/i);
 });
 
-test("wiki:01 Node init seeds an isolated profile without Git or search state", () => {
+test("wiki:01 Node init seeds an isolated profile without Git or search state", async () => {
   const vault = freshPath();
-  const result = ok(["init", vault]);
+  const result = await ok(["init", vault]);
   assert.equal(result.vault.root, fs.realpathSync(vault));
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(vault, ".wiki/config.json"), "utf8")), {
     profile: "wiki-okf", version: 1,
