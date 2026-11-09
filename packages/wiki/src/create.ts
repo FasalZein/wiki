@@ -3,7 +3,7 @@ import * as path from "node:path";
 import { createHash } from "node:crypto";
 import { inspectVault } from "./lint.ts";
 import { indexDestinationDiagnostics, markdownText } from "./navigation.ts";
-import { loadRegistry, safeName, type Diagnostic } from "./registry.ts";
+import { loadRegistry, safeName, type Diagnostic, type Registry } from "./registry.ts";
 import { containedEntry, createExclusive, WikiError } from "./vault.ts";
 
 export interface CreateRequest {
@@ -23,8 +23,7 @@ export class CreatePartialError extends WikiError {
     this.paths = paths; this.digest = digest; this.cause = cause;
   }
 }
-function registeredCreateType(root: string, name: string) {
-  const registry = loadRegistry(root);
+function registeredCreateType(registry: Registry, name: string) {
   if (registry.diagnostics.length) throw new CreateValidationError(registry.diagnostics);
   const type = registry.types.find(t => t.record.name === name);
   if (!type) throw new WikiError("usage", "Unknown registered type: " + name);
@@ -47,8 +46,8 @@ function topicMarkdown(request: CreateRequest, template: string): string {
   // JSON scalar/array syntax is safe YAML data, including punctuation and escaped control characters.
   return "---\n" + Object.entries(data).map(([key, value]) => key + ": " + JSON.stringify(value)).join("\n") + "\n---\n" + body;
 }
-function prospectiveIndexes(root: string, relative: string, markdown: string, scope: string): Map<string, string> {
-  const inventory = inspectVault(root, undefined, { path: relative, markdown });
+function prospectiveIndexes(root: string, relative: string, markdown: string, scope: string, registry: Registry): Map<string, string> {
+  const inventory = inspectVault(root, undefined, { path: relative, markdown }, registry);
   if (inventory.diagnostics.some(d => d.path === relative && d.rule === "title.duplicate")) throw new WikiError("conflict", "Duplicate normalized title in " + scope);
   inventory.diagnostics.push(...indexDestinationDiagnostics(root, inventory.indexes.keys()));
   if (inventory.diagnostics.length) throw new CreateValidationError(inventory.diagnostics);
@@ -74,10 +73,11 @@ export function completeTopicPublication(root: string, relative: string, title: 
 }
 /** Caller holds the cooperative mutation lock through validation and all publication effects. */
 export function createTopic(root: string, request: CreateRequest) {
-  const type = registeredCreateType(root, request.type);
+  const registry = loadRegistry(root);
+  const type = registeredCreateType(registry, request.type);
   const relative = topicDestination(root, request, type.record.folder);
   const markdown = topicMarkdown(request, type.record.template);
-  const indexes = prospectiveIndexes(root, relative, markdown, request.scope);
+  const indexes = prospectiveIndexes(root, relative, markdown, request.scope, registry);
   const digest = "sha256:" + createHash("sha256").update(markdown).digest("hex");
   publishTopicFile(root, relative, markdown);
   completeTopicPublication(root, relative, request.title, digest, indexes);

@@ -1,4 +1,5 @@
 import { inspectVault } from "./lint.ts";
+import type { Registry } from "./registry.ts";
 import { syncQmdText, syncAndFindQmd, syncAndEmbedQmd, qmdModelReadiness, FAST_ROLES, DEEP_ROLES, type QmdDegraded, type QmdDiagnostic, type QmdEmbedResult, type QmdEmbeddingCoverage, type QmdFindFilters, type QmdFindResult, type QmdInventory, type QmdReadyModels, type QmdSyncResult, type QmdTextCoverage } from "./qmd.ts";
 
 /** One search command's complete report. failure: the error code that sets the exit status.
@@ -72,7 +73,7 @@ export function searchReport(outcome: SearchOutcome): SearchReport {
 
 /** Runs one search command against an opened vault and returns its report. Explicit local models
  * are preflighted before any index effect or SDK model use. */
-export async function runSearch(root: string, command: SearchCommand, signal: AbortSignal): Promise<SearchReport> {
+export async function runSearch(root: string, command: SearchCommand, signal: AbortSignal, registry?: Registry): Promise<SearchReport> {
   const find = command.kind === "find" ? command : undefined;
   const embed = command.kind === "sync" && command.embed;
   const roles = find ? (find.deep ? DEEP_ROLES : FAST_ROLES) : embed ? FAST_ROLES : [];
@@ -83,7 +84,7 @@ export async function runSearch(root: string, command: SearchCommand, signal: Ab
   if (readiness.state === "unavailable" && !find) return searchReport({ kind: "models-unavailable", diagnostics: readiness.diagnostics });
   let captured: QmdInventory;
   try {
-    const inventory = inspectVault(root);
+    const inventory = inspectVault(root, undefined, undefined, registry);
     captured = { concepts: inventory.concepts, diagnostics: inventory.diagnostics };
   } catch (error) {
     // An incomplete scan cannot reuse an earlier successful receipt.
