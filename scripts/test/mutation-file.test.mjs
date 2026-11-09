@@ -4,11 +4,11 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { mutationOptions } from "../mutation-file.mjs";
 
-test("scopes the Bun command plan to one exact production file", () => {
-  const options = mutationOptions("src/cli/output.ts", { HEAVY_CPUS: "8" });
-  assert.deepEqual(options.mutate, ["src/cli/output.ts"]);
+test("scopes the command plan to one exact production file", () => {
+  const options = mutationOptions("packages/wiki/src/update.ts", { HEAVY_CPUS: "8" });
+  assert.deepEqual(options.mutate, ["packages/wiki/src/update.ts"]);
   assert.equal(options.testRunner, "command");
-  assert.equal(options.commandRunner.command, "bun test tests/cli-links.test.ts tests/cli-search.test.ts");
+  assert.equal(options.commandRunner.command, "node --test --test-concurrency=1 packages/wiki/test/update.test.ts packages/wiki/test/concurrent-writers.test.ts");
   assert.equal(options.coverageAnalysis, "off");
   assert.equal(options.incremental, true);
   assert.equal(options.concurrency, 1);
@@ -19,7 +19,7 @@ test("uses serial native Node tests for the Node CLI plan", () => {
   const options = mutationOptions("packages/wiki-cli/src/cli.ts", { HEAVY_CPUS: "15" });
   assert.equal(options.commandRunner.command, "node --test --test-concurrency=1 packages/wiki-cli/test/cli.test.ts packages/wiki-cli/test/capture-sources.test.ts");
   assert.equal(options.concurrency, 2);
-  assert.notEqual(options.incrementalFile, mutationOptions("src/cli/output.ts", { HEAVY_CPUS: "15" }).incrementalFile);
+  assert.notEqual(options.incrementalFile, mutationOptions("packages/wiki/src/update.ts", { HEAVY_CPUS: "15" }).incrementalFile);
 });
 
 test("supports all twelve wiki capture/update risk boundaries with serial sandbox-relative tests", () => {
@@ -51,10 +51,10 @@ test("supports all twelve wiki capture/update risk boundaries with serial sandbo
 
 test("the command rejects extra arguments and insufficient outer admission without starting Stryker", () => {
   const script = fileURLToPath(new URL("../mutation-file.mjs", import.meta.url));
-  const extra = spawnSync(process.execPath, [script, "src/cli/output.ts", "src/cli.ts"], { encoding: "utf8" });
+  const extra = spawnSync(process.execPath, [script, "packages/wiki/src/update.ts", "packages/wiki/src/create.ts"], { encoding: "utf8" });
   assert.equal(extra.status, 1);
   assert.match(extra.stderr, /Usage:/);
-  const nested = spawnSync(process.execPath, [script, "src/cli/output.ts"], {
+  const nested = spawnSync(process.execPath, [script, "packages/wiki/src/update.ts"], {
     encoding: "utf8", env: { ...process.env, HEAVY_SLOT: "existing-test-admission", HEAVY_CPUS: "2" },
   });
   assert.equal(nested.status, 1);
@@ -63,10 +63,10 @@ test("the command rejects extra arguments and insufficient outer admission witho
 });
 
 test("rejects unknown targets, globs, traversal, schemas, and missing CPU admission", () => {
-  for (const target of [undefined, "", "src/**/*.ts", "../src/cli/output.ts", "/src/cli/output.ts", "src/cli.ts", "templates/prd.schema.json", "src/cli/output.ts:1-4"]) {
+  for (const target of [undefined, "", "packages/wiki/src/**/*.ts", "../packages/wiki/src/update.ts", "/packages/wiki/src/update.ts", "packages/wiki/src/cli.ts", "packages/wiki/seed/note.json", "packages/wiki/src/update.ts:1-4"]) {
     assert.throws(() => mutationOptions(target, { HEAVY_CPUS: "8" }), /Unsupported mutation target/);
   }
   for (const cpus of [undefined, "", "0", "7", "8x", "NaN", "1.5"]) {
-    assert.throws(() => mutationOptions("src/cli/output.ts", { HEAVY_CPUS: cpus }), /HEAVY_CPUS/);
+    assert.throws(() => mutationOptions("packages/wiki/src/update.ts", { HEAVY_CPUS: cpus }), /HEAVY_CPUS/);
   }
 });

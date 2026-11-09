@@ -1,19 +1,12 @@
 {
   "name": "wiki",
   "version": "0.1.0",
-  "description": "Config-driven artifact store and semantic recall tool over a plain-Markdown vault. The CLI is the only writer.",
+  "description": "Workspace root for the wiki CLI (packages/wiki) and its Node packages, plus local mutation tooling.",
   "type": "module",
-  "bin": {
-    "wiki": "./dist/cli.js"
-  },
   "scripts": {
-    "dev": "bun --watch src/cli.ts",
     "mutation:file": "node scripts/mutation-file.mjs",
     "test:tooling": "node --test scripts/test/*.test.mjs",
     "typecheck:tooling": "tsc -p scripts/tsconfig.json",
-    "build": "bun build src/cli.ts --outdir dist --target bun && rm -rf dist/templates && cp -R templates dist/templates",
-    "test": "bun test tests/",
-    "typecheck": "tsc --noEmit",
     "typecheck:wiki": "tsc -p packages/wiki/tsconfig.json",
     "test:wiki": "node packages/wiki/test/run.js",
     "verify:wiki": "bun run typecheck:wiki && bun run test:wiki",
@@ -21,18 +14,19 @@
     "verify:next": "tsc -p packages/tsconfig.json && node --test \"packages/*/test/*.test.ts\""
   },
   "dependencies": {
-    "gray-matter": "^4.0.3",
-    "smol-toml": "1.9.1"
+    "gray-matter": "^4.0.3"
   },
   "devDependencies": {
     "@stryker-mutator/core": "10.1.1",
-    "@types/bun": "latest",
+    "@types/node": "26.6.6",
     "typescript": "^5.4.0"
   },
   "overrides": {
     "@stryker-mutator/core": {
       "minimatch": "11.0.5",
-      "typed-rest-client": { "qs": "6.17.1" }
+      "typed-rest-client": {
+        "qs": "6.17.1"
+      }
     }
   },
   "engines": {

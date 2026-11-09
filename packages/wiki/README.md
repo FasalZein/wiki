@@ -1,8 +1,8 @@
 # Isolated profile CLI
 
 This private package runs directly from TypeScript sources with Node built-in
-stripping (Node >=22.18). It does not use the installed legacy `wiki` binary.
-Do not run the root build or install this CLI globally for development.
+stripping (Node >=22.18). There is no build step. The global `wiki` command is a
+`bun link` of `bin/wiki.js`; see the root README.
 
 ```sh
 node packages/wiki/bin/wiki.js init /explicit/disposable/vault --json
