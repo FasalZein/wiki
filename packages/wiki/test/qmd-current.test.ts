@@ -71,7 +71,7 @@ test("wiki:12 add, equal-size restored-mtime edit, rename and delete between fin
   found = succeeds(vault, ["find", "photon"]).data;
   assert.deepEqual(paths(found.matches), [renamed], "Deleted and old renamed paths are never emitted");
   assert.equal(found.matches[0].digest, sha(edited)); assert.equal(found.matches[0].excerpt, "Yellow photon detector");
-  assert.deepEqual(found.textCoverage.inventory.map((n: { path: string }) => n.path), [renamed]);
+  assert.deepEqual(found.textCoverage, { state: "complete", inventoryCount: 1, inventoryDigest: sha(JSON.stringify([{ path: renamed, digest: sha(edited) }])) });
   assert.equal(fs.readFileSync(path.join(vault, renamed), "utf8"), edited, "Search preserves current file bytes");
   const human = cli(vault, ["find", "photon"], "fake-inference", {}, false);
   assert.equal(human.status, 0); assert.match(human.stdout, new RegExp(renamed + " \\S+ " + sha(edited) + "\\n  Observatory: Observatory telescope\\n  Yellow photon detector"));
@@ -162,7 +162,7 @@ for (const [query, label] of [["betaword", "term only in the newer revision"], [
   const r1 = fs.readFileSync(file, "utf8").replace("alphaword", "betaword"); fs.writeFileSync(file, r1);
   // A captures R1 and runs to its first lock release; B then syncs R0 and releases; A finishes.
   const a = cli(vault, ["find", query], "fake-inference-stale-a", env);
-  assert.equal(await bExit, 0, bOut + bErr); assert.equal(JSON.parse(bOut).textCoverage.inventory[0].digest, sha(r1.replace("betaword", "alphaword")), "B indexed R0 after A released");
+  assert.equal(await bExit, 0, bOut + bErr); assert.deepEqual(JSON.parse(bOut).textCoverage, { state: "complete", inventoryCount: 1, inventoryDigest: sha(JSON.stringify([{ path: relative, digest: sha(r1.replace("betaword", "alphaword")) }])) }, "B indexed R0 after A released");
   assert.equal(a.status, 0, JSON.stringify(a.data));
   assert.equal(a.data.textCoverage.state, "complete", JSON.stringify(a.data));
   assert.deepEqual(a.data.matches.map((m: Match) => m.digest), [sha(r1)], "Only the captured revision is rendered");

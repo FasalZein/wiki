@@ -67,7 +67,7 @@ Use this order. Each step ends on its check.
 
 - `matches[]` carry `path`, `scope`, `type`, `title`, `description`, `excerpt`, `score`, `literal`, and the full-file `digest` of the bytes the command read.
 - A token that contains `/` or has a dotted filename form (`src/app.ts`, `README.md`) also matches paths and note text as a plain substring. Those matches come first, list the token in `literal`, and have `score: null` when qmd did not also return them. A repository path inside a note is text, not a vault file: open it only in its repository.
-- `textCoverage` and `embeddingCoverage` are separate. Each is `complete`, `incomplete`, or `unavailable`, for the inventory the command read. Text coverage complete does not mean embeddings exist.
+- `textCoverage` and `embeddingCoverage` are separate. Each is `complete`, `incomplete`, or `unavailable`, for the inventory the command read. Text coverage complete does not mean embeddings exist. Complete text coverage reports `inventoryCount` and `inventoryDigest`, not a list of paths.
 - `degraded` with `retrieval: "lexical"` and `exhaustive: false` means models were not ready or vector search failed. Report a degraded miss as "not found by lexical search", never as "absent".
 - No field asserts that a note agrees with its external subject. A valid note is not thereby true, reviewed, or current.
 - Every `find` synchronizes text first. Incomplete text coverage means notes were skipped as invalid, unreadable, or changing: `diagnostics` names them. Report those paths, or check them with `lint <path>`.

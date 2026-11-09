@@ -644,11 +644,30 @@ prevents a validated roster, so no concepts are indexed until it is repaired.
 
 JSON includes ok, coverageBasis: "captured-inventory", textCoverage,
 embeddingCoverage, and diagnostics. Each public coverage state is
-complete, incomplete, or unavailable. Complete text coverage includes
-canonical paths and full-file SHA-256 digests. Pending embeddings are reported as
+complete, incomplete, or unavailable. Pending embeddings are reported as
 embeddingCoverage: {state: "incomplete", contentHashes: N}, not as complete
 coverage. A model-free text update does not fill embeddings. An empty current
 captured inventory can have vacuously complete embedding coverage.
+
+Complete text coverage in `search sync --json` and `find --json` is
+`{state: "complete", inventoryCount: N, inventoryDigest: "sha256:<hex>"}`.
+The output does not list the inventory; its size does not grow with the vault.
+`inventoryCount` is the number of indexed concepts. `inventoryDigest` is
+"sha256:" plus the lowercase hex SHA-256 of the UTF-8 bytes of
+`JSON.stringify(inventory)`. `inventory` is the array of
+`{"path": <canonical path>, "digest": "sha256:<hex of the full file bytes>"}`
+objects, keys in that order, sorted by path in JavaScript string order (UTF-16
+code units), with no whitespace. These are the exact bytes of the `inventory`
+array in the receipt `.wiki/search/coverage.json` (`{"version":1,"inventory":[...]}`),
+whose format is unchanged and which doctor still compares in full. Recompute
+the digest from the receipt, run from the vault root, with:
+
+    node -e 'const r=JSON.parse(require("fs").readFileSync(".wiki/search/coverage.json","utf8"));console.log("sha256:"+require("crypto").createHash("sha256").update(JSON.stringify(r.inventory)).digest("hex"))'
+
+Or recompute it from the vault: list every captured concept as `{path, digest}`
+(canonical path and `sha256:` digest of its current bytes), sort by path, and hash
+the same serialization.
+Incomplete and unavailable text coverage keep their `diagnostics` list.
 
 Coverage attests captured bytes compared with the actual indexed Markdown, not
 files frozen until command return. A noncooperating editor can change files after

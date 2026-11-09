@@ -16,7 +16,8 @@ export type QmdInventory = {
 export type QmdDiagnostic = { path: string; message: string };
 export type QmdDigest = { path: string; digest: string };
 export type QmdTextCoverage =
-  | { state: "complete"; inventory: QmdDigest[] }
+  /** inventoryCount and inventoryDigest summarize the receipt's sorted inventory; see inventoryDigest(). */
+  | { state: "complete"; inventoryCount: number; inventoryDigest: string }
   | { state: "incomplete"; diagnostics: QmdDiagnostic[] }
   | { state: "unavailable"; diagnostics: QmdDiagnostic[] };
 export type QmdEmbeddingCoverage =
@@ -38,6 +39,9 @@ const DIRECTORY = ".wiki/search";
 const COLLECTION = "concepts";
 const PREFIX = "qmd://" + COLLECTION + "/";
 function digest(markdown: string): string { return "sha256:" + createHash("sha256").update(markdown).digest("hex"); }
+/** Documented JSON contract (README): sha256 over the UTF-8 bytes of JSON.stringify of the path-sorted
+ * inventory, the exact array bytes coverage.json stores. A caller recomputes it from the receipt or vault. */
+function inventoryDigest(sorted: readonly QmdDigest[]): string { return digest(JSON.stringify(sorted)); }
 // QMD excludes build/dist/vendor directories unconditionally. Flat opaque names
 // preserve all canonical identities without inheriting engine scan exclusions or filename limits.
 function stagedId(relative: string): string { return createHash("sha256").update(relative).digest("hex") + ".md"; }
@@ -270,7 +274,7 @@ class SearchIndexSession {
       options.signal?.throwIfAborted();
       // Publish only after body comparison and SDK close; failed cleanup invalidates this receipt below.
       fs.writeFileSync(manifest, JSON.stringify({ version: 1, inventory: indexed }) + "\n", { flag: "wx" });
-      return { state: "successful", textCoverage: { state: "complete", inventory: indexed }, embeddingCoverage, update };
+      return { state: "successful", textCoverage: { state: "complete", inventoryCount: indexed.length, inventoryDigest: inventoryDigest(indexed) }, embeddingCoverage, update };
     });
     // Invalidate while still owning the lock, never after another writer can acquire it.
     if (failures.length && this.#release) this.#invalidate(failures);

@@ -49,7 +49,9 @@ test("wiki:10 real SDK adds exact full Markdown without embeddings and retrieves
   assert.equal(found.matches.length, 1);
   assert.equal(found.matches[0]?.path, "personal/notes/quasar.md");
   assert.equal(found.matches[0]?.markdown, markdown);
-  assert.match(result.textCoverage.inventory[0]?.digest ?? "", /^sha256:[a-f0-9]{64}$/);
+  assert.equal(result.textCoverage.state, "complete");
+  if (result.textCoverage.state === "complete") assert.equal(result.textCoverage.inventoryCount, 1);
+  assert.match(result.state === "successful" ? result.textCoverage.inventoryDigest : "", /^sha256:[a-f0-9]{64}$/);
 });
 
 function receipt(root: string) { return path.join(root, ".wiki/search/coverage.json"); }
@@ -358,8 +360,12 @@ test("wiki:10 coverage receipt lists captured concepts sorted by canonical path 
     { path: "personal/notes/mid.md", digest: sha256("# Mid\n") },
     { path: "personal/notes/zeta.md", digest: sha256("# Zeta\n") },
   ];
-  if (result.state === "successful") assert.deepEqual(result.textCoverage.inventory, expected);
-  assert.equal(fs.readFileSync(receipt(root), "utf8"), JSON.stringify({ version: 1, inventory: expected }) + "\n");
+  // README contract: inventoryDigest is sha256 over the exact inventory array bytes the receipt stores.
+  const stored = fs.readFileSync(receipt(root), "utf8");
+  assert.equal(stored, JSON.stringify({ version: 1, inventory: expected }) + "\n");
+  const arrayBytes = stored.slice(stored.indexOf("["), stored.lastIndexOf("]") + 1);
+  assert.deepEqual(result.textCoverage, { state: "complete", inventoryCount: 3, inventoryDigest: sha256(arrayBytes) });
+  assert.equal(sha256(JSON.stringify(JSON.parse(stored).inventory)), sha256(arrayBytes), "Re-serializing the parsed receipt reproduces the digest");
 });
 
 test("wiki:10 failure codes distinguish a busy writer from other unavailability", async () => {
