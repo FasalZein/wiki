@@ -1,7 +1,8 @@
 import { MIMEType } from "node:util";
 import { WikiError } from "./vault.ts";
 
-// Adapted from wiki-core; HTML declarations must end within the first 1024 bytes
+// Adapted from the former Node core package (removed in #41; see git history).
+// HTML declarations must end within the first 1024 bytes
 // (HTML Standard charset1024). Never decode beyond that prefix for sniffing.
 const HTML_CHARSET_PRESCAN_BYTES = 1024;
 

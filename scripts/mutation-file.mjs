@@ -19,7 +19,6 @@ const testCommands = new Map([
   // searchQmdLex, and the writer lock. findQmd, embedQmd, and model readiness
   // need the CLI test files; widen this plan before claiming those ranges.
   ["packages/wiki/src/qmd.ts", "node --test --test-concurrency=1 packages/wiki/test/qmd-sync.test.ts"],
-  ["packages/wiki-cli/src/cli.ts", "node --test --test-concurrency=1 packages/wiki-cli/test/cli.test.ts packages/wiki-cli/test/capture-sources.test.ts"],
 ]);
 
 // Reserve the coordinator plus seven processes per worker: Stryker worker,

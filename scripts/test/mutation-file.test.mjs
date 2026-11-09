@@ -15,9 +15,8 @@ test("scopes the command plan to one exact production file", () => {
   assert.equal(options.inPlace, false);
 });
 
-test("uses serial native Node tests for the Node CLI plan", () => {
-  const options = mutationOptions("packages/wiki-cli/src/cli.ts", { HEAVY_CPUS: "15" });
-  assert.equal(options.commandRunner.command, "node --test --test-concurrency=1 packages/wiki-cli/test/cli.test.ts packages/wiki-cli/test/capture-sources.test.ts");
+test("derives two workers from fifteen CPUs and keeps one cache per target", () => {
+  const options = mutationOptions("packages/wiki/src/create.ts", { HEAVY_CPUS: "15" });
   assert.equal(options.concurrency, 2);
   assert.notEqual(options.incrementalFile, mutationOptions("packages/wiki/src/update.ts", { HEAVY_CPUS: "15" }).incrementalFile);
 });
