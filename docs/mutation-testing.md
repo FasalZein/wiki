@@ -19,8 +19,6 @@ The command accepts exactly one literal production path. Supported affected-test
 
 | Production path | Test command inside each sandbox |
 | --- | --- |
-| `packages/wiki-cli/src/cli.ts` | `node --test --test-concurrency=1 packages/wiki-cli/test/cli.test.ts packages/wiki-cli/test/capture-sources.test.ts` |
-
 | `packages/wiki/src/capture.ts` | `node --test --test-concurrency=1 packages/wiki/test/capture-text.test.ts packages/wiki/test/capture-cli.test.ts packages/wiki/test/capture-pdf.test.ts packages/wiki/test/capture-web.test.ts packages/wiki/test/concurrent-writers.test.ts` |
 | `packages/wiki/src/update.ts` | `node --test --test-concurrency=1 packages/wiki/test/update.test.ts packages/wiki/test/concurrent-writers.test.ts` |
 | `packages/wiki/src/charset.ts` | `node --test --test-concurrency=1 packages/wiki/test/capture-web.test.ts` |
@@ -83,7 +81,7 @@ Do not label them tested based on TypeScript tests or schema validation.
 ## Tooling checks and security
 
 Run `heavy -- bun run test:tooling` and `heavy -- bun run typecheck:tooling`.
-The focused tooling tests cover exact scoping, the Node CLI plan and all twelve wiki runner plans, worker derivation, cache separation, and rejected inputs.
+The focused tooling tests cover exact scoping, all twelve wiki runner plans, worker derivation, cache separation, and rejected inputs.
 
 Root overrides pin Stryker's transitive `minimatch` to 11.0.5 and `typed-rest-client`'s `qs` to 6.17.1.
 These avoid GHSA-g3hv-75wg-m249 and the qs advisories reported by `npm audit` with the original Stryker graph.
