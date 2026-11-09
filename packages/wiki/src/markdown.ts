@@ -1,8 +1,14 @@
-import { fromMarkdown } from "mdast-util-from-markdown";
+import { createRequire } from "node:module";
 import type { Nodes, Root } from "mdast";
 
+// The parser loads on first use, so --help, init and plain show skip it. Node >= 22.12 requires ESM synchronously.
+const require = createRequire(import.meta.url);
+let fromMarkdown: typeof import("mdast-util-from-markdown").fromMarkdown | undefined;
 /** CommonMark AST, with source positions retained for later link and section readers. */
-export function parseMarkdown(body: string): Root { return fromMarkdown(body); }
+export function parseMarkdown(body: string): Root {
+  fromMarkdown ??= (require("mdast-util-from-markdown") as typeof import("mdast-util-from-markdown")).fromMarkdown;
+  return fromMarkdown(body);
+}
 
 /** Authored structure excludes literal examples and quoted/captured source material. */
 export function visitAuthored(node: Nodes, visit: (node: Nodes) => void): void {

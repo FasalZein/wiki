@@ -91,13 +91,15 @@ try {
     } else {
       const root = openVault(selected);
       if (sync || find) {
-        if (find && values.type !== undefined && !loadRegistry(root).types.some(t => t.record.name === values.type)) throw new WikiError("usage", "--type must name a registered type: " + values.type);
+        // find --type loads the registry once here and hands it to the vault scan.
+        const registry = find && values.type !== undefined ? loadRegistry(root) : undefined;
+        if (registry && !registry.types.some(t => t.record.name === values.type)) throw new WikiError("usage", "--type must name a registered type: " + values.type);
         const controller = new AbortController();
         const abort = () => controller.abort(new Error("Search " + (find ? "find" : "synchronization") + " interrupted"));
         process.on("SIGINT", abort); process.on("SIGTERM", abort);
         try {
           const filters: QmdFindFilters = { ...(values.personal ? { scope: "personal" as const } : values.project !== undefined ? { scope: `projects/${values.project}` as const } : {}), ...(values.type !== undefined ? { type: values.type } : {}), ...(values.limit !== undefined ? { limit: Number(values.limit) } : {}) };
-          const report = await runSearch(root, find ? { kind: "find", question: arg, terms: values.terms, deep: values.deep === true, filters } : { kind: "sync", embed: values.embed === true }, controller.signal);
+          const report = await runSearch(root, find ? { kind: "find", question: arg, terms: values.terms, deep: values.deep === true, filters } : { kind: "sync", embed: values.embed === true }, controller.signal, registry);
           if (report.failure) process.exitCode = EXIT[report.failure];
           output(report.value, report.human, report.stderr);
         } finally { process.removeListener("SIGINT", abort); process.removeListener("SIGTERM", abort); }

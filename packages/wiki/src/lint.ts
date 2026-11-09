@@ -1,12 +1,12 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { createHash } from "node:crypto";
-import { caseFold } from "unicode-case-folding";
+import { createRequire } from "node:module";
 import { linkDiagnostics } from "./links.ts";
 import { canonicalPathProblem, inspectContainedPath } from "./paths.ts";
 import { parseNoteText } from "./frontmatter.ts";
 import { metadataLines, missingHeadings, parseMarkdown } from "./markdown.ts";
-import { declaresProperty, loadRegistry, safeName, schemaDiagnostics, sortDiagnostics, type Diagnostic } from "./registry.ts";
+import { declaresProperty, loadRegistry, safeName, schemaDiagnostics, sortDiagnostics, type Diagnostic, type Registry } from "./registry.ts";
 import { maintainedDirectory, renderIndexes, indexFreshnessDiagnostics, type NavigationDirectory, type NavigationTopic } from "./navigation.ts";
 
 const SKIP = new Set([".wiki", ".git", ".obsidian", "node_modules"]);
@@ -77,7 +77,11 @@ function sourceDiagnostics(root: string, note: InventoryNote, planned: ReadonlyM
   return diagnostics;
 }
 
+// Case folding loads on first use, so commands without a vault scan skip it.
+const require = createRequire(import.meta.url);
+let caseFold: typeof import("unicode-case-folding").caseFold | undefined;
 function duplicateTitleDiagnostics(notes: InventoryNote[]): Diagnostic[] {
+  caseFold ??= (require("unicode-case-folding") as typeof import("unicode-case-folding")).caseFold;
   const titles = new Map<string, InventoryNote[]>();
   for (const note of notes) {
     if (!note.scope || typeof note.data.title !== "string") continue;
@@ -150,8 +154,9 @@ function planCaptureAssets(root: string, prospective: ProspectiveNote | undefine
   return assets;
 }
 
-export function inspectVault(root: string, selected?: string, prospective?: ProspectiveNote) {
-  const { types, diagnostics } = loadRegistry(root);
+/** A caller that already loaded the registry in this command passes it to avoid a second load. */
+export function inspectVault(root: string, selected?: string, prospective?: ProspectiveNote, registry: Registry = loadRegistry(root)) {
+  const types = registry.types, diagnostics = [...registry.diagnostics];
   const registryValid = diagnostics.length === 0;
   const notes: InventoryNote[] = [];
   const assets = planCaptureAssets(root, prospective, diagnostics);

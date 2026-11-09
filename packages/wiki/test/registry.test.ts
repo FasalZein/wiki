@@ -5,7 +5,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { declaresProperty } from "../src/registry.ts";
+import { declaresProperty, loadRegistry } from "../src/registry.ts";
 
 const BIN = fileURLToPath(new URL("../bin/wiki.js", import.meta.url));
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-registry-"));
@@ -252,6 +252,28 @@ test("wiki:02 schema references resolve escaped pointers, arrays, root and named
   ]) assert.equal(declaresProperty(schema, "category"), false);
 });
 
+test("wiki:02 a process compiles each exact schema once and keeps distinct schemas with one anchor isolated", () => {
+  const vault = fresh();
+  const base = record(vault);
+  // Same anchor name, different requirements: a shared compiler would conflict or cross-apply them.
+  const properties = { ...base.frontmatterSchema.properties, type: { type: "string" }, alpha_field: { type: "string" }, beta_field: { type: "string" } };
+  const anchored = (field: string) => ({ ...base.frontmatterSchema, properties, $ref: "#extra", $defs: { extra: { $anchor: "extra", required: [field] } } });
+  save(vault, "alpha", { ...base, name: "alpha", folder: "alphas", frontmatterSchema: anchored("alpha_field") });
+  save(vault, "beta", { ...base, name: "beta", folder: "betas", frontmatterSchema: anchored("beta_field") });
+  save(vault, "gamma", { ...base, name: "gamma", folder: "gammas", frontmatterSchema: anchored("alpha_field") });
+  const first = loadRegistry(vault), second = loadRegistry(vault);
+  assert.deepEqual(first.diagnostics, []);
+  const named = (registry: typeof first, name: string) => registry.types.find(t => t.record.name === name)!.validate;
+  assert.equal(named(first, "alpha"), named(second, "alpha"));
+  assert.equal(named(first, "alpha"), named(first, "gamma"));
+  assert.notEqual(named(first, "alpha"), named(first, "beta"));
+  const note = { title: "T", description: "D", created: "2026-01-01T00:00:00Z" };
+  for (const [name, field, other] of [["alpha", "alpha_field", "beta_field"], ["beta", "beta_field", "alpha_field"]] as const) {
+    const validate = named(second, name);
+    assert.equal(validate({ ...note, type: name, [other]: "x" }), false, name + " must require only " + field);
+    assert.equal(validate({ ...note, type: name, [field]: "x" }), true, JSON.stringify(validate.errors));
+  }
+});
 test("wiki:02 source profile keeps required locator and retrieval time with a weakened registry", () => {
   const vault = fresh();
   const source = record(vault, "source"); source.frontmatterSchema = true; save(vault, "source", source);
