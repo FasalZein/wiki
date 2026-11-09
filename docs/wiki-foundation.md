@@ -18,8 +18,8 @@ the identity of a topic. Lint reports the broken links. No automatic migration e
 
 ## Proof commands
 
-Run every command from the repository root, through `heavy`. None of them builds
-the root `dist/` or runs the installed `wiki` command.
+Run every command from the repository root, through `heavy`. None of them runs
+the installed `wiki` command.
 
 | Command | What it proves |
 | --- | --- |

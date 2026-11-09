@@ -1,7 +1,7 @@
 # Local single-file mutation testing
 
 This is worker tooling, not a completed batch hardening gate or a product boot proof.
-It does not build root `dist` or run the installed `wiki` command.
+It does not run the installed `wiki` command.
 
 ## Install and run
 
@@ -12,14 +12,13 @@ No Vitest adoption or Bun-specific Stryker runner is involved.
 Run from the repository:
 
 ```sh
-bun run mutation:file src/cli/output.ts
+bun run mutation:file packages/wiki/src/update.ts
 ```
 
 The command accepts exactly one literal production path. Supported affected-test plans:
 
 | Production path | Test command inside each sandbox |
 | --- | --- |
-| `src/cli/output.ts` | `bun test tests/cli-links.test.ts tests/cli-search.test.ts` |
 | `packages/wiki-cli/src/cli.ts` | `node --test --test-concurrency=1 packages/wiki-cli/test/cli.test.ts packages/wiki-cli/test/capture-sources.test.ts` |
 
 | `packages/wiki/src/capture.ts` | `node --test --test-concurrency=1 packages/wiki/test/capture-text.test.ts packages/wiki/test/capture-cli.test.ts packages/wiki/test/capture-pdf.test.ts packages/wiki/test/capture-web.test.ts packages/wiki/test/concurrent-writers.test.ts` |
@@ -83,23 +82,12 @@ Do not label them tested based on TypeScript tests or schema validation.
 
 ## Tooling checks and security
 
-Run `heavy -- bun run test:tooling`, `heavy -- bun run typecheck:tooling`, and `heavy -- bun run typecheck`.
-The focused tooling tests cover exact scoping, legacy and all twelve wiki runner plans, worker derivation, cache separation, and rejected inputs.
+Run `heavy -- bun run test:tooling` and `heavy -- bun run typecheck:tooling`.
+The focused tooling tests cover exact scoping, the Node CLI plan and all twelve wiki runner plans, worker derivation, cache separation, and rejected inputs.
 
 Root overrides pin Stryker's transitive `minimatch` to 11.0.5 and `typed-rest-client`'s `qs` to 6.17.1.
 These avoid GHSA-g3hv-75wg-m249 and the qs advisories reported by `npm audit` with the original Stryker graph.
 The minimatch major override is exercised by the real Stryker run; review it when upgrading Stryker.
-Root production `smol-toml` is pinned to 1.9.1. GHSA-7w5x-hrqm-74c2 (high, <=1.7.0)
-was fixed in 1.7.1; GHSA-r4xh-jqrq-34v2 (moderate, <=1.8.0) was fixed in 1.9.0.
-The only direct source caller is `src/config/config.ts`, which reads `[vault].root`.
-`tests/config.test.ts` covers that contract. Tooling tests isolate malformed-comment rejection
-and a 32,000-key valid document in children with five-second limits. The latter is bounded
-compatibility evidence, not proof of asymptotic complexity or a performance benchmark.
-Primary advisory and release references:
-- https://github.com/advisories/GHSA-7w5x-hrqm-74c2
-- https://github.com/advisories/GHSA-r4xh-jqrq-34v2
-- https://registry.npmjs.org/smol-toml/1.9.1
-
 Primary references checked for setup:
 - https://stryker-mutator.io/docs/stryker-js/getting-started/
 - https://stryker-mutator.io/docs/stryker-js/configuration/ (command runner, incremental mode, concurrency, sandbox settings)
