@@ -44,9 +44,9 @@ export function spawnJson(args: readonly string[], opts: Parameters<typeof spawn
 }
 
 /** Runs the real bin/wiki.js. imports are preloaded with --import (fault-injection guards patch process globals). */
-export function spawnCli(args: readonly string[], opts: { env?: NodeJS.ProcessEnv; cwd?: string; imports?: readonly string[]; timeout?: number; input?: string } = {}): SpawnSyncReturns<string> {
+export function spawnCli(args: readonly string[], opts: { env?: NodeJS.ProcessEnv; cwd?: string; imports?: readonly string[]; timeout?: number; killSignal?: NodeJS.Signals; input?: string } = {}): SpawnSyncReturns<string> {
   return spawnSync(process.execPath, [...(opts.imports ?? []).flatMap(file => ["--import", file]), BIN, ...args], {
-    encoding: "utf8", cwd: opts.cwd, input: opts.input, timeout: opts.timeout,
+    encoding: "utf8", cwd: opts.cwd, input: opts.input, timeout: opts.timeout, killSignal: opts.killSignal,
     env: { ...process.env, WIKI_VAULT: "", ...opts.env },
   });
 }

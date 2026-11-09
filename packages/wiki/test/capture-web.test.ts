@@ -7,11 +7,10 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { BIN, spawnCli } from "./cli-helper.ts";
 import { parseNoteText } from "../src/frontmatter.ts";
 import { buildPdf } from "./pdf-fixture.ts";
 
-const BIN = fileURLToPath(new URL("../bin/wiki.js", import.meta.url));
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-web-"));
 after(() => fs.rmSync(temp, { recursive: true, force: true }));
 let counter = 0;
@@ -19,7 +18,7 @@ const digest = (bytes: Buffer | string) => "sha256:" + createHash("sha256").upda
 function fresh() {
   const directory = path.join(temp, String(++counter)); fs.mkdirSync(directory);
   const root = path.join(directory, "vault");
-  const init = spawnSync(process.execPath, [BIN, "init", root, "--json"], { encoding: "utf8", env: { ...process.env, HOME: temp, WIKI_VAULT: "" } });
+  const init = spawnCli(["init", root, "--json"], { env: { ...process.env, HOME: temp, WIKI_VAULT: "" } });
   assert.equal(init.status, 0, init.stderr + init.stdout);
   return { root, directory };
 }

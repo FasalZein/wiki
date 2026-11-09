@@ -7,19 +7,19 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, test } from "node:test";
+import { BIN, spawnCli } from "./cli-helper.ts";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseNoteText } from "../src/frontmatter.ts";
 import { parseMarkdown, visitAuthored } from "../src/markdown.ts";
 import { buildPdf } from "./pdf-fixture.ts";
 
-const BIN = fileURLToPath(new URL("../bin/wiki.js", import.meta.url));
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-pdf-"));
 after(() => fs.rmSync(temp, { recursive: true, force: true }));
 let counter = 0;
 const digest = (bytes: Buffer | string) => "sha256:" + createHash("sha256").update(bytes).digest("hex");
 function cli(root: string, args: string[], env: NodeJS.ProcessEnv = {}) {
-  const result = spawnSync(process.execPath, [BIN, "--json", "--vault", root, ...args], {
-    encoding: "utf8", timeout: 15000, killSignal: "SIGKILL", env: { ...process.env, HOME: temp, WIKI_VAULT: "", ...env },
+  const result = spawnCli(["--json", "--vault", root, ...args], {
+    timeout: 15000, killSignal: "SIGKILL", env: { ...process.env, HOME: temp, WIKI_VAULT: "", ...env },
   });
   assert.equal(result.error, undefined); assert.equal(result.stderr, "");
   assert.equal(result.stdout.trim().split("\n").length, 1);
@@ -219,8 +219,8 @@ test("wiki:15 real PDF instructions, headings and links remain inert literal tex
 
 test("wiki:15 human PDF output explicitly reports empty layer and dependency errors", () => {
   const { root, input, directory } = fresh(buildPdf("BT ET"));
-  const run = (env: NodeJS.ProcessEnv) => spawnSync(process.execPath, [BIN, "--vault", root, ...args(input)], {
-    encoding: "utf8", timeout: 15000, env: { ...process.env, HOME: temp, WIKI_VAULT: "", ...env },
+  const run = (env: NodeJS.ProcessEnv) => spawnCli(["--vault", root, ...args(input)], {
+    timeout: 15000, env: { ...process.env, HOME: temp, WIKI_VAULT: "", ...env },
   });
   const bin = path.join(directory, "missing"); fs.mkdirSync(bin);
   const before = snapshot(root), failed = run({ PATH: bin });

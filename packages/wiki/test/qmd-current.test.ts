@@ -5,11 +5,11 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, test } from "node:test";
+import { BIN, spawnCli } from "./cli-helper.ts";
 import { fileURLToPath } from "node:url";
 
 // B12: real CLI processes over real QMD storage. Only inference is faked
 // (qmd-fake-inference.js: expansion, vector/rerank search, document embedding).
-const BIN = fileURLToPath(new URL("../bin/wiki.js", import.meta.url));
 const GUARD = fileURLToPath(new URL("./qmd-cli-guard.js", import.meta.url));
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-qmd-current-"));
 after(() => {
@@ -19,12 +19,13 @@ after(() => {
 });
 let counter = 0;
 type Match = { path: string; score: number; digest: string; title: string; description: string; excerpt: string };
-const argv = (vault: string, args: string[], json: boolean) => ["--import", GUARD, BIN, "--vault", vault, ...(json ? ["--json"] : []), ...args];
+const cliArgs = (vault: string, args: string[], json: boolean) => ["--vault", vault, ...(json ? ["--json"] : []), ...args];
+const argv = (vault: string, args: string[], json: boolean) => ["--import", GUARD, BIN, ...cliArgs(vault, args, json)];
 const environment = (vault: string, mode: string, extraEnv: Record<string, string>) => ({ ...process.env, HOME: temp, XDG_CACHE_HOME: path.join(temp, "cache"), XDG_CONFIG_HOME: path.join(temp, "config"), XDG_DATA_HOME: path.join(temp, "data"), WIKI_VAULT: "", QMD_EMBED_MODEL: "", CI: "", WIKI_QMD_CLI_GUARD: mode, WIKI_QMD_CALL_LOG: vault + ".calls.jsonl", WIKI_QMD_DENY_SUBPROCESS: "1", ...extraEnv });
 function cli(vault: string, args: string[], mode = "fake-inference", extraEnv: Record<string, string> = {}, json = true, quiet = true) {
   const log = vault + ".calls.jsonl";
   fs.rmSync(log, { force: true });
-  const result = spawnSync(process.execPath, argv(vault, args, json), { encoding: "utf8", timeout: 30000, env: environment(vault, mode, extraEnv) });
+  const result = spawnCli(cliArgs(vault, args, json), { imports: [GUARD], timeout: 30000, env: environment(vault, mode, extraEnv) });
   assert.equal(result.error, undefined);
   assert.equal(result.signal, null, result.stderr);
   if (json && quiet) assert.equal(result.stderr, "");
