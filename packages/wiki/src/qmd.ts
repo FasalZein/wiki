@@ -82,13 +82,35 @@ export type QmdEnvironment = Readonly<Record<string, string | undefined>>;
  * (HOME, XDG_CACHE_HOME, XDG_CONFIG_HOME, QMD_EMBED_MODEL, QMD_* tuning) from process.env, not from an argument.
  * So while body runs, process.env holds exactly the request environment; open() and bindModels() then set
  * the vault-local values on top of it. Afterwards every key is restored, so the host process keeps its own
- * environment. Limits: one scope per process at a time (concurrent scopes would see each other's values),
- * and values the SDK reads at its first import (its model cache directory) stay fixed for the process. */
-async function withRequestEnvironment<T>(env: QmdEnvironment, body: () => Promise<T>): Promise<T> {
-  const saved = { ...process.env }, wanted = { ...env };
-  replaceProcessEnvironment(wanted);
-  try { return await body(); }
-  finally { replaceProcessEnvironment(saved); }
+ * environment. Scopes may overlap (an in-process caller can start a request while another runs, as the
+ * writer-lock tests do): only the outermost scope swaps and restores, whichever scope ends last. An overlapping
+ * scope must ask for the active request environment, or pass process.env itself to mean "the current one";
+ * a different environment throws, because one process.env cannot hold two. Values the SDK reads at its first
+ * import (its model cache directory) stay fixed for the process. */
+export async function withRequestEnvironment<T>(env: QmdEnvironment, body: () => Promise<T>): Promise<T> {
+  if (activeScope) {
+    if (env !== process.env && !sameEnvironment(env, activeScope.wanted)) throw new Error("A search request with a different request environment overlaps the active request; run them one after another");
+    activeScope.depth++;
+    try { return await body(); }
+    finally { leaveScope(); }
+  }
+  const scope = activeScope = { wanted: { ...env }, saved: { ...process.env }, depth: 1 };
+  try {
+    replaceProcessEnvironment(scope.wanted);
+    return await body();
+  } finally { leaveScope(); }
+}
+/** The outermost active scope: the requested environment, the host environment to restore, and the open scope count. */
+let activeScope: { wanted: QmdEnvironment; saved: QmdEnvironment; depth: number } | undefined;
+function leaveScope(): void {
+  const scope = activeScope;
+  if (!scope || --scope.depth > 0) return;
+  activeScope = undefined;
+  replaceProcessEnvironment(scope.saved);
+}
+function sameEnvironment(a: QmdEnvironment, b: QmdEnvironment): boolean {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  return [...keys].every(key => a[key] === b[key]);
 }
 function replaceProcessEnvironment(next: QmdEnvironment): void {
   for (const key of Object.keys(process.env)) if (next[key] === undefined) delete process.env[key];

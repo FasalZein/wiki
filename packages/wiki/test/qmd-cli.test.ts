@@ -67,7 +67,8 @@ test("wiki:10 in-process search sync gives the SDK run()'s env and leaves the ho
     assert.equal(open.sql, "PRAGMA busy_timeout = 4321");
     assert.equal(open.cache, path.join(fs.realpathSync(vault), ".wiki/search/sdk-cache"));
   }
-  assert.deepEqual({ ...process.env }, host);
+  // Names only: a failure message must not print environment values.
+  assert.deepEqual([...new Set([...Object.keys(host), ...Object.keys(process.env)])].filter(key => host[key] !== process.env[key]), []);
 });
 
 // Real CLI processes are the e2e seam. SDK reads independently verify indexed bytes.

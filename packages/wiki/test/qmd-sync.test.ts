@@ -11,7 +11,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { createHash } from "node:crypto";
 import "./qmd-cleanup-guard.js";
 import { DatabaseSync } from "node:sqlite";
-import { syncQmdText, searchQmdLex, findQmd } from "../src/qmd.ts";
+import { syncQmdText, searchQmdLex, findQmd, withRequestEnvironment } from "../src/qmd.ts";
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-qmd-"));
 // Importing the adapter does not import QMD. Sandbox all SDK defaults before first use.
@@ -206,6 +206,38 @@ test("wiki:12 a query hit whose indexed body differs from the captured revision 
   assert.deepEqual(found.matches, [], "The stale indexed excerpt never leaks as current");
   assert.deepEqual(found.omitted.map(d => d.path), ["personal/notes/star.md"]);
   assert.match(found.omitted[0]?.message ?? "", /Indexed content differs from the captured revision/);
+});
+
+test("wiki:10 overlapping request environment scopes restore the host environment once, whichever ends first", async () => {
+  // The writer-lock test below overlaps scopes the same way: a later request starts while an earlier one runs.
+  const host = { ...process.env };
+  // Names only: a failure message must not print environment values.
+  const changed = () => [...new Set([...Object.keys(host), ...Object.keys(process.env)])].filter(key => host[key] !== process.env[key]).sort();
+  const gate = () => { let open!: () => void; const opened = new Promise<void>(resolve => { open = resolve; }); return { open, opened }; };
+  const outerSet = gate(), innerStarted = gate(), outerEnd = gate(), innerEnd = gate();
+  const seen: (string | undefined)[] = [];
+  // Unlucky order: the outer scope sets a vault-local value (as open() does), the inner scope starts, the outer
+  // sets another value, the inner scope ends while the outer still runs, then the outer ends before a third scope.
+  const outer = withRequestEnvironment(host, async () => {
+    process.env.XDG_CACHE_HOME = "/vault/outer"; outerSet.open();
+    await innerStarted.opened; process.env.QMD_EMBED_MODEL = "/vault/outer.gguf";
+    await outerEnd.opened; seen.push(process.env.XDG_CACHE_HOME, process.env.QMD_EMBED_MODEL);
+  });
+  await outerSet.opened;
+  const inner = withRequestEnvironment(process.env, async () => { innerStarted.open(); await innerEnd.opened; });
+  const last = gate();
+  const third = withRequestEnvironment(process.env, async () => { await last.opened; });
+  innerEnd.open(); await inner;
+  outerEnd.open(); await outer;
+  assert.deepEqual(seen, ["/vault/outer", "/vault/outer.gguf"], "an inner scope that ends first must not strip the outer scope's values");
+  last.open(); await third;
+  assert.deepEqual(changed(), []);
+  // A nested scope with a different request environment is refused; the active scope is unaffected.
+  const hold = gate();
+  const active = withRequestEnvironment(host, async () => { await hold.opened; });
+  await assert.rejects(withRequestEnvironment({ ...host, QMD_SQLITE_BUSY_TIMEOUT: "1" }, async () => {}), /different request environment/);
+  hold.open(); await active;
+  assert.deepEqual(changed(), []);
 });
 
 test("wiki:10 exclusive writer lock rejects competing sync and lexical reads without taking the mutation lock", async () => {
