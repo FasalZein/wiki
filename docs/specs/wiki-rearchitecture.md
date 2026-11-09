@@ -440,6 +440,7 @@ Search does not block basic structural correctness or safe reads/writes. Source 
 - A permanent pilot-vault location, a published package, and moving to another repository.
 - Owner decision 2026-11-08: the new CLI ships as `wiki` and replaces the legacy binary at release; the repository skill replaces `skills/wiki/SKILL.md`; the legacy code is removed after the new install is verified. Global skill, agent, and CLI installation and the cutover itself stay outside this specification until release.
 - 2026-11-09: after the new install was verified, the legacy Bun CLI (root `src/`, `tests/`, templates, root build wiring, and its mutation plan) was removed (#38). The batch gate is `verify:next` plus `boot:wiki`.
+- 2026-11-09: the architecture and performance pass ([wiki-architecture-pass.md](wiki-architecture-pass.md)) supersedes D16 for wiki-core and wiki-cli and amends D17 with an in-process command interface.
 - Automatic Git staging/commits, general rename/backlink migration, OCR, unsupported attachment formats, link crawling, and network correctness checking during reads or lint.
 
 ## Further Notes
