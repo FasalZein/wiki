@@ -1,7 +1,7 @@
 import { loadRegistry, safeName, type Registry } from "./registry.ts";
 import { containedEntry, sha256, WikiError } from "./vault.ts";
 import type { HeldLock } from "./mutation.ts";
-import { publish, topicLog, validateProspective, ValidationError } from "./publication.ts";
+import { publish, ValidationError } from "./publication.ts";
 
 export interface CreateRequest {
   type: string; scope: string; title: string; description: string;
@@ -36,8 +36,7 @@ export function createTopic(lock: HeldLock, request: CreateRequest) {
   const type = registeredCreateType(registry, request.type);
   const relative = topicDestination(root, request, type.record.folder);
   const markdown = topicMarkdown(request, type.record.template);
-  const plan = validateProspective(root, { path: relative, markdown }, "Duplicate normalized title in " + request.scope, registry);
   const digest = sha256(markdown);
-  publish(lock, { kind: "create", path: relative, markdown, digest, plan, log: topicLog("created", request.title, relative) });
+  publish(lock, { kind: "create", path: relative, markdown, digest, registry, duplicate: "Duplicate normalized title in " + request.scope });
   return { path: relative, title: request.title, description: request.description, digest };
 }

@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 import { inspectContainedPath } from "./paths.ts";
-import { inspectVault } from "./lint.ts";
+import { checkVault, navigationIndexes, searchConcepts, type ValidatedInventory } from "./lint.ts";
 import { indexFreshnessDiagnostics } from "./navigation.ts";
 import { containedPath as checked, hasLayoutKind, profileProblem, VAULT_LAYOUT, type ErrorCode, type LayoutKind } from "./vault.ts";
 import { qmdModelReadiness, inspectQmdIndex, DEEP_ROLES, QMD_WRITER_LOCK, type QmdModels, type QmdModelRole } from "./qmd.ts";
@@ -103,9 +103,9 @@ function indexReadProblems(root: string, indexes: Iterable<[string, string]>): R
 }
 
 /** Navigation freshness is judged only over a clean inventory. */
-function navigationCheck(root: string, inventory: ReturnType<typeof inspectVault> | undefined, problem: ReportProblem): Check {
+function navigationCheck(root: string, inventory: ValidatedInventory | undefined, problem: ReportProblem): Check {
   if (!inventory || inventory.diagnostics.length) return { state: "unavailable" };
-  const problems = indexReadProblems(root, inventory.indexes);
+  const problems = indexReadProblems(root, navigationIndexes(inventory));
   for (const d of problems) problem(d.path, d.rule + ": " + d.message, d.fix);
   return { state: problems.length ? "unavailable" : "ready" };
 }
@@ -130,14 +130,14 @@ export async function doctorVault(selected: string) {
     else profile = { state: "ready" };
   } catch (error) { problem(".wiki/config.json", message(error), "Inspect retained configuration and restore valid wiki-okf version 1 JSON explicitly; do not reinitialize over retained files"); }
   const layout = layoutCheck(root, problem);
-  let inventory: ReturnType<typeof inspectVault> | undefined;
+  let inventory: ValidatedInventory | undefined;
   let registry: Check = { state: "unavailable" };
   if (profile.state === "ready") {
     try {
       const directory = inspectContainedPath(root, ".wiki/types");
       if (!directory.ok) throw new Error(directory.problem.message);
       if (!directory.stat?.isDirectory() || !fs.readdirSync(directory.full).some(name => name.endsWith(".json"))) throw new Error("Missing registry records in .wiki/types");
-      inventory = inspectVault(root);
+      inventory = checkVault(root);
       const issues = inventory.diagnostics;
       registry = { state: issues.some(d => d.rule.startsWith("registry.")) ? "unavailable" : "ready" };
       for (const d of issues) problem(d.path, d.rule + ": " + d.message, d.fix);
@@ -149,7 +149,7 @@ export async function doctorVault(selected: string) {
   const node = nodeCheck(problem);
   const extractors = { pandoc: extractor("pandoc", diagnostics), pdftotext: extractor("pdftotext", diagnostics) };
   const modelReadiness = doctorModelReadiness(root, diagnostics);
-  const { qmd, database, textCoverage, embeddingCoverage } = await inspectQmdIndex(root, profile.state === "ready" ? inventory : undefined, modelReadiness.models, problem);
+  const { qmd, database, textCoverage, embeddingCoverage } = await inspectQmdIndex(root, profile.state === "ready" && inventory ? { concepts: searchConcepts(inventory), diagnostics: inventory.diagnostics } : undefined, modelReadiness.models, problem);
   if (diagnostics.length) failure ??= "unavailable";
   return {
     ok: failure === undefined,

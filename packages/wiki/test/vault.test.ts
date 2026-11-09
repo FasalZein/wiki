@@ -5,7 +5,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, test } from "node:test";
-import { runCli } from "./cli-helper.ts";
+import { fileURLToPath } from "node:url";
+import { runCli, spawnCli } from "./cli-helper.ts";
 import { openVault, profileProblem, readNoteRevision, readRevisionAt, VAULT_LAYOUT, WikiError } from "../src/vault.ts";
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-vault-"));
@@ -61,8 +62,8 @@ test("the protected note read refuses a FIFO without waiting for a writer, and a
   assert.throws(() => readNoteRevision(vault, "personal/notes/fifo.md", "topic"), (error: unknown) => error instanceof WikiError && error.code === "usage" && error.message === "Expected a regular Markdown topic: personal/notes/fifo.md");
   const link = path.join(vault, "personal/notes/link.md");
   fs.symlinkSync(path.join(vault, TOPIC), link);
-  // A symlink swapped in after the caller's lstat is refused by O_NOFOLLOW.
-  assert.throws(() => readRevisionAt(link, notRegular), (error: unknown) => error instanceof Error && "code" in error && error.code === "ELOOP");
+  // A symlink swapped in after the caller's lstat is refused by O_NOFOLLOW, with the caller's not-regular error.
+  assert.throws(() => readRevisionAt(link, notRegular), /not regular/);
   assert.throws(() => readNoteRevision(vault, "personal/notes/link.md", "note"), (error: unknown) => error instanceof WikiError && error.code === "usage" && /symlink/.test(error.message));
 });
 
@@ -74,6 +75,17 @@ test("show refuses a FIFO note with the regular-file usage error and changes not
   assert.equal(result.status, 2, result.stdout + result.stderr);
   assert.deepEqual(JSON.parse(result.stdout), { ok: false, error: { code: "usage", message: "Expected a regular Markdown note: personal/notes/fifo.md" } });
   assert.deepEqual(tree(vault), before);
+});
+
+test("show refuses a note swapped for a symlink after its check with the regular-file usage error, exit 2", async () => {
+  const vault = await fresh();
+  const result = spawnCli(["--vault", vault, "show", TOPIC, "--json"], {
+    imports: [fileURLToPath(new URL("./symlink-swap-guard.js", import.meta.url))], cwd: temp,
+    env: { HOME: temp, WIKI_TEST_VAULT: vault, WIKI_TEST_NOTE: TOPIC },
+  });
+  assert.equal(result.status, 2, result.stdout + result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), { ok: false, error: { code: "usage", message: "Expected a regular Markdown note: " + TOPIC } });
+  assert.ok(fs.lstatSync(path.join(vault, TOPIC)).isSymbolicLink(), "the guard swapped the note");
 });
 
 test("a vault without .wiki/locks fails at open with the layout diagnostic for reads and writes alike", async () => {

@@ -20,7 +20,9 @@ const IGNORES = "/.wiki/tmp/\n/.wiki/locks/\n/.wiki/search/\n/.wiki/qmd.sqlite\n
 
 export interface TemporaryCleanup { path: string; retained: true; message: string }
 /** Files a publication wrote. One digest for a single file, or one per path. */
-export type Written = { paths: string[]; digest: string } | { paths: string[]; digests: Record<string, string> };
+export type WrittenFile = { paths: string[]; digest: string };
+export type WrittenFiles = { paths: string[]; digests: Record<string, string> };
+export type Written = WrittenFile | WrittenFiles;
 /** What a failed publication left on disk. The CLI failure mapper reads only this record.
  * unwritten: nothing was published; a temporary file is retained.
  * written: the files in written were published, then a later step failed; temporaryPath names a retained temporary name.
@@ -137,9 +139,15 @@ function entry(root: string, relative: string): fs.Stats | undefined {
 /** One revision of a note: its full bytes, the digest of exactly those bytes, and its permission bits. */
 export interface NoteRevision { readonly bytes: Buffer; readonly digest: string; readonly mode: number }
 /** The protected read under a contained path: no-follow and nonblocking open, then a descriptor check, so a
- * symlink or FIFO swapped in after the caller's lstat is refused without waiting for a writer. */
+ * symlink or FIFO swapped in after the caller's lstat is refused without waiting for a writer. A symlink fails
+ * the no-follow open with ELOOP and gets the same not-regular error as a FIFO. */
 export function readRevisionAt(full: string, notRegular: () => Error): NoteRevision {
-  const fd = fs.openSync(full, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK | fs.constants.O_NOFOLLOW);
+  let fd: number;
+  try { fd = fs.openSync(full, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK | fs.constants.O_NOFOLLOW); }
+  catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ELOOP") throw notRegular();
+    throw error;
+  }
   try {
     const stat = fs.fstatSync(fd);
     if (!stat.isFile()) throw notRegular();

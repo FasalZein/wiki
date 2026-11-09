@@ -39,9 +39,13 @@ const WRITE_FLAGS = fs.constants.O_WRONLY | fs.constants.O_RDWR | fs.constants.O
 fs.openSync = function(file, flags, ...args) {
   if (flags !== "r" && !(typeof flags === "number" && (flags & WRITE_FLAGS) === 0)) throw new Error("Show attempted a writable open");
   // The protected note read opens a descriptor and reads it; count the open of the note itself.
-  if (typeof file !== "number" && path.resolve(file instanceof URL ? fileURLToPath(file) : String(file)) === note) {
+  // Any other vault file opened through a descriptor is an unexpected read, the same rule as readFileSync.
+  const full = typeof file === "number" ? undefined : path.resolve(file instanceof URL ? fileURLToPath(file) : String(file));
+  if (full === note) {
     reads++;
     if (reads > 1) throw new Error("Requested note read more than once");
+  } else if (full !== undefined && full.startsWith(vault + path.sep) && full !== config) {
+    throw new Error("Unexpected vault content read: " + full);
   }
   return open.call(this, file, flags, ...args);
 };
