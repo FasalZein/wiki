@@ -208,7 +208,8 @@ heavy -- bun run typecheck:wiki
 
 The test runner reads `WIKI_TEST_PATTERN` and passes its name-pattern option before
 file arguments to Node. `verify:wiki` checks this package and all its tests.
-`verify:next` also runs these tests through the same runner, and its TypeScript project
+`verify:next` also runs these tests through the same runner with `--all`, which ignores
+`WIKI_TEST_PATTERN`, so the gate always runs every test. Its TypeScript project
 includes this package source and tests. Full suites run at the batch gate, not
 after every slice. Current process tests use disposable fixtures only.
 
