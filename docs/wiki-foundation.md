@@ -29,9 +29,10 @@ the installed `wiki` command.
 | `heavy --slots 2 -- bun run verify:next` | Batch gate. Its TypeScript project and its `packages/*/test/*.test.ts` glob include this package. Do not also run `verify:wiki` at the gate. |
 
 `test:wiki` (`packages/wiki/test/run.js`) and `verify:next` run four test files
-at the same time (`--test-concurrency=4`). Each file starts one CLI process at a
-time, so a run has about four busy processes: claim `heavy --slots 2`, one slot
-per two processes. If you change the concurrency, change the slot claim with it.
+at the same time (`--test-concurrency=4`). Most tests start one CLI process at a
+time, so a run usually has about four busy processes: claim `heavy --slots 2`, one
+slot per two processes. Brief peaks are higher: two race tests start two CLI
+processes at once, and some commands start git or extractor children. If you change the concurrency, change the slot claim with it.
 The mutation plans in `scripts/mutation-file.mjs` stay serial
 (`--test-concurrency=1`), one Stryker worker per sandbox.
 
