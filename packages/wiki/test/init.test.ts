@@ -1,22 +1,18 @@
 // Principal acceptance seam: a real Node subprocess with disposable filesystem state.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { spawnCli } from "./cli-helper.ts";
 
-const BIN = fileURLToPath(new URL("../bin/wiki.js", import.meta.url));
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-init-"));
 after(() => fs.rmSync(temp, { recursive: true, force: true }));
 let counter = 0;
 function freshPath(): string { return path.join(temp, "vault-" + ++counter); }
-function cli(args: string[], env: NodeJS.ProcessEnv = {}) {
-  return spawnSync(process.execPath, [BIN, "--json", ...args], {
-    encoding: "utf8", cwd: temp, env: { ...process.env, WIKI_VAULT: "", HOME: temp, ...env },
-  });
-}
+// init resolves relative directories against the process working directory, and run() has no cwd option,
+// so these tests stay in a subprocess started in the temp directory.
+function cli(args: string[], env: NodeJS.ProcessEnv = {}) { return spawnCli(["--json", ...args], { cwd: temp, env: { HOME: temp, ...env } }); }
 function ok(args: string[], env?: NodeJS.ProcessEnv) {
   const result = cli(args, env);
   assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -42,7 +38,7 @@ function snapshot(root: string): Record<string, string> {
   return files;
 }
 
-test("wiki:01 repeat init preserves authored notes, registry, config, indexes, and ignores", () => {
+test("wiki:01 repeat init preserves authored notes, registry, config, indexes, and ignores", async () => {
   const vault = freshPath();
   ok(["init", vault]);
   fs.mkdirSync(path.join(vault, "personal/notes"), { recursive: true });
@@ -56,7 +52,7 @@ test("wiki:01 repeat init preserves authored notes, registry, config, indexes, a
   assert.deepEqual(snapshot(vault), before);
 });
 
-test("wiki:01 refuses a nonempty foreign target without any mutation", () => {
+test("wiki:01 refuses a nonempty foreign target without any mutation", async () => {
   const vault = freshPath();
   fs.mkdirSync(vault);
   fs.writeFileSync(path.join(vault, "authored.md"), "Do not convert me.\n");
@@ -66,7 +62,7 @@ test("wiki:01 refuses a nonempty foreign target without any mutation", () => {
   assert.deepEqual(fs.readdirSync(vault), ["authored.md"]);
 });
 
-test("wiki:01 refuses unsupported and damaged configurations without mutation", () => {
+test("wiki:01 refuses unsupported and damaged configurations without mutation", async () => {
   for (const config of ['{"profile":"wiki-okf","version":99}', '{"profile":"foreign","version":1}', '{', '[]', '{}']) {
     const vault = freshPath();
     ok(["init", vault]);
@@ -78,7 +74,7 @@ test("wiki:01 refuses unsupported and damaged configurations without mutation", 
   }
 });
 
-test("wiki:01 reports missing initialization files instead of attempting repair", () => {
+test("wiki:01 reports missing initialization files instead of attempting repair", async () => {
   for (const missing of [".wiki/config.json", "index.md", "log.md", ".gitignore", ".wiki/types", ".wiki/tmp", ".wiki/locks"]) {
     const vault = freshPath();
     ok(["init", vault]);
@@ -91,7 +87,7 @@ test("wiki:01 reports missing initialization files instead of attempting repair"
   }
 });
 
-test("wiki:01 refuses symlink roots, managed files, and write directories", () => {
+test("wiki:01 refuses symlink roots, managed files, and write directories", async () => {
   const outside = freshPath();
   ok(["init", outside]);
   const link = freshPath();
@@ -111,7 +107,7 @@ test("wiki:01 refuses symlink roots, managed files, and write directories", () =
   }
 });
 
-test("wiki:01 requires explicit selection and honors flag precedence over environment", () => {
+test("wiki:01 requires explicit selection and honors flag precedence over environment", async () => {
   const before = snapshot(temp);
   rejected(["init"], 2, "usage", /no default vault/i);
   rejected(["init", ""], 2, "usage", /select a vault/i);
@@ -132,29 +128,27 @@ test("wiki:01 requires explicit selection and honors flag precedence over enviro
   assert.equal(fs.existsSync(ignored), false);
 });
 
-test("wiki:01 accepts an explicitly selected empty relative directory with literal path characters", () => {
+test("wiki:01 accepts an explicitly selected empty relative directory with literal path characters", async () => {
   const relative = "empty vault ; literal";
   fs.mkdirSync(path.join(temp, relative));
   const result = ok(["init", relative]);
   assert.equal(result.vault.root, fs.realpathSync(path.join(temp, relative)));
-  const human = spawnSync(process.execPath, [BIN, "init", relative], {
-    encoding: "utf8", cwd: temp, env: { ...process.env, WIKI_VAULT: "" },
-  });
+  const human = spawnCli(["init", relative], { cwd: temp });
   assert.equal(human.status, 0, human.stderr);
   assert.equal(human.stdout, "Initialized profile vault: " + result.vault.root + "\n");
 });
 
-test("wiki:01 CLI errors are JSON, while human errors go to stderr", () => {
+test("wiki:01 CLI errors are JSON, while human errors go to stderr", async () => {
   rejected(["--unknown"], 2, "usage", /unknown/i);
   rejected(["new"], 2, "usage", /usage/i);
   rejected(["init", freshPath(), "extra"], 2, "usage", /usage/i);
-  const human = spawnSync(process.execPath, [BIN, "init"], { encoding: "utf8", env: { ...process.env, WIKI_VAULT: "" } });
+  const human = spawnCli(["init"]);
   assert.equal(human.status, 2);
   assert.equal(human.stdout, "");
   assert.match(human.stderr, /no default vault/i);
 });
 
-test("wiki:01 Node init seeds an isolated profile without Git or search state", () => {
+test("wiki:01 Node init seeds an isolated profile without Git or search state", async () => {
   const vault = freshPath();
   const result = ok(["init", vault]);
   assert.equal(result.vault.root, fs.realpathSync(vault));
