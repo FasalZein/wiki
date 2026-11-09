@@ -118,6 +118,15 @@ async function open(root: string, models?: QmdModels): Promise<QMDStore> {
     path: checked(root, DIRECTORY + "/snapshots"), pattern: "**/*.md",
   } } } });
 }
+/** Every active indexed body of the collection, keyed by staged id, in one query. Same rows as the
+ * SDK's getDocumentBody(PREFIX + id), which QMD 2.8.3 answers with two full scans of documents per
+ * call (it matches a computed virtual path). Layout per its store.js initializeDatabase:
+ * documents(collection, path, hash, active, UNIQUE(collection, path)) and content(hash PRIMARY KEY, doc). */
+function indexedBodies(store: QMDStore): Map<string, string> {
+  const rows = store.internal.db.prepare("SELECT d.path AS id, c.doc AS body FROM documents d JOIN content c ON c.hash = d.hash WHERE d.collection = ? AND d.active = 1")
+    .all<{ id: string; body: string }>(COLLECTION);
+  return new Map(rows.map(row => [row.id, row.body]));
+}
 function conceptProblem(relative: string): string | undefined {
   const canonical = canonicalPathProblem(relative);
   if (canonical) return canonical.message;
@@ -179,9 +188,10 @@ export async function syncQmdText(root: string, inventory: QmdInventory, options
     options.signal?.throwIfAborted();
     if (update.skipped) throw new Error("QMD skipped " + update.skipped + " captured concepts");
     const indexed: QmdDigest[] = [];
+    const bodies = indexedBodies(store);
     for (const [relative, markdown] of concepts) {
       options.signal?.throwIfAborted();
-      const body = await store.getDocumentBody(PREFIX + stagedId(relative));
+      const body = bodies.get(stagedId(relative)) ?? null;
       if (body !== markdown) throw new Error("Indexed Markdown differs from captured concept: " + relative);
       indexed.push({ path: relative, digest: digest(markdown) });
     }
@@ -412,9 +422,11 @@ export async function findQmd(root: string, request: QmdFindRequest, captured: Q
     const concepts = new Map(captured.map(c => [c.path, c.markdown]));
     const indexMismatch: QmdDiagnostic[] = [];
     const indexed = new Set(identities.values());
+    // Read once under this request's lock: the same bodies serve this check and rendering below.
+    const bodies = indexedBodies(store);
     for (const [relative, markdown] of concepts) {
       if (!indexed.has(relative)) indexMismatch.push({ path: relative, message: "Captured concept is missing from the queried index (replaced by another synchronization); text coverage incomplete. Search again" });
-      else if (await store.getDocumentBody(PREFIX + stagedId(relative)) !== markdown) indexMismatch.push({ path: relative, message: "Queried index holds a different revision than this request captured (replaced by another synchronization); text coverage incomplete. Search again" });
+      else if (bodies.get(stagedId(relative)) !== markdown) indexMismatch.push({ path: relative, message: "Queried index holds a different revision than this request captured (replaced by another synchronization); text coverage incomplete. Search again" });
     }
     for (const relative of indexed) if (!concepts.has(relative)) indexMismatch.push({ path: relative, message: "Queried index holds a concept outside this request's captured inventory; text coverage incomplete. Search again" });
     signal?.throwIfAborted();
@@ -485,7 +497,7 @@ export async function findQmd(root: string, request: QmdFindRequest, captured: Q
     for (const candidate of ordered) {
       if (matches.length === limit) break;
       signal?.throwIfAborted();
-      const rendered = render(root, candidate.path, candidate.file, candidate.score, candidate.literal, await store.getDocumentBody(candidate.file), concepts, queries, omitted);
+      const rendered = render(root, candidate.path, candidate.file, candidate.score, candidate.literal, bodies.get(candidate.file.slice(PREFIX.length)) ?? null, concepts, queries, omitted);
       if (rendered) matches.push(rendered);
     }
     const rerank = request.mode === "deep" && !degraded;

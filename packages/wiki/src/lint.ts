@@ -236,7 +236,14 @@ export function inspectVault(root: string, selected?: string, prospective?: Pros
   diagnostics.push(...crossNoteDiagnostics(root, notes, indexes, selected, prospective, assets));
   // Retain the exact bytes decoded and validated above. Never reread a validated path
   // for indexing: a noncooperating editor can replace it between those operations.
-  const concepts = notes.filter(note => registryValid && note.canonical && !diagnostics.some(d => d.path === "" || d.path === note.path || note.path.startsWith(d.path + "/")))
+  // A diagnostic on the vault root (""), on the note, or on any ancestor directory excludes the note.
+  const diagnosed = new Set(diagnostics.map(d => d.path));
+  const touched = (file: string) => {
+    if (diagnosed.has("") || diagnosed.has(file)) return true;
+    for (let slash = file.indexOf("/"); slash !== -1; slash = file.indexOf("/", slash + 1)) if (diagnosed.has(file.slice(0, slash))) return true;
+    return false;
+  };
+  const concepts = notes.filter(note => registryValid && note.canonical && !touched(note.path))
     .map(({ path, markdown }) => ({ path, markdown }));
   return { indexes: diagnostics.length ? new Map<string, string>() : renderIndexes(directories, navigationTopics(notes)),
     concepts, diagnostics: selectedDiagnostics(notes, diagnostics, selected) };
