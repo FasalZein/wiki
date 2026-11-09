@@ -8,6 +8,7 @@ import https from "node:https";
 import net from "node:net";
 import tls from "node:tls";
 import { syncBuiltinESMExports } from "node:module";
+import { createHash } from "node:crypto";
 import "./qmd-cleanup-guard.js";
 import { syncQmdText, searchQmdLex } from "../src/qmd.ts";
 
@@ -278,4 +279,149 @@ test("wiki:10 checked staged mapping rejects forged, duplicate, or unmapped cano
   assert.equal((await searchQmdLex(root, "quasar")).state, "unavailable");
   fs.writeFileSync(file, mapping);
   assert.deepEqual(await paths(root, "quasar"), ["personal/notes/first.md"]);
+});
+
+// Hardener additions: each test pins one observable contract of syncQmdText/searchQmdLex.
+const sha256 = (text: string) => "sha256:" + createHash("sha256").update(text).digest("hex");
+
+test("wiki:10 lexical limit accepts only positive safe integers and caps returned matches", async () => {
+  const root = fresh();
+  assert.equal((await syncQmdText(root, inventory([note("a", "# A\nPlasma\n"), note("b", "# B\nPlasma\n")]))).state, "successful");
+  for (const limit of [0, -1, 1.5, Number.NaN]) {
+    const rejected = await searchQmdLex(root, "Plasma", limit);
+    assert.equal(rejected.state, "unavailable", String(limit));
+    assert.match(JSON.stringify(rejected), /Expected a positive integer lexical limit/);
+  }
+  const one = await searchQmdLex(root, "Plasma", 1);
+  assert.equal(one.state, "successful", JSON.stringify(one));
+  assert.equal(one.matches.length, 1);
+});
+
+test("wiki:10 lexical search before any synchronization reports a missing text index", async () => {
+  const root = fresh();
+  const found = await searchQmdLex(root, "anything");
+  assert.equal(found.state, "unavailable");
+  assert.match(JSON.stringify(found), /Text index unavailable; synchronize captured concepts first/);
+});
+
+test("wiki:10 coverage receipt lists captured concepts sorted by canonical path with content digests", async () => {
+  const root = fresh();
+  const concepts = [note("zeta", "# Zeta\n"), note("alpha", "# Alpha\n"), note("mid", "# Mid\n")];
+  const result = await syncQmdText(root, inventory(concepts));
+  assert.equal(result.state, "successful", JSON.stringify(result));
+  const expected = [
+    { path: "personal/notes/alpha.md", digest: sha256("# Alpha\n") },
+    { path: "personal/notes/mid.md", digest: sha256("# Mid\n") },
+    { path: "personal/notes/zeta.md", digest: sha256("# Zeta\n") },
+  ];
+  if (result.state === "successful") assert.deepEqual(result.textCoverage.inventory, expected);
+  assert.equal(fs.readFileSync(receipt(root), "utf8"), JSON.stringify({ version: 1, inventory: expected }) + "\n");
+});
+
+test("wiki:10 failure codes distinguish a busy writer from other unavailability", async () => {
+  const busy = fresh();
+  fs.mkdirSync(path.join(busy, ".wiki/search"), { recursive: true });
+  fs.writeFileSync(path.join(busy, ".wiki/search/writer.lock"), "other writer");
+  const conflict = await syncQmdText(busy, inventory([]));
+  assert.equal(conflict.state, "unavailable");
+  if (conflict.state === "unavailable") assert.equal(conflict.code, "conflict");
+  const corrupt = fresh();
+  fs.mkdirSync(path.join(corrupt, ".wiki/search"), { recursive: true });
+  fs.writeFileSync(path.join(corrupt, ".wiki/search/qmd.sqlite"), "not SQLite");
+  const failed = await syncQmdText(corrupt, inventory([note("star", "# Star\n")]));
+  assert.equal(failed.state, "unavailable");
+  if (failed.state === "unavailable") assert.equal(failed.code, "unavailable");
+});
+
+test("wiki:10 invalid Unicode Markdown and forbidden paths are reported per concept", async () => {
+  const root = fresh();
+  const broken = await syncQmdText(root, inventory([note("lone", "# Lone \uD800 surrogate\n")]));
+  assert.equal(broken.state, "unavailable");
+  assert.match(JSON.stringify(broken), /Invalid Unicode Markdown: personal\/notes\/lone\.md/);
+  const mixed = await syncQmdText(root, { concepts: [note("ok", "# Ok\n"), { path: "personal/index.md", markdown: "# Index\n" }], diagnostics: [] });
+  assert.equal(mixed.state, "incomplete", JSON.stringify(mixed));
+  if (mixed.state === "incomplete") {
+    assert.deepEqual(mixed.textCoverage.diagnostics.map(d => d.path), ["personal/index.md"]);
+    assert.match(mixed.textCoverage.diagnostics[0]?.message ?? "", /Expected a validated concept/);
+  }
+});
+
+test("wiki:10 abort at the last check before publishing leaves neither coverage nor identity mapping", async () => {
+  const root = fresh();
+  const good = inventory([note("first", "# First\nComet\n")]);
+  let calls = 0;
+  const counting = { throwIfAborted() { calls++; } } as unknown as AbortSignal;
+  assert.equal((await syncQmdText(root, good, { signal: counting })).state, "successful");
+  const last = calls;
+  assert.ok(last > 1);
+  let seen = 0;
+  const abortLast = { throwIfAborted() { if (++seen === last) throw new Error("late abort"); } } as unknown as AbortSignal;
+  const failed = await syncQmdText(root, good, { signal: abortLast });
+  assert.equal(failed.state, "unavailable", JSON.stringify(failed));
+  assert.match(JSON.stringify(failed), /late abort/);
+  assert.equal(fs.existsSync(receipt(root)), false);
+  assert.equal(fs.existsSync(path.join(root, ".wiki/search/identities.json")), false);
+  assert.equal(fs.existsSync(path.join(root, ".wiki/search/writer.lock")), false);
+});
+test("wiki:10 malformed identity mappings are rejected as invalid before lexical results are mapped", async () => {
+  const root = fresh();
+  assert.equal((await syncQmdText(root, inventory([note("first", "# First\nQuasar\n")]))).state, "successful");
+  const file = path.join(root, ".wiki/search/identities.json");
+  const mapping = JSON.parse(fs.readFileSync(file, "utf8"));
+  const row = mapping.paths[0];
+  const documents = [null, 7, [], {}, { version: 2, paths: [row] }, { version: 1 }, { version: 1, paths: {} }];
+  const rows = [null, 7, { path: row.path }, { id: [row.id], path: row.path }, { id: 7, path: row.path }, { id: row.id }, { id: row.id, path: 7 }];
+  const cases = [
+    ...documents.map(value => ({ value, expected: /Invalid staged identity mapping/ })),
+    ...rows.map(bad => ({ value: { version: 1, paths: [bad] }, expected: /Invalid or duplicate staged identity/ })),
+  ];
+  for (const { value, expected } of cases) {
+    fs.writeFileSync(file, JSON.stringify(value));
+    const found = await searchQmdLex(root, "quasar");
+    assert.equal(found.state, "unavailable", JSON.stringify(value));
+    assert.match(JSON.stringify(found), expected, JSON.stringify(value));
+  }
+});
+
+test("wiki:10 SDK cache and config levels must be real directories; existing directories are accepted", async () => {
+  const cacheFile = fresh();
+  fs.mkdirSync(path.join(cacheFile, ".wiki/search"), { recursive: true });
+  fs.writeFileSync(path.join(cacheFile, ".wiki/search/sdk-cache"), "file");
+  const cache = await syncQmdText(cacheFile, inventory([note("a", "# A\n")]));
+  assert.equal(cache.state, "unavailable");
+  assert.match(JSON.stringify(cache), /Expected a directory for SDK cache: .wiki\/search\/sdk-cache/);
+  const configFile = fresh();
+  fs.mkdirSync(path.join(configFile, ".wiki/search/sdk-config"), { recursive: true });
+  fs.writeFileSync(path.join(configFile, ".wiki/search/sdk-config/qmd"), "file");
+  const config = await syncQmdText(configFile, inventory([note("a", "# A\n")]));
+  assert.equal(config.state, "unavailable");
+  assert.match(JSON.stringify(config), /Expected a directory for SDK config: .wiki\/search\/sdk-config\/qmd/);
+  const configDirectory = fresh();
+  fs.mkdirSync(path.join(configDirectory, ".wiki/search/sdk-config/qmd"), { recursive: true });
+  assert.equal((await syncQmdText(configDirectory, inventory([note("a", "# A\n")]))).state, "successful");
+});
+
+test("wiki:10 a symlinked SQLite sidecar fails closed without touching its target", async () => {
+  for (const suffix of ["-wal", "-shm", "-journal"]) {
+    const root = fresh();
+    const external = fresh();
+    fs.mkdirSync(path.join(root, ".wiki/search"), { recursive: true });
+    fs.symlinkSync(path.join(external, "target"), path.join(root, ".wiki/search/qmd.sqlite" + suffix));
+    const result = await syncQmdText(root, inventory([note("a", "# A\n")]));
+    assert.equal(result.state, "unavailable", suffix);
+    assert.deepEqual(fs.readdirSync(external), [], suffix);
+  }
+});
+
+test("wiki:10 a lock-creation failure other than an existing lock is not reported as a writer conflict", async () => {
+  const root = fresh();
+  const directory = path.join(root, ".wiki/search");
+  fs.mkdirSync(directory, { recursive: true });
+  fs.chmodSync(directory, 0o500);
+  let result;
+  try { result = await syncQmdText(root, inventory([])); }
+  finally { fs.chmodSync(directory, 0o700); }
+  assert.equal(result.state, "unavailable");
+  if (result.state === "unavailable") assert.equal(result.code, "unavailable");
+  assert.match(JSON.stringify(result), /EACCES/);
 });

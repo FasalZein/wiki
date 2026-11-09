@@ -33,6 +33,10 @@ The command accepts exactly one literal production path. Supported affected-test
 | `packages/wiki/src/mutation.ts` | `node --test --test-concurrency=1 packages/wiki/test/concurrent-writers.test.ts packages/wiki/test/write-boundaries.test.ts packages/wiki/test/update.test.ts packages/wiki/test/capture-cli.test.ts` |
 | `packages/wiki/src/vault.ts` | `node --test --test-concurrency=1 packages/wiki/test/init.test.ts packages/wiki/test/write-boundaries.test.ts packages/wiki/test/capture-cli.test.ts packages/wiki/test/update.test.ts` |
 | `packages/wiki/src/create.ts` | `node --test --test-concurrency=1 packages/wiki/test/create.test.ts packages/wiki/test/write-boundaries.test.ts packages/wiki/test/capture-cli.test.ts packages/wiki/test/update.test.ts` |
+| `packages/wiki/src/qmd.ts` | `node --test --test-concurrency=1 packages/wiki/test/qmd-sync.test.ts` |
+
+The qmd plan is narrow. `qmd-sync` imports `src/qmd.ts` in-process and covers the writer lock, `syncQmdText`, and `searchQmdLex`.
+It does not exercise `findQmd`, `embedQmd`, or model readiness; mutate those ranges only after widening the plan with the qmd CLI test files.
 
 The PDF plan selects all local PDF tests (`wiki:15`) and all web tests named `PDF` or `pdftotext`.
 This retains real nonempty/empty extraction, exact bytes and arguments, provenance, corrupt input,
@@ -80,7 +84,7 @@ Do not label them tested based on TypeScript tests or schema validation.
 ## Tooling checks and security
 
 Run `heavy -- bun run test:tooling`, `heavy -- bun run typecheck:tooling`, and `heavy -- bun run typecheck`.
-The focused tooling tests cover exact scoping, legacy and all eleven wiki runner plans, worker derivation, cache separation, and rejected inputs.
+The focused tooling tests cover exact scoping, legacy and all twelve wiki runner plans, worker derivation, cache separation, and rejected inputs.
 
 Root overrides pin Stryker's transitive `minimatch` to 11.0.5 and `typed-rest-client`'s `qs` to 6.17.1.
 These avoid GHSA-g3hv-75wg-m249 and the qs advisories reported by `npm audit` with the original Stryker graph.
