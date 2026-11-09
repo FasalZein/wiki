@@ -7,7 +7,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, test } from "node:test";
-import { BIN, spawnCli } from "./cli-helper.ts";
+import { BIN, spawnCli, spawnJson } from "./cli-helper.ts";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseNoteText } from "../src/frontmatter.ts";
 import { parseMarkdown, visitAuthored } from "../src/markdown.ts";
@@ -18,12 +18,7 @@ after(() => fs.rmSync(temp, { recursive: true, force: true }));
 let counter = 0;
 const digest = (bytes: Buffer | string) => "sha256:" + createHash("sha256").update(bytes).digest("hex");
 function cli(root: string, args: string[], env: NodeJS.ProcessEnv = {}) {
-  const result = spawnCli(["--json", "--vault", root, ...args], {
-    timeout: 15000, killSignal: "SIGKILL", env: { ...process.env, HOME: temp, WIKI_VAULT: "", ...env },
-  });
-  assert.equal(result.error, undefined); assert.equal(result.stderr, "");
-  assert.equal(result.stdout.trim().split("\n").length, 1);
-  return { status: result.status, data: JSON.parse(result.stdout) };
+  return spawnJson(["--vault", root, ...args], { timeout: 15000, killSignal: "SIGKILL", env: { HOME: temp, ...env } });
 }
 function fresh(bytes: Buffer) {
   const directory = path.join(temp, String(++counter)); fs.mkdirSync(directory);
