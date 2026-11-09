@@ -1,10 +1,8 @@
-import * as fs from "node:fs";
-import { createHash } from "node:crypto";
 import type { Nodes } from "mdast";
 import { parseNoteText } from "./frontmatter.ts";
 import { parseMarkdown } from "./markdown.ts";
 import { canonicalPathProblem } from "./paths.ts";
-import { containedEntry, WikiError } from "./vault.ts";
+import { WikiError, type Vault } from "./vault.ts";
 
 function renderedLeafText(node: Nodes): string | undefined {
   if (node.type === "text" || node.type === "inlineCode") return node.value;
@@ -24,16 +22,13 @@ function validateNotePath(relative: string): void {
     throw new WikiError("usage", "Expected a canonical Markdown note path outside operational and capture directories");
   }
 }
-function captureNote(root: string, relative: string): { markdown: string; digest: string } {
+function captureNote(vault: Vault, relative: string): { markdown: string; digest: string } {
   validateNotePath(relative);
-  const { full, stat } = containedEntry(root, relative);
-  if (!stat) throw new WikiError("not_found", "Missing requested note: " + relative);
-  if (!stat.isFile()) throw new WikiError("usage", "Expected a regular Markdown note: " + relative);
-  const bytes = fs.readFileSync(full);
+  const { bytes, digest } = vault.readNoteRevision(relative, "note");
   let markdown: string;
   try { markdown = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes); }
   catch { throw new WikiError("damaged", "Note is not valid UTF-8: " + relative); }
-  return { markdown, digest: "sha256:" + createHash("sha256").update(bytes).digest("hex") };
+  return { markdown, digest };
 }
 function sectionBody(markdown: string, relative: string): string {
   try { return parseNoteText(markdown).body; }
@@ -66,8 +61,8 @@ function selectSection(markdown: string, relative: string, section: string): str
 }
 
 /** Capture once: the digest names the same full bytes that supply the output. */
-export function readNote(root: string, relative: string, section?: string) {
-  const { markdown, digest } = captureNote(root, relative);
+export function readNote(vault: Vault, relative: string, section?: string) {
+  const { markdown, digest } = captureNote(vault, relative);
   if (section === undefined) return { path: relative, markdown, digest };
   return { path: relative, section, markdown: selectSection(markdown, relative, section), digest };
 }

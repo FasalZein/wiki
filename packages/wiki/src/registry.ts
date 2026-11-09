@@ -69,28 +69,6 @@ export function sortDiagnostics(items: Diagnostic[]): Diagnostic[] {
 }
 function compare(a: string, b: string): number { return a < b ? -1 : a > b ? 1 : 0; }
 function issue(file: string, rule: string, message: string, fix: string): Diagnostic { return { path: file, rule, message, fix }; }
-function validateVaultLayout(root: string): void {
-  for (const relative of ["", ".wiki", ".wiki/config.json", ".wiki/types", ".wiki/tmp", "log.md"]) {
-    const item = containedEntry(root, relative).stat;
-    if (!item) throw new WikiError("damaged", "Missing vault entry: " + relative);
-    const directory = ["", ".wiki", ".wiki/types", ".wiki/tmp"].includes(relative);
-    if (directory ? !item.isDirectory() : !item.isFile()) throw new WikiError("damaged", "Wrong vault entry kind: " + relative);
-  }
-}
-function validateVaultConfiguration(config: unknown): void {
-  if (!isMapping(config) || !("profile" in config) || !("version" in config)) throw new WikiError("damaged", "Invalid configuration");
-  if (config.profile !== "wiki-okf" || config.version !== 1) throw new WikiError("unsupported", "Unsupported profile/version; no conversion performed");
-}
-export function openVault(dir: string): string {
-  const root = path.resolve(dir);
-  if (!fs.existsSync(root)) throw new WikiError("not_found", "Missing vault: " + root);
-  validateVaultLayout(root);
-  let config: unknown;
-  try { config = JSON.parse(fs.readFileSync(path.join(root, ".wiki/config.json"), "utf8")); }
-  catch { throw new WikiError("damaged", "Invalid JSON configuration"); }
-  validateVaultConfiguration(config);
-  return fs.realpathSync(root);
-}
 
 function assertFragmentIdentifier(schema: Record<string, unknown>, key: string, message: string): void {
   if (key in schema && (typeof schema[key] !== "string" || !schema[key].startsWith("#"))) throw new Error(message);

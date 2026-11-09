@@ -5,8 +5,8 @@ import { pathToFileURL } from "node:url";
 import { extractPdf } from "./pdf.ts";
 import { assertCaptureActive } from "./extract-process.ts";
 import { fetchResource, extractWeb } from "./web.ts";
-import { loadRegistry, openVault, safeName, schemaDiagnostics, type Diagnostic } from "./registry.ts";
-import { containedEntry, WikiError } from "./vault.ts";
+import { loadRegistry, safeName, schemaDiagnostics, type Diagnostic } from "./registry.ts";
+import { containedEntry, openVault, WikiError } from "./vault.ts";
 import { parseNoteText } from "./frontmatter.ts";
 import type { HeldLock } from "./mutation.ts";
 import { publish, topicLog, validateProspective, ValidationError } from "./publication.ts";
@@ -39,7 +39,7 @@ function validateCaptureLocation(request: TextCaptureRequest, source: ReturnType
  * No implicit size limit: the selected document and rendered source are held in memory.
  */
 function planCapture(vault: string, request: TextCaptureRequest) {
-  const root = openVault(vault);
+  const { root } = openVault(vault);
   const registry = loadRegistry(root);
   if (registry.diagnostics.length) throw new CaptureValidationError(registry.diagnostics);
   const source = registry.types.find(type => type.record.name === "source");

@@ -39,11 +39,20 @@ if (forbidden) for (const name of ["readFileSync", "openSync", "statSync", "lsta
 const read = fs.readFileSync, write = fs.writeFileSync, append = fs.appendFileSync;
 const log = (entry) => append(process.env.WIKI_QMD_CALL_LOG, JSON.stringify(entry) + "\n");
 let fired = false;
-fs.readFileSync = (file, ...args) => {
+// The protected note read opens a descriptor and reads it: remember which path each descriptor names.
+const openSync = fs.openSync, opened = new Map();
+fs.openSync = (file, ...args) => {
   if (mode === "unreadable" && String(file).endsWith("/personal/notes/unreadable.md")) throw Object.assign(new Error("Injected unreadable concept"), { code: "EACCES" });
+  const fd = openSync(file, ...args);
+  opened.set(fd, String(file));
+  return fd;
+};
+fs.readFileSync = (file, ...args) => {
+  const named = typeof file === "number" ? opened.get(file) ?? "" : String(file);
+  if (mode === "unreadable" && named.endsWith("/personal/notes/unreadable.md")) throw Object.assign(new Error("Injected unreadable concept"), { code: "EACCES" });
   const bytes = read(file, ...args);
-  if (mode === "replace-after-read" && !fired && String(file).endsWith("/personal/notes/observatory.md")) {
-    fired = true; write(file, "Unvalidated replacement without frontmatter\n");
+  if (mode === "replace-after-read" && !fired && named.endsWith("/personal/notes/observatory.md")) {
+    fired = true; write(named, "Unvalidated replacement without frontmatter\n");
   }
   return bytes;
 };

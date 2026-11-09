@@ -4,9 +4,10 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import type { QMDStore, UpdateProgress, UpdateResult } from "@tobilu/qmd";
-import { canonicalPathProblem, inspectContainedPath } from "./paths.ts";
+import { canonicalPathProblem } from "./paths.ts";
 import { isMapping } from "./frontmatter.ts";
-import { noteDigest, planFind, selectMatches, type CurrentNoteReader, type FindHit } from "./find.ts";
+import { containedPath as checked, readNoteRevision } from "./vault.ts";
+import { planFind, selectMatches, type CurrentNoteReader, type FindHit } from "./find.ts";
 
 /** Caller supplies a complete capture of validated concepts, not a selected subset.
  * Report every invalid/unreadable concept in diagnostics; never silently omit it. */
@@ -57,11 +58,6 @@ function readIdentities(root: string): Map<string, string> {
   return identities;
 }
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error); }
-function checked(root: string, relative: string): string {
-  const inspected = inspectContainedPath(root, relative);
-  if (!inspected.ok) throw new Error(inspected.problem.message);
-  return inspected.full;
-}
 class IndexWriterBusyError extends Error {}
 function acquire(root: string) {
   const directory = checked(root, DIRECTORY);
@@ -520,10 +516,9 @@ export type QmdFindResult =
 /** Step (c)'s read port over the vault: rereads only vault files, never captured sources. */
 function currentNotes(root: string): CurrentNoteReader {
   return { digest(relative) {
-    try {
-      const stat = fs.lstatSync(checked(root, relative), { throwIfNoEntry: false });
-      return stat?.isFile() ? noteDigest(fs.readFileSync(checked(root, relative))) : undefined;
-    } catch { return undefined; }
+    // A missing, refused or non-regular note has no current digest.
+    try { return readNoteRevision(root, relative, "note").digest; }
+    catch { return undefined; }
   } };
 }
 /** QMD 2.8.3 swallows expansion grammar/context/prompt failures, returns the unchanged

@@ -3,20 +3,14 @@ import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 import { inspectContainedPath } from "./paths.ts";
 import { inspectVault } from "./lint.ts";
-import { isMapping } from "./frontmatter.ts";
 import { indexFreshnessDiagnostics } from "./navigation.ts";
-import type { ErrorCode } from "./vault.ts";
+import { containedPath as checked, hasLayoutKind, profileProblem, VAULT_LAYOUT, type ErrorCode, type LayoutKind } from "./vault.ts";
 import { qmdModelReadiness, inspectQmdIndex, DEEP_ROLES, QMD_WRITER_LOCK, type QmdModels, type QmdModelRole } from "./qmd.ts";
 
 type Problem = { path: string; message: string; fix: string };
 type Check = { state: "ready" } | { state: "unavailable" };
 type VersionCheck = { state: "ready"; version: string } | { state: "unavailable"; version?: string };
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error); }
-function checked(root: string, relative: string): string {
-  const inspected = inspectContainedPath(root, relative);
-  if (!inspected.ok) throw new Error(inspected.problem.message);
-  return inspected.full;
-}
 function readJson(root: string, relative: string): unknown { return JSON.parse(fs.readFileSync(checked(root, relative), "utf8")); }
 
 /** Delegate all file/configuration validation to search's model-free preflight.
@@ -55,15 +49,11 @@ function extractor(command: keyof typeof EXTRACTOR_PROBES, problems: Problem[]):
 }
 
 type ReportProblem = (file: string, text: string, fix: string, code?: ErrorCode) => void;
-const REQUIRED_LAYOUT = [["", "directory"], [".wiki", "directory"], [".wiki/config.json", "file"], [".wiki/types", "directory"], [".wiki/tmp", "directory"], [".wiki/locks", "directory"], ["index.md", "file"], ["log.md", "file"], [".gitignore", "file"]] as const;
-
-const HAS_KIND = { directory: (stat: fs.Stats) => stat.isDirectory(), file: (stat: fs.Stats) => stat.isFile() };
-
-function layoutEntryProblem(root: string, relative: string, kind: keyof typeof HAS_KIND): string | undefined {
+function layoutEntryProblem(root: string, relative: string, kind: LayoutKind): string | undefined {
   try {
     const item = inspectContainedPath(root, relative);
     if (!item.ok) return item.problem.message;
-    if (!item.stat || !HAS_KIND[kind](item.stat)) return "Missing or not a " + kind;
+    if (!item.stat || !hasLayoutKind(item.stat, kind)) return "Missing or not a " + kind;
     return undefined;
   } catch (error) { return message(error); }
 }
@@ -71,7 +61,7 @@ function layoutEntryProblem(root: string, relative: string, kind: keyof typeof H
 /** Reports every missing or wrong-kind layout entry; ready only when none is reported. */
 function layoutCheck(root: string, problem: ReportProblem): Check {
   let ready = true;
-  for (const [relative, kind] of REQUIRED_LAYOUT) {
+  for (const { path: relative, kind } of VAULT_LAYOUT) {
     const text = layoutEntryProblem(root, relative, kind);
     if (text !== undefined) { ready = false; problem(relative, text, "Inspect incomplete layout and retained files before explicit repair; doctor changes nothing"); }
   }
@@ -134,8 +124,9 @@ export async function doctorVault(selected: string) {
   let profile: Check = { state: "unavailable" };
   try {
     const config = readJson(root, ".wiki/config.json");
-    if (!isMapping(config) || !("profile" in config) || !("version" in config)) throw new Error("Configuration requires profile and version");
-    if (config.profile !== "wiki-okf" || config.version !== 1) problem(".wiki/config.json", "Unsupported profile/version; expected wiki-okf version 1", "Select a compatible explicit vault; no conversion or reinitialization performed", "unsupported");
+    const mismatch = profileProblem(config);
+    if (mismatch === "identity") throw new Error("Configuration requires profile and version");
+    if (mismatch === "unsupported") problem(".wiki/config.json", "Unsupported profile/version; expected wiki-okf version 1", "Select a compatible explicit vault; no conversion or reinitialization performed", "unsupported");
     else profile = { state: "ready" };
   } catch (error) { problem(".wiki/config.json", message(error), "Inspect retained configuration and restore valid wiki-okf version 1 JSON explicitly; do not reinitialize over retained files"); }
   const layout = layoutCheck(root, problem);

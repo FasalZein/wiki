@@ -7,6 +7,7 @@ import { canonicalPathProblem, inspectContainedPath } from "./paths.ts";
 import { parseNoteText } from "./frontmatter.ts";
 import { metadataLines, missingHeadings, parseMarkdown } from "./markdown.ts";
 import { declaresProperty, loadRegistry, safeName, schemaDiagnostics, sortDiagnostics, type Diagnostic, type Registry } from "./registry.ts";
+import { readRevisionAt, WikiError } from "./vault.ts";
 import { maintainedDirectory, renderIndexes, indexFreshnessDiagnostics, type NavigationDirectory, type NavigationTopic } from "./navigation.ts";
 
 const SKIP = new Set([".wiki", ".git", ".obsidian", "node_modules"]);
@@ -190,7 +191,7 @@ export function inspectVault(root: string, selected?: string, prospective?: Pros
     }
     // A replacement is one identity: do not retain old content or its diagnostics.
     if (prospective?.replace && relative === prospective.path) return;
-    const bytes = fs.readFileSync(full);
+    const { bytes } = readRevisionAt(full, () => new WikiError("usage", "Expected a regular Markdown note: " + relative));
     let markdown: string;
     try { markdown = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes); }
     catch {

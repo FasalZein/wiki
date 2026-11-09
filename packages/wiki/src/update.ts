@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import { canonicalPathProblem } from "./paths.ts";
-import { containedEntry, sha256 as digest, WikiError } from "./vault.ts";
+import { readNoteRevision, readRevisionAt, WikiError, type NoteRevision, type Vault } from "./vault.ts";
 import { parseNoteText } from "./frontmatter.ts";
 import type { HeldLock } from "./mutation.ts";
 import { publish, topicLog, validateProspective } from "./publication.ts";
@@ -15,16 +15,12 @@ export class UpdateConflictError extends WikiError {
 export interface UpdateCandidate { bytes: Buffer; markdown: string; digest: string }
 /** Nonblocking open plus descriptor check also refuses FIFOs swapped in after lstat. */
 export function readUpdateCandidate(file: string): UpdateCandidate {
-  let fd: number | undefined;
   try {
     if (!fs.lstatSync(file).isFile()) throw new Error("Not a regular file");
-    fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK | fs.constants.O_NOFOLLOW);
-    if (!fs.fstatSync(fd).isFile()) throw new Error("Not a regular file");
-    const bytes = fs.readFileSync(fd);
+    const { bytes, digest } = readRevisionAt(file, () => new Error("Not a regular file"));
     const markdown = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
-    return { bytes, markdown, digest: digest(bytes) };
+    return { bytes, markdown, digest };
   } catch { throw new WikiError("usage", "Candidate must be a readable regular file containing valid UTF-8"); }
-  finally { if (fd !== undefined) fs.closeSync(fd); }
 }
 const TOPIC_PATH_LENGTH = new Map([["personal", 3], ["projects", 4]]);
 function validateUpdatePath(relative: string): void {
@@ -34,21 +30,10 @@ function validateUpdatePath(relative: string): void {
   if (parts.length !== TOPIC_PATH_LENGTH.get(parts[0]!) || !relative.endsWith(".md") || parts.some(p => ["assets", "index.md", "log.md"].includes(p))) throw new WikiError("usage", "Expected a canonical topic path, not navigation or operational data");
 }
 
-function captureTarget(root: string, relative: string): { bytes: Buffer; mode: number } {
+function compare(root: string, relative: string, expected: string): NoteRevision {
   validateUpdatePath(relative);
-  const target = containedEntry(root, relative);
-  if (!target.stat) throw new WikiError("not_found", "Missing requested note: " + relative);
-  if (!target.stat.isFile()) throw new WikiError("usage", "Expected a regular Markdown topic: " + relative);
-  const fd = fs.openSync(target.full, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK | fs.constants.O_NOFOLLOW);
-  try {
-    const stat = fs.fstatSync(fd);
-    if (!stat.isFile()) throw new WikiError("usage", "Expected a regular Markdown topic: " + relative);
-    return { bytes: fs.readFileSync(fd), mode: stat.mode & 0o777 };
-  } finally { fs.closeSync(fd); }
-}
-function compare(root: string, relative: string, expected: string) {
-  const target = captureTarget(root, relative), current = digest(target.bytes);
-  if (current !== expected) throw new UpdateConflictError(relative, expected, current);
+  const target = readNoteRevision(root, relative, "topic");
+  if (target.digest !== expected) throw new UpdateConflictError(relative, expected, target.digest);
   return target;
 }
 function difference(before: Buffer, after: UpdateCandidate) {
@@ -62,7 +47,11 @@ function difference(before: Buffer, after: UpdateCandidate) {
     diff: { startLine: start + 1, removed: oldLines.slice(start, oldEnd), added: newLines.slice(start, newEnd) } };
 }
 /** Apply needs the held mutation lock; dry-run never acquires it or writes. */
-export function updateTopic(root: string, relative: string, expected: string, candidate: UpdateCandidate, apply: { dryRun: true } | { dryRun: false; lock: HeldLock }) {
+export type UpdateMode = { dryRun: true; vault: Vault } | { dryRun: false; lock: HeldLock };
+/** The vault root comes only from the mode: dry-run reads the opened vault; apply validates, rechecks and
+ * publishes under the locked root, so validation and publication cannot name different vaults. */
+export function updateTopic(apply: UpdateMode, relative: string, expected: string, candidate: UpdateCandidate) {
+  const root = apply.dryRun ? apply.vault.root : apply.lock.root;
   const before = compare(root, relative, expected);
   const plan = validateProspective(root, { path: relative, markdown: candidate.markdown, replace: true }, "Duplicate normalized title at " + relative);
   const result = { path: relative, digest: candidate.digest, candidateDigest: candidate.digest, ...difference(before.bytes, candidate) };

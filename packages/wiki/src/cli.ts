@@ -1,8 +1,8 @@
 import * as fs from "node:fs";
 import { parseArgs } from "node:util";
 import * as path from "node:path";
-import { initVault, PublicationError, WikiError, type ErrorCode, type Written } from "./vault.ts";
-import { listTypes, loadRegistry, openVault, safeName, sortDiagnostics } from "./registry.ts";
+import { initVault, openVault, PublicationError, WikiError, type ErrorCode, type Written } from "./vault.ts";
+import { listTypes, loadRegistry, safeName, sortDiagnostics, type Diagnostic } from "./registry.ts";
 import { readNote } from "./read.ts";
 import { readUpdateCandidate, updateTopic, UpdateConflictError } from "./update.ts";
 import { createTopic, type CreateRequest } from "./create.ts";
@@ -187,7 +187,7 @@ export async function run(argv: readonly string[], options: RunOptions): Promise
         if (report.error) exitCode = EXIT[report.error.code];
         output(report, doctorText(report));
       } else {
-        const root = openVault(selected);
+        const vault = openVault(selected), root = vault.root;
         if (sync || find) {
           // find --type loads the registry once here and hands it to the vault scan.
           const registry = find && values.type !== undefined ? loadRegistry(root) : undefined;
@@ -211,57 +211,74 @@ export async function run(argv: readonly string[], options: RunOptions): Promise
             try { preparedCapture = await prepareCapture(root, captureRequest, controller.signal); }
             finally { unsubscribe?.(); }
           }
-          const execute = (lock?: HeldLock) => {
-            const held = () => { if (!lock) throw new Error("Write path reached without the mutation lock"); return lock; };
+          const updateOutput = (result: ReturnType<typeof updateTopic>) => output({ ok: true, ...result }, (result.outcome === "updated" ? "Updated topic: " : result.outcome === "dry-run" ? "Dry-run topic: " : "Unchanged topic: ") + result.path + "\n" + result.digest + "\n" + JSON.stringify(result.summary) + "\n" + JSON.stringify(result.diff) + "\nNavigation: " + result.navigation + "; log: " + result.log + "\n");
+          const lintFailure = (diagnostics: Diagnostic[]) => {
+            exitCode = 1;
+            const error = { code: "lint", message: "Wiki validation failed" };
+            output({ ok: false, error, diagnostics }, "", diagnostics.map(d => d.path + ": " + d.rule + ": " + d.message + "; fix: " + d.fix).join("\n") + "\n");
+          };
+          const indexOutput = (indexes: ReadonlyMap<string, unknown>) => {
+            const paths = [...indexes.keys()].sort();
+            output({ ok: true, paths, checks: ["registry", "frontmatter", "layout", "body", "lifecycle", "scoped-titles", "links", "generated-index"] }, values.check ? "Generated indexes are current\n" : "Generated navigation: " + paths.join(", ") + "\n");
+          };
+          /** Commands that change vault bytes. Runs only inside withMutationLock, so every writer gets the held lock. */
+          const executeWrite = (lock: HeldLock) => {
             if (preparedCapture) {
-              const result = publishTextCapture(held(), preparedCapture);
+              const result = publishTextCapture(lock, preparedCapture);
               publishedResult = { written: true, paths: result.paths, digests: result.digests };
               output({ ok: true, ...result }, "Captured source: " + result.path + "\n" + Object.entries(result).filter(([key, value]) => typeof value === "string" || key === "limitations").map(([key, value]) => key + ": " + (Array.isArray(value) ? value.join("; ") : value)).join("\n") + "\n");
             } else if (update && arg !== undefined && values.expect !== undefined && candidate) {
-              const result = updateTopic(root, arg, values.expect, candidate, values["dry-run"] === true ? { dryRun: true } : { dryRun: false, lock: held() });
+              const result = updateTopic({ dryRun: false, lock }, arg, values.expect, candidate);
               if (result.outcome === "updated") publishedResult = { written: true, paths: [result.path], digest: result.digest };
-              output({ ok: true, ...result }, (result.outcome === "updated" ? "Updated topic: " : result.outcome === "dry-run" ? "Dry-run topic: " : "Unchanged topic: ") + result.path + "\n" + result.digest + "\n" + JSON.stringify(result.summary) + "\n" + JSON.stringify(result.diff) + "\nNavigation: " + result.navigation + "; log: " + result.log + "\n");
+              updateOutput(result);
             } else if (request) {
-              const result = createTopic(held(), request);
+              const result = createTopic(lock, request);
               publishedResult = { written: true, paths: [result.path], digest: result.digest };
               output({ ok: true, ...result }, "Created topic: " + result.path + "\nTitle: " + result.title + "\nDescription: " + result.description + "\n" + result.digest + "\n");
-            } else if (show && arg !== undefined) {
-              const note = readNote(root, arg, values.section);
-              output({ ok: true, ...note }, note.markdown);
             } else if (add && extra[0] !== undefined && values.folder !== undefined) {
-              const added = addType(held(), extra[0], values.folder);
+              const added = addType(lock, extra[0], values.folder);
               publishedResult = { written: true, paths: [added.path], digest: added.digest };
               output({ ok: true, path: added.path }, "Created registry scaffold: " + added.path + "; review and run whole-vault lint before commit\n");
+            } else if (index) {
+              // Regeneration validates through the publication module.
+              const current = validateCurrent(root);
+              if (current.diagnostics.length) lintFailure(current.diagnostics);
+              else {
+                if (current.plan) {
+                  const published = publish(lock, { kind: "index", plan: current.plan });
+                  if (published.written.paths.length) publishedResult = { written: true, ...published.written };
+                }
+                indexOutput(current.indexes);
+              }
+            } else throw new Error("Write dispatcher reached a read-only command");
+          };
+          /** Commands that never change vault bytes and never take the mutation lock. */
+          const executeRead = () => {
+            if (update && arg !== undefined && values.expect !== undefined && candidate) {
+              updateOutput(updateTopic({ dryRun: true, vault }, arg, values.expect, candidate));
+            } else if (show && arg !== undefined) {
+              const note = readNote(vault, arg, values.section);
+              output({ ok: true, ...note }, note.markdown);
             } else {
               const registry = list ? loadRegistry(root) : undefined;
-              // Regeneration validates through the publication module; --check only compares current bytes.
-              const current = index && !values.check ? validateCurrent(root) : undefined;
-              const checked = index && values.check ? inspectVault(root) : undefined;
-              const inventory = checked ?? current;
-              const diagnostics = registry ? registry.diagnostics : inventory ? inventory.diagnostics : lintVault(root, arg);
+              // --check only compares current bytes.
+              const checked = index ? inspectVault(root) : undefined;
+              const diagnostics = registry ? registry.diagnostics : checked ? checked.diagnostics : lintVault(root, arg);
               if (checked && !diagnostics.length) {
                 diagnostics.push(...indexFreshnessDiagnostics(root, checked.indexes));
                 sortDiagnostics(diagnostics);
               }
-              if (diagnostics.length) {
-                exitCode = 1;
-                const error = { code: "lint", message: "Wiki validation failed" };
-                output({ ok: false, error, diagnostics }, "", diagnostics.map(d => d.path + ": " + d.rule + ": " + d.message + "; fix: " + d.fix).join("\n") + "\n");
-              } else if (inventory) {
-                if (current?.plan) {
-                  const published = publish(held(), { kind: "index", plan: current.plan });
-                  if (published.written.paths.length) publishedResult = { written: true, ...published.written };
-                }
-                const paths = [...inventory.indexes.keys()].sort();
-                output({ ok: true, paths, checks: ["registry", "frontmatter", "layout", "body", "lifecycle", "scoped-titles", "links", "generated-index"] }, values.check ? "Generated indexes are current\n" : "Generated navigation: " + paths.join(", ") + "\n");
-              } else if (registry) {
+              if (diagnostics.length) lintFailure(diagnostics);
+              else if (checked) indexOutput(checked.indexes);
+              else if (registry) {
                 const types = listTypes(registry.types);
                 output({ ok: true, types }, types.map(t => t.name + " folder=" + t.folder + " required=" + t.requiredFields.join(",") + " headings=" + t.requiredHeadings.map(h => h.level + ":" + h.text).join(",") + " scopes=" + (t.scopes?.join(",") ?? "all")).join("\n") + "\n");
               } else output({ ok: true, diagnostics: [], checks: ["registry", "frontmatter", "layout", "body", "lifecycle", "scoped-titles", "links", ...(arg === undefined ? ["generated-index"] : [])] }, "Wiki lint passed (registry, frontmatter, layout, body, lifecycle, scoped titles, links; generated-index freshness " + (arg === undefined ? "checked" : "not checked for selected paths") + ")\n");
             }
           };
-          if (update && !values["dry-run"] || create || capture || add || index && !values.check) withMutationLock(root, lock => execute(lock));
-          else execute();
+          // The one lock rule: these commands write the vault; everything else is a read.
+          if (update && !values["dry-run"] || create || capture || add || index && !values.check) withMutationLock(root, executeWrite);
+          else executeRead();
         }
       }
     }
