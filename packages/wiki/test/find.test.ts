@@ -61,7 +61,7 @@ test("wiki:12 selectMatches revalidates in order, omits without retry, and stops
     { name: "an indexed body other than the captured one is omitted without a read", over: { indexed: new Map([...captured, [A, "old"]]) }, limit: 1, matches: [B], omitted: [[A, "Indexed content differs from the captured revision"]], reads: [B] },
     { name: "a hit missing from the capture is omitted without a read", over: { hits: [{ path: "projects/alpha/notes/gone.md", score: 1 }, { path: A, score: 0.5 }] }, limit: 5, matches: [A], omitted: [["projects/alpha/notes/gone.md", "Indexed candidate is not in the current captured inventory"]], reads: [A] },
     { name: "unmapped engine hits are omitted first", over: { unmapped: ["qmd://concepts/unknown.md"] }, limit: 1, matches: [A], omitted: [["qmd://concepts/unknown.md", "Indexed candidate is not in the current captured inventory"]], reads: [A] },
-    { name: "filters apply before the limit", over: { scope: "projects/alpha" }, limit: 3, matches: [A, B], omitted: [], reads: [A, B] },
+    { name: "filters apply before the limit", over: { scope: "projects/beta" }, limit: 1, matches: [C], omitted: [], reads: [C] },
   ];
   for (const { name, over = {}, current = {}, limit, matches, omitted, reads } of cases) {
     const port = reader(current);
