@@ -87,8 +87,8 @@ Not verified:
 
 Two locks exist. Neither is reclaimed by age or by PID.
 
-- `.wiki/locks/mutation.lock` serializes cooperating CLI content writes (new, type add, index, update, capture). Follow the README section "Explicit stale-lock recovery": stop other writers, read the token, PID, hostname, and time, check the real process on that host, and remove the lock file only when no owner is active. A PID alone can be reused.
-- The search index writer lock under `.wiki/search/` serializes `search sync`. Remove it only after you confirm that no index writer runs. The derived search state can then be deleted and rebuilt from Markdown.
+- `.wiki/locks/mutation.lock` serializes cooperating CLI content writes (new, type add, capture, `index` without `--check`, and `update` without `--dry-run`). Follow the README section "Explicit stale-lock recovery": stop other writers, read the token, PID, hostname, and time, check the real process on that host, and remove the lock file only when no owner is active. A PID alone can be reused.
+- `.wiki/search/writer.lock` serializes every command that writes the search index: `search sync`, `search sync --embed`, and `find` (fast and deep). The file is empty: it has no token, PID, host, or time. Before you remove it, stop every `wiki` process that uses this vault on every host that can reach it, and confirm with `ps` (look for any `wiki ... --vault <dir>` or `WIKI_VAULT` process that runs `find` or `search`). If you cannot confirm this, keep the lock. After removal, the derived `.wiki/search/` state can be deleted and rebuilt from Markdown with `search sync`.
 
 `doctor` reports held locks and retained temporary files. It never removes them.
 
@@ -99,18 +99,20 @@ file is published atomically, so no file is left half written.
 
 - When a later step fails after a file was published, the result has `ok: false` and `written: true` with the published paths and digests. Do not retry the content write.
 - Run `index` to repair generated navigation. Then inspect `log.md` and add a missing entry by hand only if needed. Do not invent its time.
-- A retained temporary file or reserved capture directory is reported by path. Inspect it before you remove it.
+- A failed write can leave a temporary file in `.wiki/tmp/` or a reserved capture directory under `<scope>/assets/<slug>/`. The failing command reports its path, and `doctor` lists every `.wiki/tmp/` entry. Compare it with the published paths, `log.md`, and the generated indexes before you remove it. Do not retry the publication blindly.
 - An interrupted `init` is not repaired by a second `init`. Inspect the retained files and choose a new empty directory or repair by hand.
-- An interrupted `search sync` publishes no complete coverage receipt. Run it again.
+- An interrupted `search sync` publishes no complete coverage receipt. Run it again. If it reports the index writer lock as busy, follow the writer-lock steps in Manual lock inspection first.
 
 ## External-editor race
 
 The mutation lock coordinates only cooperating `wiki` processes on one host. It does
 not stop Obsidian, Git, or another editor. `update` checks the expected full-file
 digest and re-reads the target just before an atomic rename, but an outside write
-between that read and the rename is lost. This is not compare-and-swap. Avoid
-outside edits to a topic while an update applies; otherwise stop, or use
-`update --dry-run`. Search coverage and find results describe the bytes read
+between that read and the rename is lost. This is not compare-and-swap. Close the topic in
+Obsidian and other editors, and do not run Git operations that touch it, before you
+apply an update. `update --dry-run` only previews the diff; it gives no protection.
+An outside write that lands between the final read and the rename is lost without a
+report. Search coverage and find results describe the bytes read
 during the command, not files frozen until it returns.
 
 ## Text coverage, embeddings, and source correctness
