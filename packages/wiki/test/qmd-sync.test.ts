@@ -49,6 +49,7 @@ test("wiki:10 real SDK adds exact full Markdown without embeddings and retrieves
   assert.equal(found.matches.length, 1);
   assert.equal(found.matches[0]?.path, "personal/notes/quasar.md");
   assert.equal(found.matches[0]?.markdown, markdown);
+  assert.equal(result.textCoverage.state, "complete");
   if (result.textCoverage.state === "complete") assert.equal(result.textCoverage.inventoryCount, 1);
   assert.match(result.state === "successful" ? result.textCoverage.inventoryDigest : "", /^sha256:[a-f0-9]{64}$/);
 });

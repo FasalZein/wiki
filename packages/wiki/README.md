@@ -660,11 +660,13 @@ objects, keys in that order, sorted by path in JavaScript string order (UTF-16
 code units), with no whitespace. These are the exact bytes of the `inventory`
 array in the receipt `.wiki/search/coverage.json` (`{"version":1,"inventory":[...]}`),
 whose format is unchanged and which doctor still compares in full. Recompute
-the digest from the receipt with:
+the digest from the receipt, run from the vault root, with:
 
     node -e 'const r=JSON.parse(require("fs").readFileSync(".wiki/search/coverage.json","utf8"));console.log("sha256:"+require("crypto").createHash("sha256").update(JSON.stringify(r.inventory)).digest("hex"))'
 
-Or recompute it from the vault: build the same array from the current concepts.
+Or recompute it from the vault: list every captured concept as `{path, digest}`
+(canonical path and `sha256:` digest of its current bytes), sort by path, and hash
+the same serialization.
 Incomplete and unavailable text coverage keep their `diagnostics` list.
 
 Coverage attests captured bytes compared with the actual indexed Markdown, not
