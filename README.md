@@ -35,7 +35,7 @@ changes the installed `wiki`; keep `packages/wiki/node_modules` installed.
 ## Verify
 
 ```sh
-bun run verify:next      # Node typecheck and tests for all packages (batch gate, heavy --slots 2)
+bun run verify:next      # Node typecheck and packages/wiki tests (batch gate, heavy --slots 2)
 bun run boot:wiki        # boot check in a temporary vault
 bun run test:tooling     # mutation tooling tests
 bun run typecheck:tooling
