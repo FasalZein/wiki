@@ -201,8 +201,8 @@ boundary as the other commands, not protection against hostile concurrent swaps.
 From the repository root:
 
 ```sh
-WIKI_TEST_PATTERN="wiki:01|wiki:02" heavy -- bun run test:wiki
-WIKI_TEST_PATTERN="wiki:06" heavy -- bun run test:wiki
+WIKI_TEST_PATTERN="wiki:01|wiki:02" heavy --slots 2 -- bun run test:wiki
+WIKI_TEST_PATTERN="wiki:06" heavy --slots 2 -- bun run test:wiki
 heavy -- bun run typecheck:wiki
 ```
 
@@ -623,7 +623,7 @@ The first detected error sets the exit: usage 2, retained lock 3, missing vault 
 unsupported profile 5, damaged retained state 6, unavailable dependency or
 uninspectable search 7. Human output includes the same diagnostics.
 
-Run `WIKI_TEST_PATTERN='wiki:17' heavy -- bun run test:wiki` for real CLI checks.
+Run `WIKI_TEST_PATTERN='wiki:17' heavy --slots 2 -- bun run test:wiki` for real CLI checks.
 They compare byte digests and complete entry listings, including `.wiki/`, against
 before/after vault and decoy HOME/XDG snapshots on healthy and damaged state.
 
