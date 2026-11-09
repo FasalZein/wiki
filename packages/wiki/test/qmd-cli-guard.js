@@ -36,7 +36,8 @@ if (forbidden) for (const name of ["readFileSync", "openSync", "statSync", "lsta
   const original = fs[name];
   fs[name] = (file, ...args) => { if (String(file).includes(forbidden)) throw new Error("Search opened a mentioned repository path: " + String(file)); return original(file, ...args); };
 }
-const read = fs.readFileSync, write = fs.writeFileSync;
+const read = fs.readFileSync, write = fs.writeFileSync, append = fs.appendFileSync;
+const log = (entry) => append(process.env.WIKI_QMD_CALL_LOG, JSON.stringify(entry) + "\n");
 let fired = false;
 fs.readFileSync = (file, ...args) => {
   if (mode === "unreadable" && String(file).endsWith("/personal/notes/unreadable.md")) throw Object.assign(new Error("Injected unreadable concept"), { code: "EACCES" });
@@ -46,15 +47,17 @@ fs.readFileSync = (file, ...args) => {
   }
   return bytes;
 };
-// Two-process stale-index schedule, synchronized only at source events through FIFOs
-// (blocking open/read, no polling): B captures R0 and pauses before its index lock;
-// A captures R1, syncs and releases; B syncs R0 and releases; then A queries.
+// Two-process schedule, synchronized only at source events through FIFOs (blocking
+// open/read, no polling): B captures R0 and pauses before its index lock; A captures R1
+// and runs until its first index-lock release; B then syncs R0 and releases; A continues.
 const fifo = (name) => path.join(process.env.WIKI_QMD_FIFO_DIR ?? "", name);
 let staleB = false, staleA = false;
 fs.writeFileSync = (file, ...args) => {
-  if (mode === "stale-b" && !staleB && String(file).endsWith("/.wiki/search/writer.lock")) {
+  const lock = String(file).endsWith("/.wiki/search/writer.lock");
+  if (mode === "stale-b" && !staleB && lock) {
     staleB = true; write(fifo("b-captured"), "captured R0"); read(fifo("b-go"));
   }
+  if (mode === "fake-inference-steal-lock" && lock) log({ op: "lock" });
   const result = write(file, ...args);
   if (mode === "inspect-active-lock-ignore" && String(file).endsWith("/.wiki/search/writer.lock")) {
     const root = path.resolve(process.argv[process.argv.indexOf("--vault") + 1]);
@@ -73,10 +76,13 @@ fs.writeFileSync = (file, ...args) => {
 };
 const unlink = fs.unlinkSync;
 fs.unlinkSync = (file, ...args) => {
+  // The final index-lock release fails; the lock stays retained.
+  if (mode === "fake-inference-release-fail" && String(file).endsWith("/.wiki/search/writer.lock")) throw Object.assign(new Error("Injected writer lock removal failure"), { code: "EACCES" });
   const result = unlink(file, ...args);
-  // Another cooperative writer takes the index lock between text sync and find/embed.
+  // Another cooperative writer takes the index lock as soon as this request releases it.
+  if (mode === "fake-inference-steal-lock" && String(file).endsWith("/.wiki/search/writer.lock")) log({ op: "unlock" });
   if (mode === "stale-b" && String(file).endsWith("/.wiki/search/writer.lock")) write(fifo("a-go"), "synced R0");
-  if (mode === "fake-inference-stale-a" && !staleA && String(file).endsWith("/.wiki/search/writer.lock")) { staleA = true; write(fifo("b-go"), "synced R1"); read(fifo("a-go")); }
+  if (mode === "fake-inference-stale-a" && !staleA && String(file).endsWith("/.wiki/search/writer.lock")) { staleA = true; write(fifo("b-go"), "A released"); read(fifo("a-go")); }
   if (mode === "fake-inference-steal-lock" && !fired && String(file).endsWith("/.wiki/search/writer.lock")) { fired = true; write(file, "other writer", { flag: "wx" }); }
   return result;
 };

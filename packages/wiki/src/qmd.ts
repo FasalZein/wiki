@@ -1,9 +1,11 @@
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import type { QMDStore, UpdateProgress, UpdateResult } from "@tobilu/qmd";
 import { canonicalPathProblem, inspectContainedPath } from "./paths.ts";
-import { parseNoteText } from "./frontmatter.ts";
+import { isMapping, parseNoteText } from "./frontmatter.ts";
 
 /** Caller supplies a complete capture of validated concepts, not a selected subset.
  * Report every invalid/unreadable concept in diagnostics; never silently omit it. */
@@ -73,12 +75,10 @@ function acquire(root: string) {
     return diagnostics;
   };
 }
-async function cleanup(store: QMDStore | undefined, release: (() => QmdDiagnostic[]) | undefined): Promise<QmdDiagnostic[]> {
-  const diagnostics: QmdDiagnostic[] = [];
-  try { await store?.close(); } catch (error) { diagnostics.push({ path: DIRECTORY, message: "SDK close failed: " + message(error) }); }
-  if (release) diagnostics.push(...release());
-  return diagnostics;
-}
+/** One operation's outcome at the shared failure boundary. value: undefined after a failure. */
+type Attempt<V> = { value: V | undefined; code: "conflict" | "unavailable"; failures: QmdDiagnostic[] };
+/** The SDK store of one operation: open binds models and environment; close ends it early (sync closes before publishing). */
+type StoreSlot = { open(models: QmdModels | undefined): Promise<QMDStore>; close(): Promise<void> };
 function unavailable(diagnostics: QmdDiagnostic[], code: "conflict" | "unavailable" = "unavailable"): Extract<QmdSyncResult, { state: "unavailable" }> {
   return { state: "unavailable", code, textCoverage: { state: "unavailable", diagnostics }, embeddingCoverage: { state: "unavailable" } };
 }
@@ -123,9 +123,12 @@ async function open(root: string, models?: QmdModels): Promise<QMDStore> {
  * call (it matches a computed virtual path). Layout per its store.js initializeDatabase:
  * documents(collection, path, hash, active, UNIQUE(collection, path)) and content(hash PRIMARY KEY, doc). */
 function indexedBodies(store: QMDStore): Map<string, string> {
-  const rows = store.internal.db.prepare("SELECT d.path AS id, c.doc AS body FROM documents d JOIN content c ON c.hash = d.hash WHERE d.collection = ? AND d.active = 1")
-    .all<{ id: string; body: string }>(COLLECTION);
-  return new Map(rows.map(row => [row.id, row.body]));
+  return new Map(activeDocuments(store.internal.db, "main").filter(row => row.collection === COLLECTION).map(row => [row.path, row.doc]));
+}
+/** The only copy of the active-document read. schema: "main", or a database ATTACHed for inspection (doctor). */
+function activeDocuments(db: QMDStore["internal"]["db"], schema: "main" | "inspected") {
+  return db.prepare("SELECT d.id, d.collection, d.path, d.title, c.doc FROM " + schema + ".documents d JOIN " + schema + ".content c ON c.hash = d.hash WHERE d.active = 1")
+    .all<{ id: number; collection: string; path: string; title: string; doc: string }>();
 }
 function conceptProblem(relative: string): string | undefined {
   const canonical = canonicalPathProblem(relative);
@@ -139,129 +142,322 @@ function conceptProblem(relative: string): string | undefined {
   return undefined;
 }
 
-/** Model-free text update. Successful receipts attest only the captured input,
- * never filesystem freshness or embedding completion. The entire directory is derived. */
-export async function syncQmdText(root: string, inventory: QmdInventory, options: QmdSyncOptions = {}): Promise<QmdSyncResult> {
-  let release: (() => QmdDiagnostic[]) | undefined;
-  let store: QMDStore | undefined;
-  let result: QmdSyncResult | undefined;
-  let code: "conflict" | "unavailable" = "unavailable";
-  const failures: QmdDiagnostic[] = [];
-  try {
-    release = acquire(root);
-    const manifest = checked(root, DIRECTORY + "/coverage.json");
-    fs.rmSync(manifest, { force: true });
-    const mapping = checked(root, DIRECTORY + "/identities.json");
-    fs.rmSync(mapping, { force: true });
-    options.signal?.throwIfAborted();
-    const diagnostics = [...inventory.diagnostics];
-    const concepts = new Map<string, string>();
-    for (const concept of inventory.concepts) {
-      const problem = conceptProblem(concept.path);
-      if (problem) diagnostics.push({ path: concept.path, message: problem });
-      else if (concepts.has(concept.path)) throw new Error("Duplicate concept path: " + concept.path);
-      else if (Buffer.from(concept.markdown).toString("utf8") !== concept.markdown) throw new Error("Invalid Unicode Markdown: " + concept.path);
-      else concepts.set(concept.path, concept.markdown);
+/** One request's hold on the vault's search index. The first operation takes the exclusive
+ * writer lock and the session keeps it until close(), so a find or embed request synchronizes
+ * text and then queries or embeds under one lock: no other writer can replace the index between.
+ * Operations run one at a time. Each opens and closes its own SDK store, because synchronization
+ * closes the store before it publishes receipts. The session owns the lock, the state files
+ * (identities.json, coverage.json, snapshots, SQLite sidecars), staged ids and SDK internals.
+ * Process-global effect: QMD 2.8.3 reads XDG_CACHE_HOME, XDG_CONFIG_HOME and QMD_EMBED_MODEL from
+ * process.env, so each store open sets them; one process must use one vault at a time. */
+class SearchIndexSession {
+  #release: (() => QmdDiagnostic[]) | undefined;
+  #closed = false;
+  /** Set once sync starts: its receipts are then only valid while this session holds the lock. */
+  #synced = false;
+  /** models: the preflighted local files that synchronization counts pending embeddings against. */
+  readonly root: string;
+  readonly models: QmdModels | undefined;
+  constructor(root: string, models: QmdModels | undefined) { this.root = root; this.models = models; }
+  #acquire(): void {
+    if (this.#closed) throw new Error("Search index session is closed");
+    this.#release ??= acquire(this.root);
+  }
+  #indexIdentities(): Map<string, string> {
+    if (!fs.existsSync(checked(this.root, DIRECTORY + "/qmd.sqlite"))) throw new Error("Text index unavailable; synchronize captured concepts first");
+    return readIdentities(this.root);
+  }
+  async #open(models: QmdModels | undefined): Promise<QMDStore> {
+    if (models) bindModels(models);
+    return open(this.root, models);
+  }
+  #invalidate(failures: QmdDiagnostic[]): void {
+    for (const file of ["coverage.json", "identities.json"]) {
+      try { fs.rmSync(checked(this.root, DIRECTORY + "/" + file), { force: true }); }
+      catch (error) { failures.push({ path: DIRECTORY + "/" + file, message: "Failed to invalidate derived state: " + message(error) + ". Do not trust retained coverage; repair permissions and synchronize again" }); }
     }
-    // QMD scans this allowlisted capture, not the vault. Full bytes are written
-    // every time: neither our adapter nor QMD gates content hashing on mtime/size.
-    const snapshots = checked(root, DIRECTORY + "/snapshots");
-    fs.rmSync(snapshots, { recursive: true, force: true });
-    fs.mkdirSync(snapshots);
-    const identities = new Map<string, string>();
-    for (const [relative, markdown] of concepts) {
-      const id = stagedId(relative);
-      if (identities.has(id)) throw new Error("Staged identity collision: " + relative);
-      identities.set(id, relative);
-      const full = checked(root, DIRECTORY + "/snapshots/" + id);
-      fs.writeFileSync(full, markdown, { flag: "wx" });
+  }
+  /** The failure boundary every operation shares: a thrown error becomes one diagnostic (a busy
+   * lock is a conflict), and an open SDK store closes afterwards without replacing the primary error. */
+  async #attempt<V>(body: (store: StoreSlot) => Promise<V>): Promise<Attempt<V>> {
+    const held: { store?: QMDStore } = {};
+    const slot: StoreSlot = {
+      open: async models => (held.store = await this.#open(models)),
+      close: async () => { const store = held.store; held.store = undefined; await store?.close(); },
+    };
+    let value: V | undefined;
+    let code: Attempt<V>["code"] = "unavailable";
+    const failures: QmdDiagnostic[] = [];
+    try { value = await body(slot); }
+    catch (error) {
+      if (error instanceof IndexWriterBusyError) code = "conflict";
+      failures.push({ path: DIRECTORY, message: message(error) });
     }
-    if (options.models) bindModels(options.models);
-    store = await open(root, options.models);
-    const update = await store.update({ collections: [COLLECTION], onProgress(progress) {
+    try { await held.store?.close(); } catch (error) { failures.push({ path: DIRECTORY, message: "SDK close failed: " + message(error) }); }
+    return { value, code, failures };
+  }
+  /** Releases the lock. A failed unlink retains our exclusive marker, so receipts this session
+   * published are invalidated. Only inSession calls it; it folds the failures into the request. */
+  close(): QmdDiagnostic[] {
+    this.#closed = true;
+    const release = this.#release;
+    this.#release = undefined;
+    const failures = release?.() ?? [];
+    if (failures.length && this.#synced) this.#invalidate(failures);
+    return failures;
+  }
+
+  /** Model-free text update: replace the text index from a complete inventory. Successful receipts
+   * attest only the captured input, never filesystem freshness or embedding completion. */
+  async sync(inventory: QmdInventory, options: QmdSyncOptions = {}): Promise<QmdSyncResult> {
+    const { value, code, failures } = await this.#attempt<QmdSyncResult>(async slot => {
+      this.#acquire();
+      this.#synced = true;
+      const manifest = checked(this.root, DIRECTORY + "/coverage.json");
+      fs.rmSync(manifest, { force: true });
+      const mapping = checked(this.root, DIRECTORY + "/identities.json");
+      fs.rmSync(mapping, { force: true });
       options.signal?.throwIfAborted();
-      const canonical = identities.get(progress.file);
-      if (!canonical) throw new Error("Unknown staged progress identity: " + progress.file);
-      options.onProgress?.({ ...progress, file: canonical });
+      const diagnostics = [...inventory.diagnostics];
+      const concepts = new Map<string, string>();
+      for (const concept of inventory.concepts) {
+        const problem = conceptProblem(concept.path);
+        if (problem) diagnostics.push({ path: concept.path, message: problem });
+        else if (concepts.has(concept.path)) throw new Error("Duplicate concept path: " + concept.path);
+        else if (Buffer.from(concept.markdown).toString("utf8") !== concept.markdown) throw new Error("Invalid Unicode Markdown: " + concept.path);
+        else concepts.set(concept.path, concept.markdown);
+      }
+      // QMD scans this allowlisted capture, not the vault. Full bytes are written
+      // every time: neither our adapter nor QMD gates content hashing on mtime/size.
+      const snapshots = checked(this.root, DIRECTORY + "/snapshots");
+      fs.rmSync(snapshots, { recursive: true, force: true });
+      fs.mkdirSync(snapshots);
+      const identities = new Map<string, string>();
+      for (const [relative, markdown] of concepts) {
+        const id = stagedId(relative);
+        if (identities.has(id)) throw new Error("Staged identity collision: " + relative);
+        identities.set(id, relative);
+        const full = checked(this.root, DIRECTORY + "/snapshots/" + id);
+        fs.writeFileSync(full, markdown, { flag: "wx" });
+      }
+      const store = await slot.open(this.models);
+      const update = await store.update({ collections: [COLLECTION], onProgress(progress) {
+        options.signal?.throwIfAborted();
+        const canonical = identities.get(progress.file);
+        if (!canonical) throw new Error("Unknown staged progress identity: " + progress.file);
+        options.onProgress?.({ ...progress, file: canonical });
+        options.signal?.throwIfAborted();
+      } });
       options.signal?.throwIfAborted();
-    } });
-    options.signal?.throwIfAborted();
-    if (update.skipped) throw new Error("QMD skipped " + update.skipped + " captured concepts");
-    const indexed: QmdDigest[] = [];
-    const bodies = indexedBodies(store);
-    for (const [relative, markdown] of concepts) {
-      options.signal?.throwIfAborted();
-      const body = bodies.get(stagedId(relative)) ?? null;
-      if (body !== markdown) throw new Error("Indexed Markdown differs from captured concept: " + relative);
-      indexed.push({ path: relative, digest: digest(markdown) });
-    }
-    const status = await store.getStatus();
-    if (status.totalDocuments !== concepts.size) throw new Error("Indexed document count differs from captured inventory");
-    const embeddingCoverage: QmdEmbeddingCoverage = status.needsEmbedding > 0
-      ? { state: "pending", contentHashes: status.needsEmbedding } : { state: "complete" };
-    // Closing is part of successful synchronization, not an effect after publishing coverage.
-    const completed = store;
-    store = undefined;
-    await completed.close();
-    fs.writeFileSync(mapping, JSON.stringify({ version: 1, paths: [...identities].map(([id, canonical]) => ({ id, path: canonical })) }) + "\n", { flag: "wx" });
-    if (diagnostics.length) result = { state: "incomplete", textCoverage: { state: "incomplete", diagnostics }, embeddingCoverage, update };
-    else {
+      if (update.skipped) throw new Error("QMD skipped " + update.skipped + " captured concepts");
+      const indexed: QmdDigest[] = [];
+      const bodies = indexedBodies(store);
+      for (const [relative, markdown] of concepts) {
+        options.signal?.throwIfAborted();
+        const body = bodies.get(stagedId(relative)) ?? null;
+        if (body !== markdown) throw new Error("Indexed Markdown differs from captured concept: " + relative);
+        indexed.push({ path: relative, digest: digest(markdown) });
+      }
+      const status = await store.getStatus();
+      if (status.totalDocuments !== concepts.size) throw new Error("Indexed document count differs from captured inventory");
+      const embeddingCoverage: QmdEmbeddingCoverage = status.needsEmbedding > 0
+        ? { state: "pending", contentHashes: status.needsEmbedding } : { state: "complete" };
+      // Closing is part of successful synchronization, not an effect after publishing coverage.
+      await slot.close();
+      fs.writeFileSync(mapping, JSON.stringify({ version: 1, paths: [...identities].map(([id, canonical]) => ({ id, path: canonical })) }) + "\n", { flag: "wx" });
+      if (diagnostics.length) return { state: "incomplete", textCoverage: { state: "incomplete", diagnostics }, embeddingCoverage, update };
       indexed.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
       options.signal?.throwIfAborted();
       // Publish only after body comparison and SDK close; failed cleanup invalidates this receipt below.
       fs.writeFileSync(manifest, JSON.stringify({ version: 1, inventory: indexed }) + "\n", { flag: "wx" });
-      result = { state: "successful", textCoverage: { state: "complete", inventory: indexed }, embeddingCoverage, update };
-    }
-  } catch (error) {
-    if (error instanceof IndexWriterBusyError) code = "conflict";
-    failures.push({ path: DIRECTORY, message: message(error) });
+      return { state: "successful", textCoverage: { state: "complete", inventory: indexed }, embeddingCoverage, update };
+    });
+    // Invalidate while still owning the lock, never after another writer can acquire it.
+    if (failures.length && this.#release) this.#invalidate(failures);
+    return failures.length ? unavailable(failures, code) : value ?? unavailable([{ path: DIRECTORY, message: "Synchronization did not complete" }]);
   }
-  // Cleanup belongs to the same structured failure boundary, without replacing the primary error.
-  failures.push(...await cleanup(store, undefined));
-  const invalidate = () => {
-    for (const file of ["coverage.json", "identities.json"]) {
-      try { fs.rmSync(checked(root, DIRECTORY + "/" + file), { force: true }); }
-      catch (error) { failures.push({ path: DIRECTORY + "/" + file, message: "Failed to invalidate derived state: " + message(error) + ". Do not trust retained coverage; repair permissions and synchronize again" }); }
-    }
-  };
-  // Invalidate while still owning the lock, never after another writer can acquire it.
-  if (failures.length && release) invalidate();
-  const releaseFailures = release?.() ?? [];
-  failures.push(...releaseFailures);
-  if (releaseFailures.length) invalidate(); // Failed unlink retains our exclusive marker.
-  return failures.length ? unavailable(failures, code) : result ?? unavailable([{ path: DIRECTORY, message: "Synchronization did not complete" }]);
+
+  /** Lexical operation only, not a freshness/coverage claim. Cannot start models or embeddings. */
+  async searchLex(query: string, limit = 10): Promise<QmdLexResult> {
+    const { value, failures } = await this.#attempt<QmdLexResult>(async slot => {
+      if (!Number.isSafeInteger(limit) || limit < 1) throw new Error("Expected a positive integer lexical limit");
+      this.#acquire();
+      const identities = this.#indexIdentities();
+      const store = await slot.open(undefined);
+      const results = await store.searchLex(query, { collection: COLLECTION, limit });
+      const matches = [];
+      for (const result of results) {
+        if (!result.filepath.startsWith(PREFIX)) throw new Error("Unexpected indexed collection identity");
+        const relative = identities.get(result.filepath.slice(PREFIX.length));
+        if (!relative) throw new Error("Unmapped indexed concept identity: " + result.filepath);
+        const markdown = await store.getDocumentBody(result.filepath);
+        if (markdown === null) throw new Error("Missing indexed result body: " + relative);
+        matches.push({ path: relative, markdown, score: result.score });
+      }
+      return { state: "successful", matches };
+    });
+    return failures.length ? { state: "unavailable", diagnostics: failures } : value ?? { state: "unavailable", diagnostics: [{ path: DIRECTORY, message: "Lexical query did not complete" }] };
+  }
+  /** Fast: one typed lex/vec request, no expansion, no rerank. Deep: explicit expansion
+   * and reranking. A fast miss never escalates. Never embeds. captured: the inventory the
+   * index was synchronized from; results render only from it. */
+  async find(request: QmdFindRequest, captured: QmdInventory["concepts"], signal?: AbortSignal): Promise<QmdFindResult> {
+    const { value, code, failures } = await this.#attempt<QmdFindResult>(async slot => {
+      signal?.throwIfAborted();
+      if (!request.question.trim() || request.terms !== undefined && !request.terms.trim()) throw new Error("Expected a nonempty question and terms");
+      const limit = request.limit ?? QMD_DEFAULT_LIMIT;
+      if (!Number.isSafeInteger(limit) || limit < 1) throw new Error("Expected a positive integer find limit");
+      this.#acquire();
+      const identities = this.#indexIdentities();
+      const lexical: QmdQuery = { type: "lex", query: request.terms ?? request.question };
+      let degraded: QmdDegraded | undefined = request.mode === "lexical" ? { retrieval: "lexical", exhaustive: false, reason: "models-unavailable", diagnostics: request.reason } : undefined;
+      const store = await slot.open(request.mode === "lexical" ? undefined : request.models);
+      let queries: QmdQuery[] = [lexical];
+      let found: { file: string; score: number }[] | undefined;
+      // The query must run against the index of this request's captured inventory. Another
+      // cooperative sync can replace it between our sync and this lock; detect, never assume.
+      const concepts = new Map(captured.map(c => [c.path, c.markdown]));
+      const indexMismatch: QmdDiagnostic[] = [];
+      const indexed = new Set(identities.values());
+      // Read once under this request's lock: the same bodies serve this check and rendering below.
+      const bodies = indexedBodies(store);
+      for (const [relative, markdown] of concepts) {
+        if (!indexed.has(relative)) indexMismatch.push({ path: relative, message: "Captured concept is missing from the queried index (replaced by another synchronization); text coverage incomplete. Search again" });
+        else if (bodies.get(stagedId(relative)) !== markdown) indexMismatch.push({ path: relative, message: "Queried index holds a different revision than this request captured (replaced by another synchronization); text coverage incomplete. Search again" });
+      }
+      for (const relative of indexed) if (!concepts.has(relative)) indexMismatch.push({ path: relative, message: "Queried index holds a concept outside this request's captured inventory; text coverage incomplete. Search again" });
+      signal?.throwIfAborted();
+      if (request.mode !== "lexical") {
+        // QMD 2.8.3 logs native model/context/query-embedding failures and returns null
+        // embeddings; structured search then skips vector legs and resolves normally.
+        // Observe the embeddings it received instead of relying on a thrown error.
+        const llm = store.internal.llm;
+        if (!llm) throw new Error("SDK store has no bound local model");
+        let missingEmbeddings = 0;
+        const embedBatch = llm.embedBatch.bind(llm);
+        llm.embedBatch = async (texts, options) => {
+          const embeddings = await embedBatch(texts, options);
+          missingEmbeddings += texts.length - embeddings.filter(e => e?.embedding).length;
+          return embeddings;
+        };
+        try {
+          if (request.mode === "fast") queries = [lexical, { type: "vec", query: request.question }];
+          else {
+            const expanded = await store.expandQuery(request.question);
+            // Native inference cannot be cancelled mid-call; stop at the next boundary.
+            signal?.throwIfAborted();
+            if (!expanded.some(q => q.query !== request.question)) throw new ExpansionFailedError("Deep query expansion produced no usable entries (" + expanded.length + " returned); expansion and reranking did not run");
+            queries = [...(request.terms === undefined ? [] : [lexical]), ...expanded.map(q => ({ type: q.type, query: q.query }))];
+          }
+          // The final limit applies after literal merging and filters, so qmd's own result slice spans the whole collection.
+          found = await store.search({ queries, rerank: request.mode === "deep", collection: COLLECTION, limit: Math.max(identities.size, 1) });
+          if (missingEmbeddings) { found = undefined; throw new Error(missingEmbeddings + " query embeddings were not produced; QMD skipped those vector legs"); }
+        } catch (error) {
+          if (!vectorFailure(error, signal)) throw error;
+          // Same engine, lexical index only: no second search stack.
+          degraded = error instanceof ExpansionFailedError
+            ? { retrieval: "lexical", exhaustive: false, reason: "expansion-failed", diagnostics: [{ path: DIRECTORY, message: message(error) }] }
+            : { retrieval: "lexical", exhaustive: false, reason: "vector-failed", diagnostics: [{ path: DIRECTORY, message: "Vector/model search failed: " + message(error) }] };
+          queries = [lexical];
+        }
+      }
+      found ??= (await store.searchLex(lexical.query, { collection: COLLECTION, limit: Math.max(identities.size, 1) })).map(hit => ({ file: hit.filepath, score: hit.score }));
+      signal?.throwIfAborted();
+      const matches: QmdRenderedMatch[] = [], omitted: QmdDiagnostic[] = [];
+      // Literal tokens are plain substrings of canonical paths and captured note text. Mentioned
+      // paths are never opened; a regex, shell or FTS reading of the token never happens.
+      const literals = literalTokens(request.question + (request.terms === undefined ? "" : "\n" + request.terms));
+      type Candidate = { path: string; file: string; score: number | null; rank: number; literal: string[] };
+      const candidates = new Map<string, Candidate>();
+      const ranked: { path: string; file: string; score: number }[] = [];
+      for (const match of found) {
+        if (!match.file.startsWith(PREFIX)) throw new Error("Unexpected indexed collection identity");
+        const relative = identities.get(match.file.slice(PREFIX.length));
+        if (relative === undefined) render(this.root, relative, match.file, match.score, [], null, concepts, queries, omitted);
+        else ranked.push({ path: relative, file: match.file, score: match.score });
+      }
+      // qmd order by score, canonical path breaks ties; a path keeps its best-ranked entry.
+      ranked.sort((a, b) => b.score - a.score || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+      for (const [rank, match] of ranked.entries()) if (!candidates.has(match.path)) candidates.set(match.path, { ...match, rank, literal: [] });
+      if (literals.length) for (const [relative, markdown] of concepts) {
+        const literal = literals.filter(token => relative.includes(token) || markdown.includes(token));
+        if (!literal.length) continue;
+        const existing = candidates.get(relative);
+        if (existing) existing.literal = literal;
+        else candidates.set(relative, { path: relative, file: PREFIX + stagedId(relative), score: null, rank: Infinity, literal });
+      }
+      const inScope = (relative: string) => request.scope === undefined || relative.startsWith(request.scope + "/");
+      // A candidate outside the captured inventory has no type; render reports its omission.
+      const ofType = (relative: string) => request.type === undefined || !concepts.has(relative) || typeOf(concepts.get(relative) ?? "") === request.type;
+      const ordered = [...candidates.values()].filter(c => inScope(c.path) && ofType(c.path))
+        .sort((a, b) => Number(!a.literal.length) - Number(!b.literal.length) || a.rank - b.rank || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+      for (const candidate of ordered) {
+        if (matches.length === limit) break;
+        signal?.throwIfAborted();
+        const rendered = render(this.root, candidate.path, candidate.file, candidate.score, candidate.literal, bodies.get(candidate.file.slice(PREFIX.length)) ?? null, concepts, queries, omitted);
+        if (rendered) matches.push(rendered);
+      }
+      const rerank = request.mode === "deep" && !degraded;
+      return { state: "successful", mode: request.mode === "lexical" ? request.requested : request.mode, queries, rerank, ...(degraded ? { degraded } : {}), literals, limit, matches, omitted, indexMismatch } satisfies QmdFindResult;
+    });
+    // A signal during cleanup still withholds success.
+    if (signal?.aborted && !failures.length) failures.push({ path: DIRECTORY, message: message(signal.reason) });
+    return failures.length ? { state: "unavailable", code, diagnostics: failures } : value ?? { state: "unavailable", code, diagnostics: [{ path: DIRECTORY, message: "Find did not complete" }] };
+  }
+  /** Explicit synchronous embedding of current missing content hashes. No detached worker. */
+  async embed(models: QmdReadyModels<"embed">, signal?: AbortSignal): Promise<QmdEmbedResult> {
+    // Filled as embedding progresses: a later failure still reports what was embedded.
+    const done: { embedded?: { docsProcessed: number; chunksEmbedded: number; errors: number }; coverage: QmdEmbeddingCoverage } = { coverage: { state: "unavailable" } };
+    const problems: QmdDiagnostic[] = [];
+    const attempt = await this.#attempt(async slot => {
+      signal?.throwIfAborted();
+      this.#acquire();
+      if (!fs.existsSync(checked(this.root, DIRECTORY + "/qmd.sqlite"))) throw new Error("Text index unavailable; synchronize captured concepts first");
+      const store = await slot.open(models);
+      // Progress is the SDK's only callback; aborting there stops between batches.
+      const outcome = await store.embed({ onProgress() { signal?.throwIfAborted(); } });
+      signal?.throwIfAborted();
+      done.embedded = { docsProcessed: outcome.docsProcessed, chunksEmbedded: outcome.chunksEmbedded, errors: outcome.errors };
+      const status = await store.getStatus();
+      done.coverage = status.needsEmbedding > 0 ? { state: "pending", contentHashes: status.needsEmbedding } : { state: "complete" };
+      if (outcome.errors > 0) problems.push({ path: DIRECTORY, message: outcome.errors + " embedding errors" });
+      if (done.coverage.state !== "complete") problems.push({ path: DIRECTORY, message: "Embeddings remain pending after explicit embedding" });
+    });
+    const failures = [...problems, ...attempt.failures];
+    if (signal?.aborted && !failures.some(f => f.message === message(signal.reason))) failures.push({ path: DIRECTORY, message: message(signal.reason) });
+    const { embedded, coverage } = done;
+    if (failures.length || !embedded || coverage.state !== "complete") return { state: "failed", code: attempt.code, embeddingCoverage: coverage.state === "complete" ? { state: "unavailable" } : coverage, ...(embedded ? { embedded } : {}), diagnostics: failures };
+    return { state: "complete", embeddingCoverage: { state: "complete" }, embedded };
+  }
+}
+/** What one request reports: sync-led requests (sync, find, --embed) or a single test-seam operation. */
+type SessionOutcome = { sync?: QmdSyncResult; find?: QmdFindResult; embed?: QmdEmbedResult; lex?: QmdLexResult };
+/** Runs one request in one session, then releases the lock and folds a failed release into the result.
+ * A failed release retains the lock, and close() has invalidated every receipt this session's sync
+ * published. A request that synchronized therefore reports an unavailable synchronization and drops
+ * its follow-on result (keeping that result's failures as diagnostics), as before one session held
+ * the lock across sync and query. A request without sync reports its operation unavailable. */
+async function inSession<O extends SessionOutcome>(root: string, models: QmdModels | undefined, run: (session: SearchIndexSession) => Promise<O>): Promise<O> {
+  const session = new SearchIndexSession(root, models);
+  const outcome = await run(session);
+  const release = session.close();
+  if (!release.length) return outcome;
+  const { sync, find, embed, lex } = outcome;
+  const operation = [...(find?.state === "unavailable" ? find.diagnostics : []), ...(embed?.state === "failed" ? embed.diagnostics : []), ...(lex?.state === "unavailable" ? lex.diagnostics : [])];
+  // Each branch keeps the key the caller reads (sync, find or lex); follow-on keys are optional.
+  if (sync) return { sync: sync.state === "unavailable" ? unavailable([...sync.textCoverage.diagnostics, ...release], sync.code) : unavailable([...operation, ...release]) } as O;
+  if (find) return { find: { state: "unavailable", code: find.state === "unavailable" ? find.code : "unavailable", diagnostics: [...operation, ...release] } } as O;
+  return { lex: { state: "unavailable", diagnostics: [...operation, ...release] } } as O;
 }
 
-/** Lexical operation only, not a freshness/coverage claim. Synchronize the full
- * current inventory first. This interface cannot start models or embeddings. */
+/** Model-free text update in its own session. The entire .wiki/search directory is derived. */
+export async function syncQmdText(root: string, inventory: QmdInventory, options: QmdSyncOptions = {}): Promise<QmdSyncResult> {
+  return (await inSession(root, options.models, async session => ({ sync: await session.sync(inventory, options) }))).sync;
+}
+
+/** Lexical oracle for tests and diagnostics: synchronize the full current inventory first. */
 export async function searchQmdLex(root: string, query: string, limit = 10): Promise<QmdLexResult> {
-  let release: (() => QmdDiagnostic[]) | undefined;
-  let store: QMDStore | undefined;
-  let result: QmdLexResult | undefined;
-  const failures: QmdDiagnostic[] = [];
-  try {
-    if (!Number.isSafeInteger(limit) || limit < 1) throw new Error("Expected a positive integer lexical limit");
-    release = acquire(root);
-    const dbPath = checked(root, DIRECTORY + "/qmd.sqlite");
-    if (!fs.existsSync(dbPath)) throw new Error("Text index unavailable; synchronize captured concepts first");
-    const identities = readIdentities(root);
-    store = await open(root);
-    const results = await store.searchLex(query, { collection: COLLECTION, limit });
-    const matches = [];
-    for (const result of results) {
-      if (!result.filepath.startsWith(PREFIX)) throw new Error("Unexpected indexed collection identity");
-      const relative = identities.get(result.filepath.slice(PREFIX.length));
-      if (!relative) throw new Error("Unmapped indexed concept identity: " + result.filepath);
-      const markdown = await store.getDocumentBody(result.filepath);
-      if (markdown === null) throw new Error("Missing indexed result body: " + relative);
-      matches.push({ path: relative, markdown, score: result.score });
-    }
-    result = { state: "successful", matches };
-  } catch (error) {
-    failures.push({ path: DIRECTORY, message: message(error) });
-  }
-  failures.push(...await cleanup(store, release));
-  return failures.length ? { state: "unavailable", diagnostics: failures } : result ?? { state: "unavailable", diagnostics: [{ path: DIRECTORY, message: "Lexical query did not complete" }] };
+  return (await inSession(root, undefined, async session => ({ lex: await session.searchLex(query, limit) }))).lex;
 }
 
 /** Explicit local model files from .wiki/config.json search.models. Initialization leaves them unset. */
@@ -394,156 +590,184 @@ function vectorFailure(error: unknown, signal: AbortSignal | undefined): boolean
   return !(error instanceof IndexWriterBusyError) && !signal?.aborted;
 }
 
-/** Fast: one typed lex/vec request, no expansion, no rerank. Deep: explicit expansion
- * and reranking. A fast miss never escalates. Synchronize text first; never embeds.
- * captured: the same inventory passed to syncQmdText; results render only from it. */
+/** Find in its own session against an index synchronized earlier (test seam for index mismatch). */
 export async function findQmd(root: string, request: QmdFindRequest, captured: QmdInventory["concepts"], signal?: AbortSignal): Promise<QmdFindResult> {
-  let release: (() => QmdDiagnostic[]) | undefined;
-  let store: QMDStore | undefined;
-  let result: QmdFindResult | undefined;
-  let code: "conflict" | "unavailable" = "unavailable";
-  const failures: QmdDiagnostic[] = [];
-  try {
-    signal?.throwIfAborted();
-    if (!request.question.trim() || request.terms !== undefined && !request.terms.trim()) throw new Error("Expected a nonempty question and terms");
-    const limit = request.limit ?? QMD_DEFAULT_LIMIT;
-    if (!Number.isSafeInteger(limit) || limit < 1) throw new Error("Expected a positive integer find limit");
-    release = acquire(root);
-    if (!fs.existsSync(checked(root, DIRECTORY + "/qmd.sqlite"))) throw new Error("Text index unavailable; synchronize captured concepts first");
-    const identities = readIdentities(root);
-    const lexical: QmdQuery = { type: "lex", query: request.terms ?? request.question };
-    let degraded: QmdDegraded | undefined = request.mode === "lexical" ? { retrieval: "lexical", exhaustive: false, reason: "models-unavailable", diagnostics: request.reason } : undefined;
-    if (request.mode !== "lexical") bindModels(request.models);
-    store = await open(root, request.mode === "lexical" ? undefined : request.models);
-    let queries: QmdQuery[] = [lexical];
-    let found: { file: string; score: number }[] | undefined;
-    // The query must run against the index of this request's captured inventory. Another
-    // cooperative sync can replace it between our sync and this lock; detect, never assume.
-    const concepts = new Map(captured.map(c => [c.path, c.markdown]));
-    const indexMismatch: QmdDiagnostic[] = [];
-    const indexed = new Set(identities.values());
-    // Read once under this request's lock: the same bodies serve this check and rendering below.
-    const bodies = indexedBodies(store);
-    for (const [relative, markdown] of concepts) {
-      if (!indexed.has(relative)) indexMismatch.push({ path: relative, message: "Captured concept is missing from the queried index (replaced by another synchronization); text coverage incomplete. Search again" });
-      else if (bodies.get(stagedId(relative)) !== markdown) indexMismatch.push({ path: relative, message: "Queried index holds a different revision than this request captured (replaced by another synchronization); text coverage incomplete. Search again" });
-    }
-    for (const relative of indexed) if (!concepts.has(relative)) indexMismatch.push({ path: relative, message: "Queried index holds a concept outside this request's captured inventory; text coverage incomplete. Search again" });
-    signal?.throwIfAborted();
-    if (request.mode !== "lexical") {
-      // QMD 2.8.3 logs native model/context/query-embedding failures and returns null
-      // embeddings; structured search then skips vector legs and resolves normally.
-      // Observe the embeddings it received instead of relying on a thrown error.
-      const llm = store.internal.llm;
-      if (!llm) throw new Error("SDK store has no bound local model");
-      let missingEmbeddings = 0;
-      const embedBatch = llm.embedBatch.bind(llm);
-      llm.embedBatch = async (texts, options) => {
-        const embeddings = await embedBatch(texts, options);
-        missingEmbeddings += texts.length - embeddings.filter(e => e?.embedding).length;
-        return embeddings;
-      };
-      try {
-        if (request.mode === "fast") queries = [lexical, { type: "vec", query: request.question }];
-        else {
-          const expanded = await store.expandQuery(request.question);
-          // Native inference cannot be cancelled mid-call; stop at the next boundary.
-          signal?.throwIfAborted();
-          if (!expanded.some(q => q.query !== request.question)) throw new ExpansionFailedError("Deep query expansion produced no usable entries (" + expanded.length + " returned); expansion and reranking did not run");
-          queries = [...(request.terms === undefined ? [] : [lexical]), ...expanded.map(q => ({ type: q.type, query: q.query }))];
-        }
-        // The final limit applies after literal merging and filters, so qmd's own result slice spans the whole collection.
-        found = await store.search({ queries, rerank: request.mode === "deep", collection: COLLECTION, limit: Math.max(identities.size, 1) });
-        if (missingEmbeddings) { found = undefined; throw new Error(missingEmbeddings + " query embeddings were not produced; QMD skipped those vector legs"); }
-      } catch (error) {
-        if (!vectorFailure(error, signal)) throw error;
-        // Same engine, lexical index only: no second search stack.
-        degraded = error instanceof ExpansionFailedError
-          ? { retrieval: "lexical", exhaustive: false, reason: "expansion-failed", diagnostics: [{ path: DIRECTORY, message: message(error) }] }
-          : { retrieval: "lexical", exhaustive: false, reason: "vector-failed", diagnostics: [{ path: DIRECTORY, message: "Vector/model search failed: " + message(error) }] };
-        queries = [lexical];
-      }
-    }
-    found ??= (await store.searchLex(lexical.query, { collection: COLLECTION, limit: Math.max(identities.size, 1) })).map(hit => ({ file: hit.filepath, score: hit.score }));
-    signal?.throwIfAborted();
-    const matches: QmdRenderedMatch[] = [], omitted: QmdDiagnostic[] = [];
-    // Literal tokens are plain substrings of canonical paths and captured note text. Mentioned
-    // paths are never opened; a regex, shell or FTS reading of the token never happens.
-    const literals = literalTokens(request.question + (request.terms === undefined ? "" : "\n" + request.terms));
-    type Candidate = { path: string; file: string; score: number | null; rank: number; literal: string[] };
-    const candidates = new Map<string, Candidate>();
-    const ranked: { path: string; file: string; score: number }[] = [];
-    for (const match of found) {
-      if (!match.file.startsWith(PREFIX)) throw new Error("Unexpected indexed collection identity");
-      const relative = identities.get(match.file.slice(PREFIX.length));
-      if (relative === undefined) render(root, relative, match.file, match.score, [], null, concepts, queries, omitted);
-      else ranked.push({ path: relative, file: match.file, score: match.score });
-    }
-    // qmd order by score, canonical path breaks ties; a path keeps its best-ranked entry.
-    ranked.sort((a, b) => b.score - a.score || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-    for (const [rank, match] of ranked.entries()) if (!candidates.has(match.path)) candidates.set(match.path, { ...match, rank, literal: [] });
-    if (literals.length) for (const [relative, markdown] of concepts) {
-      const literal = literals.filter(token => relative.includes(token) || markdown.includes(token));
-      if (!literal.length) continue;
-      const existing = candidates.get(relative);
-      if (existing) existing.literal = literal;
-      else candidates.set(relative, { path: relative, file: PREFIX + stagedId(relative), score: null, rank: Infinity, literal });
-    }
-    const inScope = (relative: string) => request.scope === undefined || relative.startsWith(request.scope + "/");
-    // A candidate outside the captured inventory has no type; render reports its omission.
-    const ofType = (relative: string) => request.type === undefined || !concepts.has(relative) || typeOf(concepts.get(relative) ?? "") === request.type;
-    const ordered = [...candidates.values()].filter(c => inScope(c.path) && ofType(c.path))
-      .sort((a, b) => Number(!a.literal.length) - Number(!b.literal.length) || a.rank - b.rank || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-    for (const candidate of ordered) {
-      if (matches.length === limit) break;
-      signal?.throwIfAborted();
-      const rendered = render(root, candidate.path, candidate.file, candidate.score, candidate.literal, bodies.get(candidate.file.slice(PREFIX.length)) ?? null, concepts, queries, omitted);
-      if (rendered) matches.push(rendered);
-    }
-    const rerank = request.mode === "deep" && !degraded;
-    result = { state: "successful", mode: request.mode === "lexical" ? request.requested : request.mode, queries, rerank, ...(degraded ? { degraded } : {}), literals, limit, matches, omitted, indexMismatch };
-  } catch (error) {
-    if (error instanceof IndexWriterBusyError) code = "conflict";
-    failures.push({ path: DIRECTORY, message: message(error) });
-  }
-  failures.push(...await cleanup(store, release));
-  // A signal during cleanup still withholds success.
-  if (signal?.aborted && !failures.length) failures.push({ path: DIRECTORY, message: message(signal.reason) });
-  return failures.length ? { state: "unavailable", code, diagnostics: failures } : result ?? { state: "unavailable", code, diagnostics: [{ path: DIRECTORY, message: "Find did not complete" }] };
+  return (await inSession(root, undefined, async session => ({ find: await session.find(request, captured, signal) }))).find;
+}
+/** One find request: synchronize text and query under one session lock. find is absent when the
+ * text update was unavailable (find did not run). */
+export async function syncAndFindQmd(root: string, inventory: QmdInventory, options: QmdSyncOptions, request: QmdFindRequest, signal?: AbortSignal): Promise<{ sync: QmdSyncResult; find?: QmdFindResult }> {
+  return inSession(root, options.models, async (session): Promise<{ sync: QmdSyncResult; find?: QmdFindResult }> => {
+    const sync = await session.sync(inventory, options);
+    return sync.state === "unavailable" ? { sync } : { sync, find: await session.find(request, inventory.concepts, signal) };
+  });
 }
 
 export type QmdEmbedResult =
   | { state: "complete"; embeddingCoverage: { state: "complete" }; embedded: { docsProcessed: number; chunksEmbedded: number; errors: number } }
   | { state: "failed"; code: "conflict" | "unavailable"; embeddingCoverage: QmdEmbeddingCoverage; embedded?: { docsProcessed: number; chunksEmbedded: number; errors: number }; diagnostics: QmdDiagnostic[] };
 
-/** Explicit synchronous embedding of current missing content hashes. No detached worker. */
-export async function embedQmd(root: string, models: QmdReadyModels<"embed">, signal?: AbortSignal): Promise<QmdEmbedResult> {
-  let code: "conflict" | "unavailable" = "unavailable";
-  let release: (() => QmdDiagnostic[]) | undefined;
-  let store: QMDStore | undefined;
-  let embedded: { docsProcessed: number; chunksEmbedded: number; errors: number } | undefined;
-  let coverage: QmdEmbeddingCoverage = { state: "unavailable" };
-  const failures: QmdDiagnostic[] = [];
-  try {
-    signal?.throwIfAborted();
-    release = acquire(root);
-    if (!fs.existsSync(checked(root, DIRECTORY + "/qmd.sqlite"))) throw new Error("Text index unavailable; synchronize captured concepts first");
-    bindModels(models);
-    store = await open(root, models);
-    // Progress is the SDK's only callback; aborting there stops between batches.
-    const outcome = await store.embed({ onProgress() { signal?.throwIfAborted(); } });
-    signal?.throwIfAborted();
-    embedded = { docsProcessed: outcome.docsProcessed, chunksEmbedded: outcome.chunksEmbedded, errors: outcome.errors };
-    const status = await store.getStatus();
-    coverage = status.needsEmbedding > 0 ? { state: "pending", contentHashes: status.needsEmbedding } : { state: "complete" };
-    if (outcome.errors > 0) failures.push({ path: DIRECTORY, message: outcome.errors + " embedding errors" });
-    if (coverage.state !== "complete") failures.push({ path: DIRECTORY, message: "Embeddings remain pending after explicit embedding" });
-  } catch (error) {
-    if (error instanceof IndexWriterBusyError) code = "conflict";
-    failures.push({ path: DIRECTORY, message: message(error) });
+/** One search sync --embed request: synchronize text and embed under one session lock.
+ * embed is absent when the text update was unavailable (embedding did not run). */
+export async function syncAndEmbedQmd(root: string, inventory: QmdInventory, options: QmdSyncOptions, models: QmdReadyModels<"embed">, signal?: AbortSignal): Promise<{ sync: QmdSyncResult; embed?: QmdEmbedResult }> {
+  return inSession(root, options.models, async (session): Promise<{ sync: QmdSyncResult; embed?: QmdEmbedResult }> => {
+    const sync = await session.sync(inventory, options);
+    return sync.state === "unavailable" ? { sync } : { sync, embed: await session.embed(models, signal) };
+  });
+}
+
+// Doctor inspection of a disposable copy. Database file names and QMD 2.8.3 tables stay in this module.
+const SEARCH = DIRECTORY;
+const DATABASE = SEARCH + "/qmd.sqlite";
+/** The index writer lock, relative to the vault root; doctor reports it when retained. */
+export const QMD_WRITER_LOCK = DIRECTORY + "/writer.lock";
+export type QmdVersionCheck = { state: "ready"; version: string } | { state: "unavailable"; version?: string };
+export type QmdInspectInventory = { concepts: readonly { path: string; markdown: string }[]; diagnostics: readonly unknown[] };
+export type QmdInspectProblem = (file: string, text: string, fix: string, code?: "unavailable") => void;
+export type QmdInspection = {
+  qmd: QmdVersionCheck;
+  database: { state: "ready" | "unavailable" };
+  textCoverage: { state: "complete" | "incomplete" | "unavailable" };
+  embeddingCoverage: { state: "complete" | "incomplete"; contentHashes: number } | { state: "unavailable" };
+};
+function readJson(root: string, relative: string): unknown { return JSON.parse(fs.readFileSync(checked(root, relative), "utf8")); }
+// QMD 2.8.3 stores standalone FTS fields with each CJK run spaced by character
+// (store.js normalizeCjkForFTS). Compare that representation, not raw Markdown.
+function qmdFtsText(text: string): string {
+  return text.replace(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]+/gu, run => " " + Array.from(run).join(" ") + " ");
+}
+/** Throws unless the retained search state shows no active or interrupted writer. */
+function assertQuiescentSearch(root: string): void {
+  if (fs.existsSync(checked(root, SEARCH + "/writer.lock"))) throw new Error("Index writer lock retained; do not trust previous coverage");
+  for (const suffix of ["-wal", "-shm", "-journal"]) {
+    if (fs.existsSync(checked(root, DATABASE + suffix))) throw new Error("Retained SQLite sidecar " + DATABASE + suffix + "; index may be active or interrupted. Inspect the writer before explicit recovery");
   }
-  failures.push(...await cleanup(store, release));
-  if (signal?.aborted && !failures.some(f => f.message === message(signal.reason))) failures.push({ path: DIRECTORY, message: message(signal.reason) });
-  if (failures.length || !embedded || coverage.state !== "complete") return { state: "failed", code, embeddingCoverage: coverage.state === "complete" ? { state: "unavailable" } : coverage, ...(embedded ? { embedded } : {}), diagnostics: failures };
-  return { state: "complete", embeddingCoverage: { state: "complete" }, embedded };
+}
+
+function isWithin(base: string, target: string): boolean {
+  const relative = path.relative(base, target);
+  return !relative || relative !== ".." && !relative.startsWith(".." + path.sep) && !path.isAbsolute(relative);
+}
+
+/** Throws when the diagnostic scratch directory lies inside the vault or HOME/XDG roots. */
+function assertIsolatedScratch(root: string, scratch: string): void {
+  for (const protectedRoot of [root, process.env.HOME, process.env.XDG_CACHE_HOME, process.env.XDG_CONFIG_HOME, process.env.XDG_DATA_HOME]) {
+    if (!protectedRoot) continue;
+    const base = fs.existsSync(protectedRoot) ? fs.realpathSync(protectedRoot) : path.resolve(protectedRoot);
+    if (isWithin(base, scratch)) throw new Error("Diagnostic scratch directory must be outside the vault and HOME/XDG; set TMPDIR to an isolated temporary directory");
+  }
+}
+
+/** Embedding metadata is healthy only when every active chunk has a physical vector row. */
+function embeddingVectorsHealthy(db: QMDStore["internal"]["db"], embedded: { hash: string; seq: number }[], problem: QmdInspectProblem): boolean {
+  if (!embedded.length) return true;
+  try {
+    const vectors = new Set(db.prepare("SELECT hash_seq FROM inspected.vectors_vec").all<{ hash_seq: string }>().map(row => row.hash_seq));
+    if (embedded.some(row => !vectors.has(row.hash + "_" + row.seq))) throw new Error("Embedding metadata has missing physical vector rows");
+    return true;
+  } catch (error) {
+    problem(DATABASE, "Embedding vector storage is incomplete: " + message(error), "Inspect the interrupted embedding operation and retained local database before explicit search sync --embed; metadata alone does not prove vector coverage");
+    return false;
+  }
+}
+
+/** Doctor's read-only index inspection: takes no writer lock and never opens the retained database
+ * with SQLite. Probes the native SDK in memory, then checks a disposable byte copy of the index
+ * (SQLite integrity, schema, FTS rows, vector rows, receipts, identities, bodies) against the
+ * captured inventory. inventory: undefined unless the profile is compatible and readable.
+ * problem receives every diagnostic. Doctor reports a retained writer lock itself; inspection
+ * then stops at the quiescence check, so only its own search-state problems decide the summary. */
+export async function inspectQmdIndex(root: string, inventory: QmdInspectInventory | undefined, models: QmdModels, problem: QmdInspectProblem): Promise<QmdInspection> {
+  let searchProblem = false;
+  const report: QmdInspectProblem = (file, ...rest) => { if (file.startsWith(SEARCH)) searchProblem = true; problem(file, ...rest); };
+  let qmd: QmdVersionCheck = { state: "unavailable" };
+  let database: QmdInspection["database"] = { state: "unavailable" };
+  let textCoverage: QmdInspection["textCoverage"] = { state: "unavailable" };
+  let embeddingCoverage: QmdInspection["embeddingCoverage"] = { state: "unavailable" };
+  let probe: QMDStore | undefined, snapshotStore: QMDStore | undefined;
+  let temporary: string | undefined;
+  try {
+    const entry = import.meta.resolve("@tobilu/qmd");
+    const metadata: unknown = JSON.parse(fs.readFileSync(fileURLToPath(new URL("../package.json", entry)), "utf8"));
+    if (!isMapping(metadata) || typeof metadata.version !== "string") throw new Error("qmd package has no version");
+    qmd = { state: "unavailable", version: metadata.version };
+    const { createStore } = await import("@tobilu/qmd");
+    // Native SQLite/FTS and sqlite-vec probe uses memory only, not the vault store.
+    probe = await createStore({ dbPath: ":memory:", config: { collections: {} } });
+    probe.internal.db.prepare("SELECT vec_version()").get();
+    await probe.searchLex("doctor", { collection: COLLECTION, limit: 1 });
+    qmd = { state: "ready", version: metadata.version };
+    if (!inventory) throw new Error("Compatible profile and readable concept inventory required");
+    assertQuiescentSearch(root);
+    // Even a read-only SQLite connection can create WAL/SHM. Capture bytes into
+    // a disposable snapshot instead. Never open the retained database with SQLite.
+    const bytes = fs.readFileSync(checked(root, DATABASE));
+    const scratch = fs.realpathSync(os.tmpdir());
+    assertIsolatedScratch(root, scratch);
+    temporary = fs.mkdtempSync(path.join(scratch, "wiki-doctor-db-"));
+    const copied = path.join(temporary, "qmd.sqlite");
+    fs.writeFileSync(copied, bytes, { flag: "wx" });
+    probe.internal.db.prepare("ATTACH DATABASE ? AS inspected").run(copied);
+    const integrity = probe.internal.db.prepare("PRAGMA inspected.quick_check").all<{ quick_check: string }>();
+    if (integrity.length !== 1 || integrity[0]?.quick_check !== "ok") throw new Error("SQLite integrity check failed: " + JSON.stringify(integrity));
+    if (probe.internal.db.prepare("PRAGMA inspected.foreign_key_check").all().length) throw new Error("SQLite foreign-key check failed");
+    // Pin the required 2.8.3 metadata schema before the SDK can migrate its copy.
+    const active = activeDocuments(probe.internal.db, "inspected");
+    probe.internal.db.prepare("SELECT hash, seq, model, embed_fingerprint, total_chunks FROM inspected.content_vectors").all();
+    probe.internal.db.exec("INSERT INTO inspected.documents_fts(documents_fts) VALUES('integrity-check')");
+    // Internal FTS integrity permits missing/stale standalone rows. Check the
+    // retained set and content before SDK initialization can rebuild its copy.
+    const lexical = probe.internal.db.prepare("SELECT rowid, filepath, title, body FROM inspected.documents_fts").all<{ rowid: number; filepath: string; title: string; body: string }>();
+    const lexicalById = new Map(lexical.map(row => [row.rowid, row]));
+    const lexicalHealthy = lexical.length === active.length && active.every(doc => {
+      const row = lexicalById.get(doc.id);
+      return row?.filepath === qmdFtsText(doc.collection + "/" + doc.path) && row.title === qmdFtsText(doc.title) && row.body === qmdFtsText(doc.doc);
+    });
+    if (!lexicalHealthy) report(DATABASE, "Lexical index rows do not equal active document identities and content", "Inspect the retained database and run search sync explicitly; FTS internal integrity and timestamps do not prove text coverage");
+    const capturedById = new Map(inventory.concepts.map(concept => [stagedId(concept.path), concept.markdown]));
+    const indexedInventoryMatches = active.length === capturedById.size && active.every(doc => doc.collection === COLLECTION && capturedById.get(doc.path) === doc.doc);
+    if (!indexedInventoryMatches) report(DATABASE, "Indexed document set/content differs from the captured inventory", "Inspect current notes and run search sync explicitly; no completeness is inferred from timestamps");
+    const embedded = probe.internal.db.prepare("SELECT DISTINCT v.hash, v.seq FROM inspected.content_vectors v JOIN inspected.documents d ON d.hash = v.hash WHERE d.active = 1").all<{ hash: string; seq: number }>();
+    const vectorsHealthy = embeddingVectorsHealthy(probe.internal.db, embedded, report);
+    probe.internal.db.exec("DETACH DATABASE inspected");
+    snapshotStore = await createStore({ dbPath: copied, config: { collections: {}, models: models } });
+    const status = await snapshotStore.getStatus();
+    database = { state: lexicalHealthy && vectorsHealthy ? "ready" : "unavailable" };
+    const expected = inventory.concepts.map(c => ({ path: c.path, digest: digest(c.markdown) })).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+    let complete = lexicalHealthy && indexedInventoryMatches && inventory.diagnostics.length === 0 && status.totalDocuments === expected.length;
+    const receipt = readJson(root, SEARCH + "/coverage.json");
+    if (!isMapping(receipt) || receipt.version !== 1 || JSON.stringify(receipt.inventory) !== JSON.stringify(expected)) {
+      complete = false;
+      report(SEARCH + "/coverage.json", "Successful coverage receipt does not match captured path/content digests", "Run search sync explicitly after inspecting earlier failures");
+    }
+    const identities = readJson(root, SEARCH + "/identities.json");
+    const expectedIdentities = inventory.concepts.map(c => ({ id: stagedId(c.path), path: c.path }));
+    const identityFormat = isMapping(identities) && identities.version === 1 && Array.isArray(identities.paths);
+    const actualIdentities: unknown[] = isMapping(identities) && Array.isArray(identities.paths) ? identities.paths : [];
+    if (!identityFormat || actualIdentities.length !== expectedIdentities.length || expectedIdentities.some(expected => !actualIdentities.some(row => isMapping(row) && row.id === expected.id && row.path === expected.path))) {
+      complete = false; report(SEARCH + "/identities.json", "Missing or incompatible canonical identity mapping", "Inspect retained search state, then run search sync explicitly");
+    }
+    const bodies = indexedBodies(snapshotStore);
+    for (const concept of inventory.concepts) {
+      if ((bodies.get(stagedId(concept.path)) ?? null) !== concept.markdown) {
+        complete = false; report(concept.path, "Indexed text differs from captured note bytes", "Run search sync explicitly; timestamps do not establish coverage");
+      }
+    }
+    if (!bytes.equals(fs.readFileSync(checked(root, DATABASE))) || ["/writer.lock", "/qmd.sqlite-wal", "/qmd.sqlite-shm", "/qmd.sqlite-journal"].some(suffix => fs.existsSync(checked(root, SEARCH + suffix)))) throw new Error("Search database changed during inspection");
+    textCoverage = { state: complete ? "complete" : "incomplete" };
+    if (!complete && !searchProblem) report(SEARCH, "Text index does not cover the complete captured inventory", "Inspect diagnostics and run search sync explicitly");
+    embeddingCoverage = vectorsHealthy && models.embed ? { state: complete && status.needsEmbedding === 0 ? "complete" : "incomplete", contentHashes: status.needsEmbedding } : { state: "unavailable" };
+  } catch (error) {
+    report(qmd.state === "ready" ? DATABASE : "@tobilu/qmd (native SQLite/sqlite-vec)", message(error), qmd.state === "ready" ? "Inspect retained local database, receipts and locks before explicit search sync; doctor never repairs them" : "Supply the pinned qmd SDK and compatible native dependencies for this Node runtime; doctor does not install them", "unavailable");
+    textCoverage = { state: "unavailable" }; embeddingCoverage = { state: "unavailable" };
+  } finally {
+    for (const store of [snapshotStore, probe]) {
+      try { await store?.close(); } catch (error) { report(DATABASE, "Diagnostic database close failed: " + message(error), "Inspect runtime/native dependency health", "unavailable"); database = { state: "unavailable" }; textCoverage = { state: "unavailable" }; embeddingCoverage = { state: "unavailable" }; }
+    }
+    if (temporary) {
+      try { fs.rmSync(temporary, { recursive: true, force: true }); }
+      catch (error) { report(temporary, "Diagnostic snapshot cleanup failed: " + message(error), "Inspect and explicitly remove this disposable diagnostic snapshot; the vault was not repaired", "unavailable"); }
+    }
+  }
+  return { qmd, database, textCoverage, embeddingCoverage };
 }
