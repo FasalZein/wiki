@@ -30,7 +30,7 @@ export function validatePending(root: string, note: PendingNote, duplicate: stri
   return indexes;
 }
 /** Index regeneration validates the current vault; diagnostics are a refusal, reported by the caller as lint output. */
-function validateCurrent(root: string): { diagnostics: Diagnostic[]; indexes: ReadonlyMap<string, string> } {
+function validateCurrent(root: string): { diagnostics: readonly Diagnostic[]; indexes: ReadonlyMap<string, string> } {
   const validated = checkVault(root);
   const indexes = navigationIndexes(validated);
   const diagnostics = validated.diagnostics.length ? validated.diagnostics : sortDiagnostics(indexDestinationDiagnostics(root, indexes.keys()));
@@ -62,7 +62,7 @@ export type Change = CreateChange | ReplaceChange | CaptureChange | TypeChange |
 export interface Published<W extends Written> { state: "complete"; written: W }
 /** Index regeneration reports validation diagnostics as a refusal value, not an error. */
 export type IndexOutcome = { state: "complete"; written: WrittenFiles; indexes: ReadonlyMap<string, string> }
-  | { state: "refused"; diagnostics: Diagnostic[] };
+  | { state: "refused"; diagnostics: readonly Diagnostic[] };
 
 const TOPIC_PARTIAL = "Topic published but navigation or log failed; run index to repair navigation and inspect log.md before adding any missing historical entry manually";
 const REGISTRY_PARTIAL = "Registry scaffold was published but its log entry failed; inspect log.md before adding the missing entry manually";

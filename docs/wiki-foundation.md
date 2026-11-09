@@ -26,10 +26,10 @@ the installed `wiki` command.
 | `heavy -- bun run boot:wiki` | Boot check. It starts `packages/wiki/bin/wiki.js` under the current Node, in a new temporary directory with a decoy HOME. It runs init, type list, lint, new, show, an update with a stale expected digest (must exit 3 and leave the topic unchanged), and index --check. It removes the directory and exits 0. Any failed step exits 1. It loads no search engine or model. |
 | `WIKI_TEST_PATTERN='wiki:20' heavy --slots 2 -- bun run test:wiki` | Runs the boot script as a real process. Checks the step list, the removal of its temporary state, and a nonzero exit when it cannot complete. |
 | `WIKI_QMD_PROOF=handoff WIKI_QMD_MODEL_DIR=/existing/models heavy -- node packages/wiki/test/qmd-model-proof.js` | Complete synthetic handoff smoke with real local models. See below. |
-| `heavy --slots 2 -- bun run verify:next` | Batch gate. Its TypeScript project and its `packages/*/test/*.test.ts` glob include this package. Do not also run `verify:wiki` at the gate. |
+| `heavy --slots 2 -- bun run verify:next` | Batch gate. Its TypeScript project includes this package, and it runs all of this package's tests through `packages/wiki/test/run.js --all`, which ignores `WIKI_TEST_PATTERN`. Do not also run `verify:wiki` at the gate. |
 
-`test:wiki` (`packages/wiki/test/run.js`) and `verify:next` run four test files
-at the same time (`--test-concurrency=4`). Most tests start one CLI process at a
+`test:wiki` and `verify:next` both run `packages/wiki/test/run.js`, which runs four
+test files at the same time (`FILE_CONCURRENCY`, `--test-concurrency=4`). Most tests start one CLI process at a
 time, so a run usually has about four busy processes: claim `heavy --slots 2`, one
 slot per two processes. Brief peaks are higher: two race tests start two CLI
 processes at once, and some commands start git or extractor children. If you change the concurrency, change the slot claim with it.

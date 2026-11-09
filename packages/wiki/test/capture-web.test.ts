@@ -7,7 +7,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, test } from "node:test";
-import { BIN, spawnCli } from "./cli-helper.ts";
+import { BIN, runCli, spawnCli } from "./cli-helper.ts";
 import { parseNoteText } from "../src/frontmatter.ts";
 import { buildPdf } from "./pdf-fixture.ts";
 
@@ -213,6 +213,27 @@ test("wiki:16 interrupted response body fails before publication", { timeout: 15
   const fixture = await serve((_req, res) => { res.writeHead(200, { "content-type": "text/plain", "content-length": "100" }); res.write("partial"); res.destroy(); });
   try { await refused(root, fixture.origin + "/body", 7, /request\/body failed/); assert.equal(fixture.hits.length, 1); }
   finally { await fixture.close(); }
+});
+test("wiki:16 in-process run: an interrupt cancels an in-flight HTTP request without publication", { timeout: 15000 }, async () => {
+  const { root } = fresh(), before = snapshot(root);
+  let ready!: () => void;
+  const requested = new Promise<void>(resolve => { ready = resolve; });
+  let disconnected!: () => void;
+  const connectionClosed = new Promise<void>(resolve => { disconnected = resolve; });
+  const fixture = await serve((_req, res) => { res.on("close", disconnected); ready(); });
+  const controller = new AbortController();
+  try {
+    const running = runCli(["--json", "--vault", root, ...args(fixture.origin + "/cancel")], { signal: controller.signal });
+    await requested;
+    assert.deepEqual(snapshot(root), before, "no mutation lock while waiting for network");
+    controller.abort();
+    const result = await running;
+    assert.equal(result.status, 7, JSON.stringify(result)); assert.equal(result.stderr, "");
+    const data = JSON.parse(result.stdout);
+    assert.match(data.error.message, /capture cancelled/); assert.equal(data.written, undefined);
+    await connectionClosed;
+    assert.deepEqual(snapshot(root), before); assert.equal(fixture.hits.length, 1);
+  } finally { await fixture.close(); }
 });
 function tool(directory: string, command: string, script: string) {
   const bin = path.join(directory, "bin"); fs.mkdirSync(bin);

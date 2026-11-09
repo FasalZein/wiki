@@ -1,6 +1,6 @@
 import { checkVault, searchConcepts } from "./lint.ts";
 import type { Registry } from "./registry.ts";
-import { syncQmdText, syncAndFindQmd, syncAndEmbedQmd, qmdModelReadiness, FAST_ROLES, DEEP_ROLES, type QmdDegraded, type QmdDiagnostic, type QmdEmbedResult, type QmdEmbeddingCoverage, type QmdFindFilters, type QmdFindResult, type QmdInventory, type QmdReadyModels, type QmdSyncResult, type QmdTextCoverage } from "./qmd.ts";
+import { syncQmdText, syncAndFindQmd, syncAndEmbedQmd, qmdModelReadiness, FAST_ROLES, DEEP_ROLES, type QmdDegraded, type QmdDiagnostic, type QmdAvailableSync, type QmdEmbedResult, type QmdEmbeddingCoverage, type QmdEnvironment, type QmdFindFilters, type QmdFindResult, type QmdInventory, type QmdReadyModels, type QmdSyncResult, type QmdTextCoverage } from "./qmd.ts";
 
 /** One search command's complete report. failure: the error code that sets the exit status.
  * value: the JSON document; human and stderr: the text output. The CLI only prints it. */
@@ -9,13 +9,14 @@ export type SearchReport = { failure: "conflict" | "unavailable" | undefined; va
 export type SearchCommand =
   | { kind: "sync"; embed: boolean }
   | { kind: "find"; question: string; terms?: string; deep: boolean; filters: QmdFindFilters };
-/** What the search session returned, in the shape the report reads. */
+/** What the search session returned, in the shape the report reads. An unavailable synchronization
+ * reports the same for every command, so it is always a sync outcome; embed and find carry their result. */
 export type SearchOutcome =
   /** A sync or embed request whose models failed preflight; find degrades instead. */
   | { kind: "models-unavailable"; diagnostics: QmdDiagnostic[] }
   | { kind: "sync"; sync: QmdSyncResult }
-  | { kind: "embed"; sync: QmdSyncResult; embed?: QmdEmbedResult }
-  | { kind: "find"; sync: QmdSyncResult; find?: QmdFindResult; requested: "fast" | "deep"; filters: QmdFindFilters };
+  | { kind: "embed"; sync: QmdAvailableSync; embed: QmdEmbedResult }
+  | { kind: "find"; sync: QmdAvailableSync; find: QmdFindResult; requested: "fast" | "deep"; filters: QmdFindFilters };
 
 const DEGRADED_LABEL: Record<QmdDegraded["reason"], string> = { "models-unavailable": "search models not ready", "vector-failed": "vector search failed", "expansion-failed": "deep expansion failed; no reranking" };
 type ReportedEmbedding = { state: "complete" } | { state: "incomplete"; contentHashes: number } | { state: "unavailable" };
@@ -48,15 +49,12 @@ export function searchReport(outcome: SearchOutcome): SearchReport {
   if (result.state === "unavailable") return report(busy(result.code, "Search synchronization unavailable"), result.textCoverage, synced, {}, coverageText(result.textCoverage, synced), diagnostics);
   if (outcome.kind === "sync") return report(undefined, result.textCoverage, synced, {}, coverageText(result.textCoverage, synced), diagnostics);
   if (outcome.kind === "embed") {
-    // The session runs embedding whenever synchronization succeeded.
     const embedded = outcome.embed;
-    if (!embedded) throw new Error("Embedding did not run after a successful synchronization");
     const coverage = reported(embedded.embeddingCoverage);
     if (embedded.state === "failed") return report(busy(embedded.code, "Embedding synchronization failed"), result.textCoverage, coverage, { embedding: "failed", ...(embedded.embedded ? { embedded: embedded.embedded } : {}) }, coverageText(result.textCoverage, coverage), [...diagnostics, ...embedded.diagnostics]);
     return report(undefined, result.textCoverage, coverage, { embedding: "complete", embedded: embedded.embedded }, coverageText(result.textCoverage, coverage), diagnostics);
   }
   const found = outcome.find;
-  if (!found) throw new Error("Find did not run after a successful synchronization");
   if (found.state === "unavailable") return report(busy(found.code, "Search find unavailable"), result.textCoverage, synced, { mode: outcome.requested }, coverageText(result.textCoverage, synced), [...diagnostics, ...found.diagnostics]);
   // A replaced index or omitted candidates (deleted, renamed, stale index, moving target) make text coverage incomplete for this request.
   const coverageProblems = [...found.indexMismatch, ...found.omitted];
@@ -72,8 +70,8 @@ export function searchReport(outcome: SearchOutcome): SearchReport {
 }
 
 /** Runs one search command against an opened vault and returns its report. Explicit local models
- * are preflighted before any index effect or SDK model use. */
-export async function runSearch(root: string, command: SearchCommand, signal: AbortSignal, registry?: Registry): Promise<SearchReport> {
+ * are preflighted before any index effect or SDK model use. env: the request environment the SDK reads. */
+export async function runSearch(root: string, command: SearchCommand, env: QmdEnvironment, signal: AbortSignal, registry?: Registry): Promise<SearchReport> {
   const find = command.kind === "find" ? command : undefined;
   const embed = command.kind === "sync" && command.embed;
   const roles = find ? (find.deep ? DEEP_ROLES : FAST_ROLES) : embed ? FAST_ROLES : [];
@@ -97,9 +95,12 @@ export async function runSearch(root: string, command: SearchCommand, signal: Ab
     const requested = find.deep ? "deep" as const : "fast" as const;
     const outcome = await syncAndFindQmd(root, captured, syncOptions, readiness.state === "unavailable" ? { ...filters, mode: "lexical", requested, question, terms, reason: readiness.diagnostics }
       : find.deep ? { ...filters, mode: "deep", question, terms, models: readiness.models as QmdReadyModels<"embed" | "generate" | "rerank"> } // --deep preflighted DEEP_ROLES
-      : { ...filters, mode: "fast", question, terms, models: readiness.models }, signal);
-    return searchReport({ kind: "find", ...outcome, requested, filters });
+      : { ...filters, mode: "fast", question, terms, models: readiness.models }, env, signal);
+    return searchReport("find" in outcome ? { kind: "find", ...outcome, requested, filters } : { kind: "sync", sync: outcome.sync });
   }
-  if (embed && readiness.state === "ready") return searchReport({ kind: "embed", ...await syncAndEmbedQmd(root, captured, syncOptions, readiness.models, signal) });
-  return searchReport({ kind: "sync", sync: await syncQmdText(root, captured, syncOptions) });
+  if (embed && readiness.state === "ready") {
+    const outcome = await syncAndEmbedQmd(root, captured, syncOptions, readiness.models, env, signal);
+    return searchReport("embed" in outcome ? { kind: "embed", ...outcome } : { kind: "sync", sync: outcome.sync });
+  }
+  return searchReport({ kind: "sync", sync: await syncQmdText(root, captured, syncOptions, env) });
 }

@@ -85,7 +85,8 @@ type PublishedResult = { written: true } & Written;
  * a search or a capture extraction runs, so outside those windows an interrupt keeps its default effect on the host. */
 export type Interrupts = (listener: () => void) => () => void;
 export interface RunOptions {
-  /** Environment for vault selection (WIKI_VAULT). Relative paths still resolve against the process working directory. */
+  /** Environment for vault selection (WIKI_VAULT) and for the search SDK (find, search sync, doctor), which sees it as
+   * process.env while it runs. Relative paths still resolve against the process working directory. */
   env: Readonly<Record<string, string | undefined>>;
   interrupts?: Interrupts;
 }
@@ -183,7 +184,7 @@ export async function run(argv: readonly string[], options: RunOptions): Promise
         const vault = initVault(selected);
         output({ ok: true, vault }, "Initialized profile vault: " + vault.root + "\n");
       } else if (doctor) {
-        const report = await doctorVault(selected);
+        const report = await doctorVault(selected, options.env);
         if (report.error) exitCode = EXIT[report.error.code];
         output(report, doctorText(report));
       } else {
@@ -197,7 +198,7 @@ export async function run(argv: readonly string[], options: RunOptions): Promise
           const unsubscribe = options.interrupts?.(abort);
           try {
             const filters: QmdFindFilters = { ...(values.personal ? { scope: "personal" as const } : values.project !== undefined ? { scope: `projects/${values.project}` as const } : {}), ...(values.type !== undefined ? { type: values.type } : {}), ...(values.limit !== undefined ? { limit: Number(values.limit) } : {}) };
-            const report = await runSearch(root, find ? { kind: "find", question: arg, terms: values.terms, deep: values.deep === true, filters } : { kind: "sync", embed: values.embed === true }, controller.signal, registry);
+            const report = await runSearch(root, find ? { kind: "find", question: arg, terms: values.terms, deep: values.deep === true, filters } : { kind: "sync", embed: values.embed === true }, options.env, controller.signal, registry);
             if (report.failure) exitCode = EXIT[report.failure];
             output(report.value, report.human, report.stderr);
           } finally { unsubscribe?.(); }
@@ -212,7 +213,7 @@ export async function run(argv: readonly string[], options: RunOptions): Promise
             finally { unsubscribe?.(); }
           }
           const updateOutput = (result: ReturnType<typeof updateTopic>) => output({ ok: true, ...result }, (result.outcome === "updated" ? "Updated topic: " : result.outcome === "dry-run" ? "Dry-run topic: " : "Unchanged topic: ") + result.path + "\n" + result.digest + "\n" + JSON.stringify(result.summary) + "\n" + JSON.stringify(result.diff) + "\nNavigation: " + result.navigation + "; log: " + result.log + "\n");
-          const lintFailure = (diagnostics: Diagnostic[]) => {
+          const lintFailure = (diagnostics: readonly Diagnostic[]) => {
             exitCode = 1;
             const error = { code: "lint", message: "Wiki validation failed" };
             output({ ok: false, error, diagnostics }, "", diagnostics.map(d => d.path + ": " + d.rule + ": " + d.message + "; fix: " + d.fix).join("\n") + "\n");
@@ -261,11 +262,9 @@ export async function run(argv: readonly string[], options: RunOptions): Promise
               // --check only compares current bytes.
               const checked = index ? checkVault(root) : undefined;
               const indexes = checked ? navigationIndexes(checked) : undefined;
-              const diagnostics = registry ? registry.diagnostics : checked ? checked.diagnostics : lintVault(vault, arg);
-              if (indexes && !diagnostics.length) {
-                diagnostics.push(...indexFreshnessDiagnostics(root, indexes));
-                sortDiagnostics(diagnostics);
-              }
+              const found = registry ? registry.diagnostics : checked ? checked.diagnostics : lintVault(vault, arg);
+              // Index freshness is checked only over a clean inventory; the validated list stays unchanged.
+              const diagnostics = indexes && !found.length ? sortDiagnostics([...found, ...indexFreshnessDiagnostics(root, indexes)]) : found;
               if (diagnostics.length) lintFailure(diagnostics);
               else if (indexes) indexOutput(indexes);
               else if (registry) {

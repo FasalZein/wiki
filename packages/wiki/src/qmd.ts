@@ -76,6 +76,46 @@ function acquire(root: string) {
     return diagnostics;
   };
 }
+/** The environment of one request: run()'s env, which bin/wiki.js fills from process.env. */
+export type QmdEnvironment = Readonly<Record<string, string | undefined>>;
+/** The only place this module scopes process.env. QMD 2.8.3 and its native model layer read their settings
+ * (HOME, XDG_CACHE_HOME, XDG_CONFIG_HOME, QMD_EMBED_MODEL, QMD_* tuning) from process.env, not from an argument.
+ * So while body runs, process.env holds exactly the request environment; open() and bindModels() then set
+ * the vault-local values on top of it. Afterwards every key is restored, so the host process keeps its own
+ * environment. Scopes may overlap (an in-process caller can start a request while another runs, as the
+ * writer-lock tests do): only the outermost scope swaps and restores, whichever scope ends last. An overlapping
+ * scope must ask for the active request environment, or pass process.env itself to mean "the current one";
+ * a different environment throws, because one process.env cannot hold two. Values the SDK reads at its first
+ * import (its model cache directory) stay fixed for the process. */
+export async function withRequestEnvironment<T>(env: QmdEnvironment, body: () => Promise<T>): Promise<T> {
+  if (activeScope) {
+    if (env !== process.env && !sameEnvironment(env, activeScope.wanted)) throw new Error("A search request with a different request environment overlaps the active request; run them one after another");
+    activeScope.depth++;
+    try { return await body(); }
+    finally { leaveScope(); }
+  }
+  const scope = activeScope = { wanted: { ...env }, saved: { ...process.env }, depth: 1 };
+  try {
+    replaceProcessEnvironment(scope.wanted);
+    return await body();
+  } finally { leaveScope(); }
+}
+/** The outermost active scope: the requested environment, the host environment to restore, and the open scope count. */
+let activeScope: { wanted: QmdEnvironment; saved: QmdEnvironment; depth: number } | undefined;
+function leaveScope(): void {
+  const scope = activeScope;
+  if (!scope || --scope.depth > 0) return;
+  activeScope = undefined;
+  replaceProcessEnvironment(scope.saved);
+}
+function sameEnvironment(a: QmdEnvironment, b: QmdEnvironment): boolean {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  return [...keys].every(key => a[key] === b[key]);
+}
+function replaceProcessEnvironment(next: QmdEnvironment): void {
+  for (const key of Object.keys(process.env)) if (next[key] === undefined) delete process.env[key];
+  for (const [key, value] of Object.entries(next)) if (value !== undefined) process.env[key] = value;
+}
 /** One operation's outcome at the shared failure boundary. value: undefined after a failure. */
 type Attempt<V> = { value: V | undefined; code: "conflict" | "unavailable"; failures: QmdDiagnostic[] };
 /** The SDK store of one operation: open binds models and environment; close ends it early (sync closes before publishing). */
@@ -150,7 +190,7 @@ function conceptProblem(relative: string): string | undefined {
  * closes the store before it publishes receipts. The session owns the lock, the state files
  * (identities.json, coverage.json, snapshots, SQLite sidecars), staged ids and SDK internals.
  * Process-global effect: QMD 2.8.3 reads XDG_CACHE_HOME, XDG_CONFIG_HOME and QMD_EMBED_MODEL from
- * process.env, so each store open sets them; one process must use one vault at a time. */
+ * process.env, so each store open sets them inside the request scope (withRequestEnvironment). */
 class SearchIndexSession {
   #release: (() => QmdDiagnostic[]) | undefined;
   #closed = false;
@@ -419,25 +459,28 @@ class SearchIndexSession {
  * reports an unavailable synchronization and drops its follow-on result (keeping that result's
  * failures as diagnostics), as before one session held the lock across sync and query. A request
  * without sync reports its operation unavailable. */
-async function inSession<O>(root: string, models: QmdModels | undefined, run: (session: SearchIndexSession) => Promise<O>, released: (outcome: O, release: QmdDiagnostic[]) => O): Promise<O> {
-  const session = new SearchIndexSession(root, models);
-  const outcome = await run(session);
-  const release = session.close();
-  return release.length ? released(outcome, release) : outcome;
+async function inSession<O>(root: string, models: QmdModels | undefined, env: QmdEnvironment, run: (session: SearchIndexSession) => Promise<O>, released: (outcome: O, release: QmdDiagnostic[]) => O): Promise<O> {
+  return withRequestEnvironment(env, async () => {
+    const session = new SearchIndexSession(root, models);
+    const outcome = await run(session);
+    const release = session.close();
+    return release.length ? released(outcome, release) : outcome;
+  });
 }
 /** The fold of a sync-led request. operation: the failures of its follow-on find or embed. */
-function releasedSync(sync: QmdSyncResult, operation: QmdDiagnostic[], release: QmdDiagnostic[]): { sync: QmdSyncResult } {
+function releasedSync(sync: QmdSyncResult, operation: QmdDiagnostic[], release: QmdDiagnostic[]): { sync: QmdUnavailableSync } {
   return { sync: sync.state === "unavailable" ? unavailable([...sync.textCoverage.diagnostics, ...release], sync.code) : unavailable([...operation, ...release]) };
 }
 
-/** Model-free text update in its own session. The entire .wiki/search directory is derived. */
-export async function syncQmdText(root: string, inventory: QmdInventory, options: QmdSyncOptions = {}): Promise<QmdSyncResult> {
-  return (await inSession(root, options.models, async session => ({ sync: await session.sync(inventory, options) }), (o, release) => releasedSync(o.sync, [], release))).sync;
+/** Model-free text update in its own session. The entire .wiki/search directory is derived.
+ * env: the request environment; direct test callers use the host environment. */
+export async function syncQmdText(root: string, inventory: QmdInventory, options: QmdSyncOptions = {}, env: QmdEnvironment = process.env): Promise<QmdSyncResult> {
+  return (await inSession(root, options.models, env, async session => ({ sync: await session.sync(inventory, options) }), (o, release) => releasedSync(o.sync, [], release))).sync;
 }
 
 /** Lexical oracle for tests and diagnostics: synchronize the full current inventory first. */
 export async function searchQmdLex(root: string, query: string, limit = 10): Promise<QmdLexResult> {
-  return inSession(root, undefined, session => session.searchLex(query, limit),
+  return inSession(root, undefined, process.env, session => session.searchLex(query, limit),
     (lex, release) => ({ state: "unavailable", diagnostics: [...(lex.state === "unavailable" ? lex.diagnostics : []), ...release] }));
 }
 
@@ -528,31 +571,35 @@ function vectorFailure(error: unknown, signal: AbortSignal | undefined): boolean
   return !(error instanceof IndexWriterBusyError) && !signal?.aborted;
 }
 
-/** Find in its own session against an index synchronized earlier (test seam for index mismatch). */
+/** Find in its own session against an index synchronized earlier (test seam for index mismatch; host environment). */
 export async function findQmd(root: string, request: QmdFindRequest, captured: QmdInventory["concepts"], signal?: AbortSignal): Promise<QmdFindResult> {
-  return inSession(root, undefined, session => session.find(request, captured, signal),
+  return inSession(root, undefined, process.env, session => session.find(request, captured, signal),
     (find, release) => ({ state: "unavailable", code: find.state === "unavailable" ? find.code : "unavailable", diagnostics: [...(find.state === "unavailable" ? find.diagnostics : []), ...release] }));
 }
-/** One find request: synchronize text and query under one session lock. find is absent when the
- * text update was unavailable (find did not run). */
-export async function syncAndFindQmd(root: string, inventory: QmdInventory, options: QmdSyncOptions, request: QmdFindRequest, signal?: AbortSignal): Promise<{ sync: QmdSyncResult; find?: QmdFindResult }> {
-  return inSession(root, options.models, async (session): Promise<{ sync: QmdSyncResult; find?: QmdFindResult }> => {
+export type QmdUnavailableSync = Extract<QmdSyncResult, { state: "unavailable" }>;
+export type QmdAvailableSync = Exclude<QmdSyncResult, { state: "unavailable" }>;
+/** A sync-led find: find ran exactly when the text update was available. */
+export type QmdSyncedFind = { sync: QmdUnavailableSync } | { sync: QmdAvailableSync; find: QmdFindResult };
+/** One find request: synchronize text and query under one session lock. */
+export async function syncAndFindQmd(root: string, inventory: QmdInventory, options: QmdSyncOptions, request: QmdFindRequest, env: QmdEnvironment, signal?: AbortSignal): Promise<QmdSyncedFind> {
+  return inSession(root, options.models, env, async (session): Promise<QmdSyncedFind> => {
     const sync = await session.sync(inventory, options);
     return sync.state === "unavailable" ? { sync } : { sync, find: await session.find(request, inventory.concepts, signal) };
-  }, (o, release) => releasedSync(o.sync, o.find?.state === "unavailable" ? o.find.diagnostics : [], release));
+  }, (o, release) => releasedSync(o.sync, "find" in o && o.find.state === "unavailable" ? o.find.diagnostics : [], release));
 }
 
 export type QmdEmbedResult =
   | { state: "complete"; embeddingCoverage: { state: "complete" }; embedded: { docsProcessed: number; chunksEmbedded: number; errors: number } }
   | { state: "failed"; code: "conflict" | "unavailable"; embeddingCoverage: QmdEmbeddingCoverage; embedded?: { docsProcessed: number; chunksEmbedded: number; errors: number }; diagnostics: QmdDiagnostic[] };
 
-/** One search sync --embed request: synchronize text and embed under one session lock.
- * embed is absent when the text update was unavailable (embedding did not run). */
-export async function syncAndEmbedQmd(root: string, inventory: QmdInventory, options: QmdSyncOptions, models: QmdReadyModels<"embed">, signal?: AbortSignal): Promise<{ sync: QmdSyncResult; embed?: QmdEmbedResult }> {
-  return inSession(root, options.models, async (session): Promise<{ sync: QmdSyncResult; embed?: QmdEmbedResult }> => {
+/** A sync-led embedding: embedding ran exactly when the text update was available. */
+export type QmdSyncedEmbed = { sync: QmdUnavailableSync } | { sync: QmdAvailableSync; embed: QmdEmbedResult };
+/** One search sync --embed request: synchronize text and embed under one session lock. */
+export async function syncAndEmbedQmd(root: string, inventory: QmdInventory, options: QmdSyncOptions, models: QmdReadyModels<"embed">, env: QmdEnvironment, signal?: AbortSignal): Promise<QmdSyncedEmbed> {
+  return inSession(root, options.models, env, async (session): Promise<QmdSyncedEmbed> => {
     const sync = await session.sync(inventory, options);
     return sync.state === "unavailable" ? { sync } : { sync, embed: await session.embed(models, signal) };
-  }, (o, release) => releasedSync(o.sync, o.embed?.state === "failed" ? o.embed.diagnostics : [], release));
+  }, (o, release) => releasedSync(o.sync, "embed" in o && o.embed.state === "failed" ? o.embed.diagnostics : [], release));
 }
 
 // Doctor inspection of a disposable copy. Database file names and QMD 2.8.3 tables stay in this module.
@@ -615,8 +662,12 @@ function embeddingVectorsHealthy(db: QMDStore["internal"]["db"], embedded: { has
  * (SQLite integrity, schema, FTS rows, vector rows, receipts, identities, bodies) against the
  * captured inventory. inventory: undefined unless the profile is compatible and readable.
  * problem receives every diagnostic. Doctor reports a retained writer lock itself; inspection
- * then stops at the quiescence check, so only its own search-state problems decide the summary. */
-export async function inspectQmdIndex(root: string, inventory: QmdInspectInventory | undefined, models: QmdModels, problem: QmdInspectProblem): Promise<QmdInspection> {
+ * then stops at the quiescence check, so only its own search-state problems decide the summary.
+ * env: the request environment; the SDK and the HOME/XDG scratch check read it (withRequestEnvironment). */
+export async function inspectQmdIndex(root: string, inventory: QmdInspectInventory | undefined, models: QmdModels, problem: QmdInspectProblem, env: QmdEnvironment): Promise<QmdInspection> {
+  return withRequestEnvironment(env, () => inspectInScope(root, inventory, models, problem));
+}
+async function inspectInScope(root: string, inventory: QmdInspectInventory | undefined, models: QmdModels, problem: QmdInspectProblem): Promise<QmdInspection> {
   let searchProblem = false;
   const report: QmdInspectProblem = (file, ...rest) => { if (file.startsWith(SEARCH)) searchProblem = true; problem(file, ...rest); };
   let qmd: QmdVersionCheck = { state: "unavailable" };

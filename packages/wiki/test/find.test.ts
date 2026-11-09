@@ -129,7 +129,7 @@ test("wiki:13 degraded lexical results carry their reason label, unavailable emb
 test("wiki:12 failures map to one error code and message per stage", () => {
   const unavailableSync: QmdSyncResult = { state: "unavailable", code: "conflict", textCoverage: { state: "unavailable", diagnostics: [{ path: ".wiki/search", message: "busy" }] }, embeddingCoverage: { state: "unavailable" } };
   const cases: [string, SearchOutcome, "conflict" | "unavailable", string][] = [
-    ["busy sync during find", { kind: "find", sync: unavailableSync, requested: "deep", filters: {} }, "conflict", "Search index writer is busy"],
+    ["busy sync (find and embed report it as sync)", { kind: "sync", sync: unavailableSync }, "conflict", "Search index writer is busy"],
     ["sync unavailable", { kind: "sync", sync: { ...unavailableSync, code: "unavailable" } }, "unavailable", "Search synchronization unavailable"],
     ["find unavailable", findOutcome({ state: "unavailable", code: "unavailable", diagnostics: [{ path: ".wiki/search", message: "x" }] }), "unavailable", "Search find unavailable"],
     ["embed failed", { kind: "embed", sync: synced, embed: { state: "failed", code: "unavailable", embeddingCoverage: { state: "unavailable" }, diagnostics: [{ path: ".wiki/search", message: "x" }] } }, "unavailable", "Embedding synchronization failed"],

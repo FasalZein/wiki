@@ -7,7 +7,7 @@ import * as path from "node:path";
 import { Readable } from "node:stream";
 import { createInterface } from "node:readline";
 import { after, test } from "node:test";
-import { BIN, spawnCli, spawnJson } from "./cli-helper.ts";
+import { BIN, spawnJson } from "./cli-helper.ts";
 import { fileURLToPath } from "node:url";
 
 const GUARD = fileURLToPath(new URL("./concurrency-io-guard.js", import.meta.url));
@@ -147,13 +147,10 @@ for (const mode of ["index-fail", "log-fail"]) test("wiki:09 index recovery pres
   const { vault, note, bytes } = fresh();
   const published = bytes.replace("Original description", "Published description") + "Published fact\n";
   const log = read(vault, "log.md");
-  const result = spawnCli(["--json", "--vault", vault, ...args(note.digest, candidate(published))], {
+  const { status, data: partial } = spawnJson(["--vault", vault, ...args(note.digest, candidate(published))], {
     imports: [fileURLToPath(new URL("./update-io-guard.js", import.meta.url))], cwd: temp, env: { ...env(), WIKI_UPDATE_GUARD: mode }, timeout: 15000,
   });
-  assert.equal(result.error, undefined); assert.equal(result.stderr, "");
-  assert.equal(result.stdout.trim().split("\n").length, 1);
-  const partial = JSON.parse(result.stdout);
-  assert.equal(result.status, 6); assert.equal(partial.ok, false); assert.equal(partial.written, true);
+  assert.equal(status, 6); assert.equal(partial.ok, false); assert.equal(partial.written, true);
   assert.deepEqual(partial.paths, [relative]); assert.equal(partial.digest, digest(published));
   assert.match(partial.error.message, /run index to repair navigation.*inspect log.md.*manually/);
   assert.equal(read(vault), published); assert.equal(read(vault, "log.md"), log);

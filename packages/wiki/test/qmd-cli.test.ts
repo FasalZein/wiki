@@ -5,7 +5,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, test } from "node:test";
-import { spawnCli } from "./cli-helper.ts";
+import { runCli, spawnCli } from "./cli-helper.ts";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { searchQmdLex } from "../src/qmd.ts";
 
@@ -44,6 +45,31 @@ function note(vault: string, title = "Observatory", scope = ["--personal"]) {
 }
 function read(vault: string, relative: string) { return fs.readFileSync(path.join(vault, relative), "utf8"); }
 function receipt(vault: string) { return path.join(vault, ".wiki/search/coverage.json"); }
+
+test("wiki:10 in-process search sync gives the SDK run()'s env and leaves the host environment unchanged", async () => {
+  const vault = fresh(); note(vault);
+  // Source event: QMD 2.8.3 openDatabase turns process.env.QMD_SQLITE_BUSY_TIMEOUT into this PRAGMA (default 120000).
+  const Database = createRequire(import.meta.url)("better-sqlite3") as { prototype: { exec(this: unknown, sql: string): unknown } };
+  const exec = Database.prototype.exec;
+  const seen: { sql: string; cache: string | undefined }[] = [];
+  Database.prototype.exec = function (sql) {
+    if (sql.startsWith("PRAGMA busy_timeout")) seen.push({ sql, cache: process.env.XDG_CACHE_HOME });
+    return exec.call(this, sql);
+  };
+  assert.equal(process.env.QMD_SQLITE_BUSY_TIMEOUT, undefined);
+  const host = { ...process.env };
+  let result;
+  try { result = await runCli(["--json", "--vault", vault, "search", "sync"], { env: { ...process.env, QMD_SQLITE_BUSY_TIMEOUT: "4321" } }); }
+  finally { Database.prototype.exec = exec; }
+  assert.equal(result.status, 0, result.stderr + result.stdout); assert.equal(JSON.parse(result.stdout).ok, true);
+  assert.ok(seen.length > 0);
+  for (const open of seen) {
+    assert.equal(open.sql, "PRAGMA busy_timeout = 4321");
+    assert.equal(open.cache, path.join(fs.realpathSync(vault), ".wiki/search/sdk-cache"));
+  }
+  // Names only: a failure message must not print environment values.
+  assert.deepEqual([...new Set([...Object.keys(host), ...Object.keys(process.env)])].filter(key => host[key] !== process.env[key]), []);
+});
 
 // Real CLI processes are the e2e seam. SDK reads independently verify indexed bytes.
 test("wiki:10 CLI sync captures registry-valid full Markdown with separate pending embedding coverage and human output", async () => {

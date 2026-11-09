@@ -11,7 +11,7 @@
     "test:wiki": "node packages/wiki/test/run.js",
     "verify:wiki": "bun run typecheck:wiki && bun run test:wiki",
     "boot:wiki": "node packages/wiki/scripts/boot.js",
-    "verify:next": "tsc -p packages/tsconfig.json && node --test --test-concurrency=4 \"packages/*/test/*.test.ts\""
+    "verify:next": "tsc -p packages/tsconfig.json && node packages/wiki/test/run.js --all"
   },
   "devDependencies": {
     "@stryker-mutator/core": "10.1.1",

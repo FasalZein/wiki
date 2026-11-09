@@ -5,7 +5,7 @@ import { inspectContainedPath } from "./paths.ts";
 import { checkVault, navigationIndexes, searchConcepts, type ValidatedInventory } from "./lint.ts";
 import { indexFreshnessDiagnostics } from "./navigation.ts";
 import { containedPath as checked, hasLayoutKind, profileProblem, VAULT_LAYOUT, type ErrorCode, type LayoutKind } from "./vault.ts";
-import { qmdModelReadiness, inspectQmdIndex, DEEP_ROLES, QMD_WRITER_LOCK, type QmdModels, type QmdModelRole } from "./qmd.ts";
+import { qmdModelReadiness, inspectQmdIndex, DEEP_ROLES, QMD_WRITER_LOCK, type QmdEnvironment, type QmdModels, type QmdModelRole } from "./qmd.ts";
 
 type Problem = { path: string; message: string; fix: string };
 type Check = { state: "ready" } | { state: "unavailable" };
@@ -110,8 +110,9 @@ function navigationCheck(root: string, inventory: ValidatedInventory | undefined
   return { state: problems.length ? "unavailable" : "ready" };
 }
 
-/** Inspect only. No writer lock, synchronization, note publication, or SDK model resolution. */
-export async function doctorVault(selected: string) {
+/** Inspect only. No writer lock, synchronization, note publication, or SDK model resolution.
+ * env: the request environment the index inspection reads. */
+export async function doctorVault(selected: string, env: QmdEnvironment) {
   const root = path.resolve(selected), diagnostics: Problem[] = [];
   let failure: ErrorCode | undefined;
   const problem: ReportProblem = (file, text, fix, code = "damaged") => {
@@ -149,7 +150,7 @@ export async function doctorVault(selected: string) {
   const node = nodeCheck(problem);
   const extractors = { pandoc: extractor("pandoc", diagnostics), pdftotext: extractor("pdftotext", diagnostics) };
   const modelReadiness = doctorModelReadiness(root, diagnostics);
-  const { qmd, database, textCoverage, embeddingCoverage } = await inspectQmdIndex(root, profile.state === "ready" && inventory ? { concepts: searchConcepts(inventory), diagnostics: inventory.diagnostics } : undefined, modelReadiness.models, problem);
+  const { qmd, database, textCoverage, embeddingCoverage } = await inspectQmdIndex(root, profile.state === "ready" && inventory ? { concepts: searchConcepts(inventory), diagnostics: inventory.diagnostics } : undefined, modelReadiness.models, problem, env);
   if (diagnostics.length) failure ??= "unavailable";
   return {
     ok: failure === undefined,

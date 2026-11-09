@@ -5,9 +5,12 @@ import { fileURLToPath } from "node:url";
 
 const files = readdirSync(new URL(".", import.meta.url)).filter((name) => name.endsWith(".test.ts"))
   .sort().map((name) => fileURLToPath(new URL(name, import.meta.url)));
-const pattern = process.env.WIKI_TEST_PATTERN;
-// Test files run in parallel; each file spawns one CLI process at a time. Keep this
-// value at twice the heavy slots that docs/wiki-foundation.md tells callers to claim.
+// --all (verify:next, the batch gate) runs every test even when WIKI_TEST_PATTERN is set, so a leaked
+// variable cannot turn the gate into a subset run. test:wiki honors the pattern.
+const pattern = process.argv.includes("--all") ? undefined : process.env.WIKI_TEST_PATTERN;
+// The one test-file concurrency value: test:wiki and verify:next both run this script. Most
+// tests start one CLI process at a time. Keep this value at twice the heavy slots that
+// docs/wiki-foundation.md tells callers to claim.
 const FILE_CONCURRENCY = 4;
 const result = spawnSync(process.execPath, ["--test", `--test-concurrency=${FILE_CONCURRENCY}`, ...(pattern ? ["--test-name-pattern", pattern] : []), ...files], { stdio: "inherit" });
 if (result.error) throw result.error;
