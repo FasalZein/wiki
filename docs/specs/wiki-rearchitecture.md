@@ -2,7 +2,7 @@
 
 Status: Owner-approved structure-first build direction, reconciled 2026-11-06. This file is the authoritative build specification. Implementation and runtime verification remain outstanding.
 
-This specification supersedes the 2026-10-05 evidence-first implementation plan previously stored here. Existing evidence-first code in `packages/wiki-core` and `packages/wiki-cli`, legacy code, and historical evidence records remain untouched. The new foundation is CLI + schema registry + skill + an inactive repository-owned dedicated wiki-agent example. GitHub ticket publication and closure of #9-#14 require owner approval of exact text; this repository update does not authorize those writes.
+This specification supersedes the 2026-10-05 evidence-first implementation plan previously stored here. Existing evidence-first code in `packages/wiki-core` and `packages/wiki-cli`, legacy code, and historical evidence records remain untouched (both packages and the legacy code were later removed: #38, #41). The new foundation is CLI + schema registry + skill + an inactive repository-owned dedicated wiki-agent example. GitHub ticket publication and closure of #9-#14 require owner approval of exact text; this repository update does not authorize those writes.
 
 ## Problem Statement
 
