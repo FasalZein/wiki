@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { syncBuiltinESMExports } from "node:module";
 const root = fs.realpathSync(process.argv[process.argv.indexOf("--vault") + 1]);
 const input = process.argv[process.argv.indexOf("capture") + 1];
-const inputStat = fs.statSync(input), mode = process.env.OKF_CAPTURE_GUARD;
+const inputStat = fs.statSync(input), mode = process.env.WIKI_CAPTURE_GUARD;
 const open = fs.openSync, read = fs.readFileSync, write = fs.writeFileSync, link = fs.linkSync, mkdir = fs.mkdirSync;
 const lock = path.join(root, ".wiki/locks/mutation.lock"), tmp = path.join(root, ".wiki/tmp");
 let reads = 0;

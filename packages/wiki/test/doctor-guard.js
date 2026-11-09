@@ -6,8 +6,8 @@ import https from "node:https";
 import net from "node:net";
 import tls from "node:tls";
 import { registerHooks, syncBuiltinESMExports } from "node:module";
-const mode = process.env.OKF_DOCTOR_GUARD;
-if (mode === "close-failure") { process.env.OKF_QMD_FAIL_CLOSE = "yes"; await import("./qmd-cleanup-guard.js"); }
+const mode = process.env.WIKI_DOCTOR_GUARD;
+if (mode === "close-failure") { process.env.WIKI_QMD_FAIL_CLOSE = "yes"; await import("./qmd-cleanup-guard.js"); }
 const root = path.resolve(process.argv[process.argv.indexOf("--vault") + 1]);
 const home = process.env.HOME;
 const protectedRoots = [root, home, process.env.XDG_CACHE_HOME, process.env.XDG_CONFIG_HOME, process.env.XDG_DATA_HOME].filter(Boolean);

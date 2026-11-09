@@ -9,9 +9,9 @@ import { fileURLToPath } from "node:url";
 
 // Real CLI processes over real QMD storage. Only external inference is faked
 // (qmd-fake-inference.js: the fake vector half contributes nothing, so lexical misses stay misses).
-const BIN = fileURLToPath(new URL("../bin/okf-wiki.js", import.meta.url));
+const BIN = fileURLToPath(new URL("../bin/wiki.js", import.meta.url));
 const GUARD = fileURLToPath(new URL("./qmd-cli-guard.js", import.meta.url));
-const temp = fs.mkdtempSync(path.join(os.tmpdir(), "okf-qmd-literal-"));
+const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-qmd-literal-"));
 after(() => fs.rmSync(temp, { recursive: true, force: true }));
 let counter = 0;
 type Match = { path: string; scope: string; type: string; score: number | null; literal: string[]; digest: string; title: string; description: string; excerpt: string };
@@ -20,7 +20,7 @@ function cli(vault: string, args: string[], mode = "fake-inference", extraEnv: R
   fs.rmSync(log, { force: true });
   const result = spawnSync(process.execPath, ["--import", GUARD, BIN, "--vault", vault, ...(json ? ["--json"] : []), ...args], {
     encoding: "utf8", timeout: 30000,
-    env: { ...process.env, HOME: temp, XDG_CACHE_HOME: path.join(temp, "cache"), XDG_CONFIG_HOME: path.join(temp, "config"), XDG_DATA_HOME: path.join(temp, "data"), WIKI_VAULT: "", QMD_EMBED_MODEL: "", OKF_QMD_CLI_GUARD: mode, OKF_QMD_CALL_LOG: log, OKF_QMD_DENY_SUBPROCESS: "1", ...extraEnv },
+    env: { ...process.env, HOME: temp, XDG_CACHE_HOME: path.join(temp, "cache"), XDG_CONFIG_HOME: path.join(temp, "config"), XDG_DATA_HOME: path.join(temp, "data"), WIKI_VAULT: "", QMD_EMBED_MODEL: "", WIKI_QMD_CLI_GUARD: mode, WIKI_QMD_CALL_LOG: log, WIKI_QMD_DENY_SUBPROCESS: "1", ...extraEnv },
   });
   assert.equal(result.error, undefined);
   assert.equal(result.signal, null, result.stderr);
@@ -48,14 +48,14 @@ function note(vault: string, title: string, body: string, scope: string[] = ["--
 const paths = (matches: Match[]) => matches.map(m => m.path);
 const sha = (vault: string, relative: string) => "sha256:" + createHash("sha256").update(fs.readFileSync(path.join(vault, relative))).digest("hex");
 
-test("okf:13 a note mentioning a slash path or dotted filename is found when qmd misses it, without opening the mentioned path", () => {
+test("wiki:13 a note mentioning a slash path or dotted filename is found when qmd misses it, without opening the mentioned path", () => {
   for (const models of [true, false]) {
     const vault = fresh(models);
     const handler = note(vault, "Request routing", "Routing lives in `src/server/handler.ts` today.\n");
     const env = note(vault, "Secrets", "Never commit the .env.production file.\n");
     note(vault, "Garden", "Garden tomatoes in soil\n");
     // The repository file exists outside the vault; search must not open it.
-    const forbid = { OKF_QMD_FORBID_PATH: "src/server/handler.ts" };
+    const forbid = { WIKI_QMD_FORBID_PATH: "src/server/handler.ts" };
     const found = succeeds(vault, ["find", "where is src/server/handler.ts?", "--terms", "zzzunmatched"], "fake-inference", forbid).data;
     assert.deepEqual(paths(found.matches), [handler], JSON.stringify(found));
     assert.deepEqual(found.literals, ["src/server/handler.ts"]);
@@ -73,7 +73,7 @@ test("okf:13 a note mentioning a slash path or dotted filename is found when qmd
   }
 });
 
-test("okf:13 dotted filenames with numeric or punctuation extensions are literal tokens; version strings are not", () => {
+test("wiki:13 dotted filenames with numeric or punctuation extensions are literal tokens; version strings are not", () => {
   const vault = fresh(false);
   const man = note(vault, "Manual page", "Read printf.3 for format details.\n");
   const lib = note(vault, "Library", "Link against libssl.so.3 at runtime.\n");
@@ -91,7 +91,7 @@ test("okf:13 dotted filenames with numeric or punctuation extensions are literal
   }
 });
 
-test("okf:13 every match carries its scope and registered type from the captured revision", () => {
+test("wiki:13 every match carries its scope and registered type from the captured revision", () => {
   const vault = fresh();
   succeeds(vault, ["type", "add", "building", "--folder", "build"], "");
   const custom = note(vault, "Hangar", "Hangar plan in docs/hangar.md.\n", ["--project", "site"], "building");
@@ -104,7 +104,7 @@ test("okf:13 every match carries its scope and registered type from the captured
   assert.equal(byPath.get(personal)?.literal.length, 0);
 });
 
-test("okf:13 tokens match literally, never as regex, shell or FTS syntax", () => {
+test("wiki:13 tokens match literally, never as regex, shell or FTS syntax", () => {
   const vault = fresh();
   const glob = note(vault, "Glob", "Pattern lib/[ab]*.ts selects files.\n");
   note(vault, "Plain", "See lib/a.ts and lib/b.ts directly.\n");
@@ -118,7 +118,7 @@ test("okf:13 tokens match literally, never as regex, shell or FTS syntax", () =>
   assert.deepEqual(succeeds(vault, ["find", "LIB/[AB]*.TS", "--terms", "zzzunmatched"]).data.matches, []);
 });
 
-test("okf:13 literal matches precede qmd candidates, collapse by canonical path, and qmd order is kept with canonical tie breaks", () => {
+test("wiki:13 literal matches precede qmd candidates, collapse by canonical path, and qmd order is kept with canonical tie breaks", () => {
   const vault = fresh();
   const both = note(vault, "Both", "Telescope notes for docs/x.md here.\n");
   const literalOnly = note(vault, "Literal", "Only docs/x.md is mentioned.\n");
@@ -148,7 +148,7 @@ test("okf:13 literal matches precede qmd candidates, collapse by canonical path,
   assert.match(human.stdout, new RegExp(literalOnly + " literal " + sha(vault, literalOnly) + " \\[literal: docs/x\\.md\\]\\n  Literal: Literal description\\n  Only docs/x\\.md is mentioned\\."));
 });
 
-test("okf:13 scope and type filters apply before the final limit; the default limit is the pinned qmd default", () => {
+test("wiki:13 scope and type filters apply before the final limit; the default limit is the pinned qmd default", () => {
   const vault = fresh();
   for (let i = 0; i < 12; i++) note(vault, "Personal " + String.fromCharCode(97 + i), "Comet comet comet sighting " + i + ".\n");
   const project = note(vault, "Project comet", "One comet mention buried in a long sentence about many unrelated topics and words.\n", ["--project", "demo"]);
@@ -172,10 +172,10 @@ test("okf:13 scope and type filters apply before the final limit; the default li
   for (const args of [["lint", "--limit", "1"], ["search", "sync", "--type", "note"]]) assert.equal(cli(vault, args).status, 2);
 });
 
-test("okf:13 a literal-only match that changes during search is omitted with a moving-target diagnostic", () => {
+test("wiki:13 a literal-only match that changes during search is omitted with a moving-target diagnostic", () => {
   const vault = fresh();
   const moving = note(vault, "Moving", "Mentions src/app.ts once.\n"), stable = note(vault, "Stable", "Also src/app.ts here.\n");
-  const result = succeeds(vault, ["find", "src/app.ts", "--terms", "zzzunmatched"], "fake-inference-move-edit", { OKF_QMD_MOVE_PATH: path.join(vault, moving) });
+  const result = succeeds(vault, ["find", "src/app.ts", "--terms", "zzzunmatched"], "fake-inference-move-edit", { WIKI_QMD_MOVE_PATH: path.join(vault, moving) });
   assert.ok(result.ops.includes("search"), "The edit happened at the search inference seam");
   assert.deepEqual(paths(result.data.matches), [stable]); assert.equal(result.data.matches[0].digest, sha(vault, stable));
   assert.equal(result.data.textCoverage.state, "incomplete");

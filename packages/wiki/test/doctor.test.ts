@@ -7,9 +7,9 @@ import * as path from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-const BIN = fileURLToPath(new URL("../bin/okf-wiki.js", import.meta.url));
+const BIN = fileURLToPath(new URL("../bin/wiki.js", import.meta.url));
 const GUARD = fileURLToPath(new URL("./doctor-guard.js", import.meta.url));
-const temp = fs.mkdtempSync(path.join(os.tmpdir(), "okf-doctor-"));
+const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-doctor-"));
 const home = path.join(temp, "home");
 fs.mkdirSync(home);
 fs.writeFileSync(path.join(home, "sentinel"), "Do not touch");
@@ -44,7 +44,7 @@ function doctor(vault: string, overrides = {}, json = true) {
   return result;
 }
 
-test("okf:17 real CLI reports actual versions, profile, layout and separate read-only coverage", () => {
+test("wiki:17 real CLI reports actual versions, profile, layout and separate read-only coverage", () => {
   const vault = fresh(); note(vault); succeeds(vault, ["search", "sync"]);
   const result = doctor(vault);
   assert.equal(result.status, 7); // Models are deliberately not provisioned by init or doctor.
@@ -74,7 +74,7 @@ function configureModels(vault: string) {
   fs.writeFileSync(path.join(vault, ".wiki/config.json"), JSON.stringify({ profile: "wiki-okf", version: 1, search: { models } }));
 }
 
-test("okf:17 configured model-file readiness never resolves models, and pending embeddings remain separate from complete text", () => {
+test("wiki:17 configured model-file readiness never resolves models, and pending embeddings remain separate from complete text", () => {
   const vault = fresh(); configureModels(vault); succeeds(vault, ["search", "sync"]);
   const empty = doctor(vault); assert.equal(empty.status, 0, JSON.stringify(empty.data));
   assert.equal(empty.data.search.textCoverage.state, "complete"); assert.equal(empty.data.search.embeddingCoverage.state, "complete");
@@ -87,7 +87,7 @@ test("okf:17 configured model-file readiness never resolves models, and pending 
   for (const expression of [/Node: ready \(/, /qmd\/native: ready \(/, /pandoc: ready \(/, /pdftotext: ready \(/, /Profile: ready/, /Text coverage: complete/, /Embedding coverage: incomplete/, /not timestamp freshness or source correctness/, /No repairs performed/]) assert.match(human.stdout, expression);
 });
 
-for (const change of ["equal-time-edit", "add", "rename", "delete"]) test("okf:17 captured content detects " + change + " without sync or receipt rewrites", () => {
+for (const change of ["equal-time-edit", "add", "rename", "delete"]) test("wiki:17 captured content detects " + change + " without sync or receipt rewrites", () => {
   const vault = fresh(), relative = note(vault), file = path.join(vault, relative);
   configureModels(vault); succeeds(vault, ["search", "sync"]);
   const before = fs.statSync(file);
@@ -101,28 +101,28 @@ for (const change of ["equal-time-edit", "add", "rename", "delete"]) test("okf:1
   assert.match(JSON.stringify(result.data.diagnostics), /captured|Indexed text/);
 });
 
-test("okf:17 unreadable concepts are named, never silently omitted from text coverage", () => {
+test("wiki:17 unreadable concepts are named, never silently omitted from text coverage", () => {
   const vault = fresh(); const relative = note(vault); succeeds(vault, ["search", "sync"]);
-  const result = doctor(vault, { OKF_DOCTOR_GUARD: "unreadable" });
+  const result = doctor(vault, { WIKI_DOCTOR_GUARD: "unreadable" });
   assert.equal(result.status, 6); assert.equal(result.data.search.textCoverage.state, "incomplete");
   assert.ok(result.data.diagnostics.some((d: { path: string; message: string }) => d.path === relative && /unreadable/.test(d.message)));
 });
 
-test("okf:17 missing extractors name Pandoc and pdftotext without installation or fallback", () => {
+test("wiki:17 missing extractors name Pandoc and pdftotext without installation or fallback", () => {
   const vault = fresh(); configureModels(vault); succeeds(vault, ["search", "sync"]);
   const result = doctor(vault, { PATH: "" }); assert.equal(result.status, 7);
   assert.equal(result.data.extractors.pandoc.state, "unavailable"); assert.equal(result.data.extractors.pdftotext.state, "unavailable");
   assert.equal(result.data.search.textCoverage.state, "complete");
   for (const dependency of ["pandoc", "pdftotext"]) assert.ok(result.data.diagnostics.some((d: { path: string; fix: string }) => d.path === dependency && /PATH/.test(d.fix)));
 });
-for (const mode of ["missing-sdk", "missing-native", "missing-vector"]) test("okf:17 " + mode + " reports qmd dependency without writable store or global changes", () => {
+for (const mode of ["missing-sdk", "missing-native", "missing-vector"]) test("wiki:17 " + mode + " reports qmd dependency without writable store or global changes", () => {
   const vault = fresh(); note(vault); succeeds(vault, ["search", "sync"]);
-  const result = doctor(vault, { OKF_DOCTOR_GUARD: mode }); assert.equal(result.status, 7);
+  const result = doctor(vault, { WIKI_DOCTOR_GUARD: mode }); assert.equal(result.status, 7);
   assert.equal(result.data.runtime.qmd.state, "unavailable"); assert.equal(result.data.search.textCoverage.state, "unavailable");
   assert.match(JSON.stringify(result.data.diagnostics), /qmd.*native SQLite\/sqlite-vec/);
 });
 
-for (const model of ["missing", "remote", "unreadable-format", "malformed-search"]) test("okf:17 configured " + model + " model dependency is actionable and never downloaded", () => {
+for (const model of ["missing", "remote", "unreadable-format", "malformed-search"]) test("wiki:17 configured " + model + " model dependency is actionable and never downloaded", () => {
   const vault = fresh(); configureModels(vault); note(vault); succeeds(vault, ["search", "sync"]);
   const configFile = path.join(vault, ".wiki/config.json"), config = JSON.parse(fs.readFileSync(configFile, "utf8"));
   if (model === "missing") fs.unlinkSync(config.search.models.embed);
@@ -136,7 +136,7 @@ for (const model of ["missing", "remote", "unreadable-format", "malformed-search
   assert.match(JSON.stringify(result.data.diagnostics), /search.models/);
 });
 
-for (const damage of ["config-json", "config-missing", "config-unsupported", "registry-json", "registry-missing", "layout-missing"]) test("okf:17 " + damage + " reports retained damage without reinitializing", () => {
+for (const damage of ["config-json", "config-missing", "config-unsupported", "registry-json", "registry-missing", "layout-missing"]) test("wiki:17 " + damage + " reports retained damage without reinitializing", () => {
   const vault = fresh(); note(vault); succeeds(vault, ["search", "sync"]);
   if (damage === "config-json") fs.writeFileSync(path.join(vault, ".wiki/config.json"), "{broken");
   if (damage === "config-missing") fs.unlinkSync(path.join(vault, ".wiki/config.json"));
@@ -151,13 +151,13 @@ for (const damage of ["config-json", "config-missing", "config-unsupported", "re
   assert.ok(result.data.diagnostics.every((d: { fix: string }) => d.fix.length > 0));
 });
 
-test("okf:17 foreign vault remains foreign and is not silently initialized", () => {
+test("wiki:17 foreign vault remains foreign and is not silently initialized", () => {
   const vault = path.join(temp, String(++counter)); fs.mkdirSync(vault); fs.writeFileSync(path.join(vault, "foreign.md"), "Owner bytes");
   const result = doctor(vault); assert.equal(result.status, 6); assert.equal(result.data.profile.state, "unavailable");
   assert.equal(fs.existsSync(path.join(vault, ".wiki")), false);
 });
 
-for (const damage of ["database-corrupt", "database-missing", "receipt-missing", "receipt-json", "identities-missing", "wal", "shm", "journal", "index-lock", "mutation-lock", "temporary"]) test("okf:17 " + damage + " stays visible and byte-identical", () => {
+for (const damage of ["database-corrupt", "database-missing", "receipt-missing", "receipt-json", "identities-missing", "wal", "shm", "journal", "index-lock", "mutation-lock", "temporary"]) test("wiki:17 " + damage + " stays visible and byte-identical", () => {
   const vault = fresh(); configureModels(vault); note(vault); succeeds(vault, ["search", "sync"]);
   const search = path.join(vault, ".wiki/search");
   if (damage === "database-corrupt") fs.writeFileSync(path.join(search, "qmd.sqlite"), "Broken SQLite bytes");
@@ -174,7 +174,7 @@ for (const damage of ["database-corrupt", "database-missing", "receipt-missing",
   if (!["mutation-lock", "temporary"].includes(damage)) assert.notEqual(result.data.search.textCoverage.state, "complete");
 });
 
-test("okf:17 symlinked local database never opens or mutates the decoy target", () => {
+test("wiki:17 symlinked local database never opens or mutates the decoy target", () => {
   const vault = fresh(); note(vault); succeeds(vault, ["search", "sync"]);
   const file = path.join(vault, ".wiki/search/qmd.sqlite"), decoy = path.join(home, "decoy.sqlite");
   fs.copyFileSync(file, decoy); fs.unlinkSync(file); fs.symlinkSync(decoy, file);
@@ -182,19 +182,19 @@ test("okf:17 symlinked local database never opens or mutates the decoy target", 
   assert.match(JSON.stringify(result.data.diagnostics), /symlink/);
 });
 
-for (const args of [["doctor", "extra"], ["doctor", "--check"], ["doctor", "--section", "Intro"], ["doctor", "--folder", "notes"], ["doctor", "--personal"]]) test("okf:17 rejects doctor usage " + args.join(" "), () => {
+for (const args of [["doctor", "extra"], ["doctor", "--check"], ["doctor", "--section", "Intro"], ["doctor", "--folder", "notes"], ["doctor", "--personal"]]) test("wiki:17 rejects doctor usage " + args.join(" "), () => {
   const vault = fresh(), before = snapshot(vault); const result = cli(vault, args);
   assert.equal(result.status, 2); assert.deepEqual(snapshot(vault), before);
 });
 
 
-test("okf:17 missing requested vault reports exit 4 and creates no directory", () => {
+test("wiki:17 missing requested vault reports exit 4 and creates no directory", () => {
   const vault = path.join(temp, "absent"), beforeHome = snapshot(home);
   const result = cli(vault, ["doctor"]); assert.equal(result.status, 4); assert.equal(result.data.error.code, "not_found");
   assert.equal(fs.existsSync(vault), false); assert.deepEqual(snapshot(home), beforeHome);
 });
 
-test("okf:17 empty registry and stale navigation are actionable without scaffolding or regeneration", () => {
+test("wiki:17 empty registry and stale navigation are actionable without scaffolding or regeneration", () => {
   const empty = fresh(); fs.rmSync(path.join(empty, ".wiki/types"), { recursive: true }); fs.mkdirSync(path.join(empty, ".wiki/types"));
   const missing = doctor(empty); assert.equal(missing.data.registry.state, "unavailable"); assert.match(JSON.stringify(missing.data.diagnostics), /Missing registry records/);
   const vault = fresh(); note(vault); succeeds(vault, ["search", "sync"]); fs.appendFileSync(path.join(vault, "personal/index.md"), "Edited generated index\n");
@@ -202,7 +202,7 @@ test("okf:17 empty registry and stale navigation are actionable without scaffold
   assert.ok(stale.data.diagnostics.some((d: { path: string; fix: string }) => d.path === "personal/index.md" && /index/.test(d.fix)));
 });
 
-for (const table of ["documents_fts", "content_vectors"]) test("okf:17 damaged " + table + " schema is not silently repaired by SDK initialization", async () => {
+for (const table of ["documents_fts", "content_vectors"]) test("wiki:17 damaged " + table + " schema is not silently repaired by SDK initialization", async () => {
   const vault = fresh(); configureModels(vault); note(vault); succeeds(vault, ["search", "sync"]);
   const { createStore } = await import("@tobilu/qmd");
   const store = await createStore({ dbPath: path.join(vault, ".wiki/search/qmd.sqlite"), config: { collections: {} } });
@@ -211,20 +211,20 @@ for (const table of ["documents_fts", "content_vectors"]) test("okf:17 damaged "
   assert.equal(result.data.search.textCoverage.state, "unavailable"); assert.match(JSON.stringify(result.data.diagnostics), new RegExp(table));
 });
 
-test("okf:17 empty inventory does not make an invalid identity-mapping version compatible", () => {
+test("wiki:17 empty inventory does not make an invalid identity-mapping version compatible", () => {
   const vault = fresh(); configureModels(vault); succeeds(vault, ["search", "sync"]);
   fs.writeFileSync(path.join(vault, ".wiki/search/identities.json"), '{"version":9,"paths":[]}');
   const result = doctor(vault); assert.equal(result.status, 6); assert.equal(result.data.search.textCoverage.state, "incomplete");
 });
 
-test("okf:17 scratch placement inside the vault is refused before creating diagnostic files", () => {
+test("wiki:17 scratch placement inside the vault is refused before creating diagnostic files", () => {
   const vault = fresh(); configureModels(vault); note(vault); succeeds(vault, ["search", "sync"]);
   const result = doctor(vault, { TMPDIR: vault }); assert.equal(result.status, 7); assert.equal(result.data.search.textCoverage.state, "unavailable");
   assert.match(JSON.stringify(result.data.diagnostics), /scratch directory must be outside/);
 });
 
 
-test("okf:17 interrupted embedding metadata without physical vectors cannot report healthy embeddings", async () => {
+test("wiki:17 interrupted embedding metadata without physical vectors cannot report healthy embeddings", async () => {
   const vault = fresh(); configureModels(vault); note(vault); succeeds(vault, ["search", "sync"]);
   const { createStore } = await import("@tobilu/qmd");
   const store = await createStore({ dbPath: path.join(vault, ".wiki/search/qmd.sqlite"), config: { collections: {} } });
@@ -239,15 +239,15 @@ test("okf:17 interrupted embedding metadata without physical vectors cannot repo
 });
 
 
-test("okf:17 diagnostic native close failure keeps a structured report and never certifies coverage", () => {
+test("wiki:17 diagnostic native close failure keeps a structured report and never certifies coverage", () => {
   const vault = fresh(); configureModels(vault); note(vault); succeeds(vault, ["search", "sync"]);
-  const result = doctor(vault, { OKF_DOCTOR_GUARD: "close-failure" }); assert.equal(result.status, 7);
+  const result = doctor(vault, { WIKI_DOCTOR_GUARD: "close-failure" }); assert.equal(result.status, 7);
   assert.equal(result.data.search.textCoverage.state, "unavailable"); assert.equal(result.data.search.embeddingCoverage.state, "unavailable");
   assert.match(JSON.stringify(result.data.diagnostics), /Diagnostic database close failed.*SQLITE_IOERR/);
 });
 
 
-test("okf:17 shared readiness keeps embed available when deep-only model files are missing", () => {
+test("wiki:17 shared readiness keeps embed available when deep-only model files are missing", () => {
   const vault = fresh(); configureModels(vault); note(vault); succeeds(vault, ["search", "sync"]);
   fs.unlinkSync(path.join(vault, "models/generate.gguf")); fs.unlinkSync(path.join(vault, "models/rerank.gguf"));
   const result = doctor(vault); assert.equal(result.status, 7);
@@ -255,7 +255,7 @@ test("okf:17 shared readiness keeps embed available when deep-only model files a
   assert.equal(result.data.search.textCoverage.state, "complete"); assert.equal(result.data.search.embeddingCoverage.state, "incomplete");
 });
 
-test("okf:17 doctor never provisions the SDK cache/config chain after normal sync state is removed", () => {
+test("wiki:17 doctor never provisions the SDK cache/config chain after normal sync state is removed", () => {
   const vault = fresh(); configureModels(vault); note(vault); succeeds(vault, ["search", "sync"]);
   const cache = path.join(vault, ".wiki/search/sdk-cache"), config = path.join(vault, ".wiki/search/sdk-config");
   assert.equal(fs.existsSync(path.join(cache, "qmd/models")), true, "#25 sync creates the local SDK cache before doctor");
@@ -269,7 +269,7 @@ test("okf:17 doctor never provisions the SDK cache/config chain after normal syn
 });
 
 
-for (const damage of ["missing-row", "stale-body", "stale-title", "stale-identity", "extra-row"]) test("okf:17 review P1 lexical " + damage + " cannot report complete captured text coverage", async () => {
+for (const damage of ["missing-row", "stale-body", "stale-title", "stale-identity", "extra-row"]) test("wiki:17 review P1 lexical " + damage + " cannot report complete captured text coverage", async () => {
   const vault = fresh(); configureModels(vault); note(vault);
   succeeds(vault, ["new", "note", "--personal", "--title", "Lighthouse", "--description", "Second captured concept"]);
   succeeds(vault, ["search", "sync"]);
@@ -290,10 +290,10 @@ for (const damage of ["missing-row", "stale-body", "stale-title", "stale-identit
 });
 
 
-test("okf:17 review P1 unreadable generated index retains every independent readiness section", () => {
+test("wiki:17 review P1 unreadable generated index retains every independent readiness section", () => {
   const vault = fresh(); configureModels(vault); note(vault); succeeds(vault, ["search", "sync"]);
   fs.appendFileSync(path.join(vault, "index.md"), "Stale but readable generated navigation\n");
-  const result = doctor(vault, { OKF_DOCTOR_GUARD: "unreadable-index" });
+  const result = doctor(vault, { WIKI_DOCTOR_GUARD: "unreadable-index" });
   assert.equal(result.status, 6, JSON.stringify(result.data)); assert.equal(result.data.error.code, "damaged");
   assert.equal(result.data.runtime.node.version, process.versions.node); assert.equal(result.data.runtime.qmd.state, "ready");
   assert.equal(result.data.extractors.pandoc.state, "ready"); assert.equal(result.data.extractors.pdftotext.state, "ready");
@@ -306,7 +306,7 @@ test("okf:17 review P1 unreadable generated index retains every independent read
 });
 
 
-test("okf:17 healthy lexical coverage respects pinned qmd CJK field normalization", () => {
+test("wiki:17 healthy lexical coverage respects pinned qmd CJK field normalization", () => {
   const vault = fresh(); configureModels(vault);
   const relative = succeeds(vault, ["new", "note", "--personal", "--title", "Tokyo 東京", "--description", "Mixed 中文 and English"]).path;
   fs.appendFileSync(path.join(vault, relative), "\n東京 한국 カタカナ ひらがな 中文.\n");

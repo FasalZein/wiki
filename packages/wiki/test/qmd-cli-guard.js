@@ -7,8 +7,8 @@ import https from "node:https";
 import net from "node:net";
 import tls from "node:tls";
 import { registerHooks, syncBuiltinESMExports } from "node:module";
-const mode = process.env.OKF_QMD_CLI_GUARD;
-if (mode === "close-failure") { process.env.OKF_QMD_FAIL_CLOSE = "yes"; await import("./qmd-cleanup-guard.js"); }
+const mode = process.env.WIKI_QMD_CLI_GUARD;
+if (mode === "close-failure") { process.env.WIKI_QMD_FAIL_CLOSE = "yes"; await import("./qmd-cleanup-guard.js"); }
 let modelAttempts = 0;
 // Fake only external inference: the wrapper keeps the real SDK store and SQLite storage.
 const FAKE_INFERENCE = new URL("./qmd-fake-inference.js", import.meta.url).href;
@@ -20,7 +20,7 @@ registerHooks({ resolve(specifier, context, nextResolve) {
 } });
 let networkAttempts = 0;
 // Find and sync must not start detached embedding workers or any subprocess.
-if (process.env.OKF_QMD_DENY_SUBPROCESS === "1") {
+if (process.env.WIKI_QMD_DENY_SUBPROCESS === "1") {
   const cp = await import("node:child_process");
   for (const name of ["spawn", "spawnSync", "exec", "execSync", "execFile", "execFileSync", "fork"]) cp.default[name] = () => { throw new Error("Search attempted subprocess " + name); };
 }
@@ -31,7 +31,7 @@ process.on("exit", () => {
 http.request = http.get = https.request = https.get = net.connect = net.createConnection = tls.connect = deny;
 net.Socket.prototype.connect = deny; globalThis.fetch = deny;
 // A repository path that a note mentions must never be opened by search.
-const forbidden = process.env.OKF_QMD_FORBID_PATH;
+const forbidden = process.env.WIKI_QMD_FORBID_PATH;
 if (forbidden) for (const name of ["readFileSync", "openSync", "statSync", "lstatSync", "existsSync", "accessSync", "readdirSync", "realpathSync"]) {
   const original = fs[name];
   fs[name] = (file, ...args) => { if (String(file).includes(forbidden)) throw new Error("Search opened a mentioned repository path: " + String(file)); return original(file, ...args); };
@@ -49,7 +49,7 @@ fs.readFileSync = (file, ...args) => {
 // Two-process stale-index schedule, synchronized only at source events through FIFOs
 // (blocking open/read, no polling): B captures R0 and pauses before its index lock;
 // A captures R1, syncs and releases; B syncs R0 and releases; then A queries.
-const fifo = (name) => path.join(process.env.OKF_QMD_FIFO_DIR ?? "", name);
+const fifo = (name) => path.join(process.env.WIKI_QMD_FIFO_DIR ?? "", name);
 let staleB = false, staleA = false;
 fs.writeFileSync = (file, ...args) => {
   if (mode === "stale-b" && !staleB && String(file).endsWith("/.wiki/search/writer.lock")) {

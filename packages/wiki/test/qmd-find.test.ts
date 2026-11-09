@@ -8,9 +8,9 @@ import { fileURLToPath } from "node:url";
 
 // Real CLI processes over real QMD storage. Only external inference is faked
 // (qmd-fake-inference.js); the real local-model smoke is qmd-model-proof.js find.
-const BIN = fileURLToPath(new URL("../bin/okf-wiki.js", import.meta.url));
+const BIN = fileURLToPath(new URL("../bin/wiki.js", import.meta.url));
 const GUARD = fileURLToPath(new URL("./qmd-cli-guard.js", import.meta.url));
-const temp = fs.mkdtempSync(path.join(os.tmpdir(), "okf-qmd-find-"));
+const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-qmd-find-"));
 after(() => {
   try {
     for (const dir of ["cache", "config", "data"]) assert.equal(fs.existsSync(path.join(temp, dir)), false, "No global-default search state: " + dir);
@@ -23,7 +23,7 @@ function cli(vault: string, args: string[], mode = "", json = true, extraEnv: Re
   fs.rmSync(log, { force: true });
   const result = spawnSync(process.execPath, ["--import", GUARD, BIN, "--vault", vault, ...(json ? ["--json"] : []), ...args], {
     encoding: "utf8", timeout: 30000,
-    env: { ...process.env, HOME: temp, XDG_CACHE_HOME: path.join(temp, "cache"), XDG_CONFIG_HOME: path.join(temp, "config"), XDG_DATA_HOME: path.join(temp, "data"), WIKI_VAULT: "", QMD_EMBED_MODEL: "", OKF_QMD_CLI_GUARD: mode, OKF_QMD_CALL_LOG: log, OKF_QMD_DENY_SUBPROCESS: "1", ...extraEnv },
+    env: { ...process.env, HOME: temp, XDG_CACHE_HOME: path.join(temp, "cache"), XDG_CONFIG_HOME: path.join(temp, "config"), XDG_DATA_HOME: path.join(temp, "data"), WIKI_VAULT: "", QMD_EMBED_MODEL: "", WIKI_QMD_CLI_GUARD: mode, WIKI_QMD_CALL_LOG: log, WIKI_QMD_DENY_SUBPROCESS: "1", ...extraEnv },
   });
   assert.equal(result.error, undefined);
   assert.equal(result.signal, null, result.stderr);
@@ -49,7 +49,7 @@ function configure(vault: string, roles: string[]) {
 }
 const ops = (calls: Call[]) => calls.map(c => c.op);
 
-test("okf:11 fast find forwards one typed lex/vec request without expansion or rerank, syncs text and never embeds", () => {
+test("wiki:11 fast find forwards one typed lex/vec request without expansion or rerank, syncs text and never embeds", () => {
   const vault = fresh(), star = note(vault, "Observatory", "Observatory telescope for stars"); note(vault, "Garden", "Garden tomatoes in soil");
   const models = configure(vault, ["embed"]);
   // The fake vector half contributes nothing; this literal question is also a lexical hit.
@@ -73,7 +73,7 @@ test("okf:11 fast find forwards one typed lex/vec request without expansion or r
   assert.match(human.stdout, /Text coverage: complete/); assert.match(human.stdout, /Embedding coverage: incomplete \(2 content hashes pending\)/);
 });
 
-test("okf:11 fast miss never escalates to deep; deep find explicitly expands and reranks", () => {
+test("wiki:11 fast miss never escalates to deep; deep find explicitly expands and reranks", () => {
   const vault = fresh(), star = note(vault, "Observatory", "Observatory telescope for stars");
   configure(vault, ["embed", "generate", "rerank"]);
   const miss = cli(vault, ["find", "zzzunmatched"], "fake-inference");
@@ -91,8 +91,8 @@ test("okf:11 fast miss never escalates to deep; deep find explicitly expands and
   assert.deepEqual(deep.data.matches.map((m: { path: string }) => m.path), [star]);
 });
 
-// B12 (okf:12) replaced find's former exit 7 here with labelled degraded lexical retrieval; explicit embedding keeps exit 7.
-test("okf:11 okf:12 missing, remote or invalid models are explicit readiness diagnostics without downloads; find degrades to model-free lexical", () => {
+// B12 (wiki:12) replaced find's former exit 7 here with labelled degraded lexical retrieval; explicit embedding keeps exit 7.
+test("wiki:11 wiki:12 missing, remote or invalid models are explicit readiness diagnostics without downloads; find degrades to model-free lexical", () => {
   const vault = fresh(), star = note(vault, "Observatory", "Observatory telescope");
   const embed = cli(vault, ["search", "sync", "--embed"], "fake-inference");
   assert.equal(embed.status, 7, JSON.stringify(embed)); assert.equal(embed.data.error.code, "unavailable"); assert.equal(embed.data.readiness, "unavailable");
@@ -124,10 +124,10 @@ test("okf:11 okf:12 missing, remote or invalid models are explicit readiness dia
   const humanEmbed = cli(vault, ["search", "sync", "--embed"], "", false); assert.equal(humanEmbed.status, 7); assert.match(humanEmbed.stderr, /^unavailable: Search models are not ready/);
 });
 
-test("okf:11 search sync --embed runs explicit embedding synchronously and reports failure or remaining pending coverage", () => {
+test("wiki:11 search sync --embed runs explicit embedding synchronously and reports failure or remaining pending coverage", () => {
   const vault = fresh(); note(vault, "Observatory", "Observatory telescope");
   const models = configure(vault, ["embed"]);
-  const failed = cli(vault, ["search", "sync", "--embed"], "fake-inference", true, { OKF_QMD_FAKE_EMBED: "fail" });
+  const failed = cli(vault, ["search", "sync", "--embed"], "fake-inference", true, { WIKI_QMD_FAKE_EMBED: "fail" });
   assert.equal(failed.status, 7, JSON.stringify(failed)); assert.equal(failed.data.embedding, "failed");
   assert.equal(failed.data.textCoverage.state, "complete"); assert.equal(failed.data.embeddingCoverage.state, "unavailable");
   assert.match(JSON.stringify(failed.data.diagnostics), /Injected local embedding failure/);
@@ -139,7 +139,7 @@ test("okf:11 search sync --embed runs explicit embedding synchronously and repor
   const plain = cli(vault, ["search", "sync"], "fake-inference"); assert.equal(plain.status, 0); assert.equal(plain.textStore, 2); assert.deepEqual(plain.textModels, models); assert.deepEqual(ops(plain.calls), [], "Plain sync opens no model-configured store");
 });
 
-test("okf:11 find option boundaries are usage errors before index effects", () => {
+test("wiki:11 find option boundaries are usage errors before index effects", () => {
   const vault = fresh(); note(vault, "Observatory", "Observatory telescope");
   for (const args of [["find"], ["find", "a", "b"], ["find", " "], ["find", "a", "--terms", " "], ["search", "sync", "--deep"], ["search", "sync", "--terms", "x"], ["find", "a", "--embed"], ["show", "x", "--deep"]]) {
     const result = cli(vault, args); assert.equal(result.status, 2, JSON.stringify(args) + JSON.stringify(result.data)); assert.equal(result.data.error.code, "usage");
@@ -147,7 +147,7 @@ test("okf:11 find option boundaries are usage errors before index effects", () =
   assert.equal(fs.existsSync(path.join(vault, ".wiki/search")), false);
 });
 
-test("okf:11 SIGTERM during explicit embedding, expansion or search is never reported as success and releases the index lock", () => {
+test("wiki:11 SIGTERM during explicit embedding, expansion or search is never reported as success and releases the index lock", () => {
   const vault = fresh(); note(vault, "Observatory", "Observatory telescope for stars");
   configure(vault, ["embed", "generate", "rerank"]);
   for (const [seam, args] of [["embed", ["search", "sync", "--embed"]], ["search", ["find", "telescope"]], ["expand", ["find", "--deep", "telescope"]], ["search", ["find", "--deep", "telescope stars"]]] as const) {
@@ -161,7 +161,7 @@ test("okf:11 SIGTERM during explicit embedding, expansion or search is never rep
   }
 });
 
-test("okf:11 a writer taking the index lock between text sync and find/embed is conflict exit 3, not unavailable", () => {
+test("wiki:11 a writer taking the index lock between text sync and find/embed is conflict exit 3, not unavailable", () => {
   const vault = fresh(); note(vault, "Observatory", "Observatory telescope");
   configure(vault, ["embed"]);
   for (const args of [["find", "telescope"], ["search", "sync", "--embed"]]) {
@@ -175,7 +175,7 @@ test("okf:11 a writer taking the index lock between text sync and find/embed is 
   }
 });
 
-test("okf:11 SDK model cache binds to vault-local derived state, never an absent or unwritable user cache", () => {
+test("wiki:11 SDK model cache binds to vault-local derived state, never an absent or unwritable user cache", () => {
   const vault = fresh(); note(vault, "Observatory", "Observatory telescope");
   configure(vault, ["embed", "generate", "rerank"]);
   const decoy = path.join(temp, "decoy-" + counter); fs.mkdirSync(decoy); fs.chmodSync(decoy, 0o500);
@@ -192,7 +192,7 @@ test("okf:11 SDK model cache binds to vault-local derived state, never an absent
   } finally { fs.chmodSync(decoy, 0o700); }
 });
 
-test("okf:11 nested SDK cache symlinks or non-directories are refused before SDK effects and leave external directories unchanged", () => {
+test("wiki:11 nested SDK cache symlinks or non-directories are refused before SDK effects and leave external directories unchanged", () => {
   for (const [label, linked] of [["nested qmd", "sdk-cache/qmd"], ["final models", "sdk-cache/qmd/models"], ["config qmd", "sdk-config/qmd"]] as const) {
     const vault = fresh(); note(vault, "Observatory", "Observatory telescope"); configure(vault, ["embed"]);
     const external = fs.mkdtempSync(path.join(temp, "external-")); fs.writeFileSync(path.join(external, "keep.txt"), "external bytes");

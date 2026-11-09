@@ -11,7 +11,7 @@ import { syncBuiltinESMExports } from "node:module";
 import "./qmd-cleanup-guard.js";
 import { syncQmdText, searchQmdLex } from "../src/qmd.ts";
 
-const temp = fs.mkdtempSync(path.join(os.tmpdir(), "okf-qmd-"));
+const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-qmd-"));
 // Importing the adapter does not import QMD. Sandbox all SDK defaults before first use.
 const home = path.join(temp, "home");
 fs.mkdirSync(home);
@@ -35,7 +35,7 @@ function fresh() { const root = path.join(temp, String(++sequence)); fs.mkdirSyn
 const note = (name: string, markdown: string) => ({ path: "personal/notes/" + name + ".md", markdown });
 const inventory = (concepts: ReturnType<typeof note>[]) => ({ concepts, diagnostics: [] });
 
-test("okf:10 real SDK adds exact full Markdown without embeddings and retrieves lexical matches", async () => {
+test("wiki:10 real SDK adds exact full Markdown without embeddings and retrieves lexical matches", async () => {
   const root = fresh();
   const markdown = "\uFEFF---\r\ntype: note\r\n---\r\n# Café\r\n\r\nQuasar observatory trailing spaces  \r\n";
   const result = await syncQmdText(root, inventory([note("quasar", markdown)]));
@@ -57,7 +57,7 @@ async function paths(root: string, query: string) {
   return found.matches.map(m => m.path);
 }
 
-test("okf:10 same-size same-mtime edits, additions, removals, and same-content renames follow full captured bytes", async () => {
+test("wiki:10 same-size same-mtime edits, additions, removals, and same-content renames follow full captured bytes", async () => {
   const root = fresh();
   const source = path.join(root, "personal/notes/star.md");
   fs.mkdirSync(path.dirname(source), { recursive: true });
@@ -91,7 +91,7 @@ test("okf:10 same-size same-mtime edits, additions, removals, and same-content r
   assert.deepEqual(await paths(root, "photon"), []);
 });
 
-test("okf:10 derived state deletion rebuilds exact coverage, including shared-content identities", async () => {
+test("wiki:10 derived state deletion rebuilds exact coverage, including shared-content identities", async () => {
   const root = fresh();
   const retained = [note("one", "# Shared\nNebula\n"), note("two", "# Shared\nNebula\n")];
   for (const concept of retained) {
@@ -111,7 +111,7 @@ test("okf:10 derived state deletion rebuilds exact coverage, including shared-co
   assert.deepEqual((await paths(root, "Nebula")).sort(), ["personal/notes/one.md", "personal/notes/two.md"]);
 });
 
-test("okf:10 caller diagnostics and forbidden supplied paths never claim complete coverage or enter retrieval", async () => {
+test("wiki:10 caller diagnostics and forbidden supplied paths never claim complete coverage or enter retrieval", async () => {
   const root = fresh();
   const good = note("valid", "# Valid\nAdmitted pulsar\n");
   assert.equal((await syncQmdText(root, inventory([good]))).state, "successful");
@@ -129,7 +129,7 @@ test("okf:10 caller diagnostics and forbidden supplied paths never claim complet
 });
 
 for (const mode of ["abort", "throw"] as const) {
-  test("okf:10 " + mode + " at actual SDK progress invalidates receipt and permits explicit recovery", async () => {
+  test("wiki:10 " + mode + " at actual SDK progress invalidates receipt and permits explicit recovery", async () => {
     const root = fresh();
     const good = inventory([note("first", "# First\nInitial comet\n")]);
     assert.equal((await syncQmdText(root, good)).state, "successful");
@@ -153,7 +153,7 @@ for (const mode of ["abort", "throw"] as const) {
   });
 }
 
-test("okf:10 SDK-skipped empty content cannot pass indexed-body verification", async () => {
+test("wiki:10 SDK-skipped empty content cannot pass indexed-body verification", async () => {
   const root = fresh();
   const result = await syncQmdText(root, inventory([note("empty", "")]));
   assert.equal(result.state, "unavailable", JSON.stringify(result));
@@ -161,7 +161,7 @@ test("okf:10 SDK-skipped empty content cannot pass indexed-body verification", a
   assert.equal(fs.existsSync(receipt(root)), false);
 });
 
-test("okf:10 exclusive writer lock rejects competing sync and lexical reads without taking the mutation lock", async () => {
+test("wiki:10 exclusive writer lock rejects competing sync and lexical reads without taking the mutation lock", async () => {
   const root = fresh();
   fs.mkdirSync(path.join(root, ".wiki"));
   fs.writeFileSync(path.join(root, ".wiki/mutation.lock"), "unrelated content operation");
@@ -176,7 +176,7 @@ test("okf:10 exclusive writer lock rejects competing sync and lexical reads with
   assert.equal(fs.readFileSync(path.join(root, ".wiki/mutation.lock"), "utf8"), "unrelated content operation");
 });
 
-test("okf:10 native database failures, duplicate captures, and symlinks fail closed", async () => {
+test("wiki:10 native database failures, duplicate captures, and symlinks fail closed", async () => {
   const corrupt = fresh();
   fs.mkdirSync(path.join(corrupt, ".wiki/search"), { recursive: true });
   fs.writeFileSync(path.join(corrupt, ".wiki/search/qmd.sqlite"), "not SQLite");
@@ -194,7 +194,7 @@ test("okf:10 native database failures, duplicate captures, and symlinks fail clo
 });
 
 
-test("okf:10 valid build/dist/vendor project and folder identities survive SDK exclusions, rename, and rebuild", async () => {
+test("wiki:10 valid build/dist/vendor project and folder identities survive SDK exclusions, rename, and rebuild", async () => {
   const root = fresh();
   const names = ["app", "build", "dist", "vendor"];
   const concepts = names.flatMap(project => names.map(folder => ({
@@ -213,7 +213,7 @@ test("okf:10 valid build/dist/vendor project and folder identities survive SDK e
   assert.deepEqual((await paths(root, "photon")).sort(), renamed.map(c => c.path).sort());
 });
 
-test("okf:10 SDK progress failure plus permission-denied cleanup preserves both diagnostics and retained-lock recovery", async () => {
+test("wiki:10 SDK progress failure plus permission-denied cleanup preserves both diagnostics and retained-lock recovery", async () => {
   const root = fresh();
   const good = inventory([note("first", "# First\nQuasar\n")]);
   assert.equal((await syncQmdText(root, good)).state, "successful");
@@ -237,21 +237,21 @@ test("okf:10 SDK progress failure plus permission-denied cleanup preserves both 
   assert.equal((await syncQmdText(root, good)).state, "successful");
 });
 
-test("okf:10 native close failures stay structured after real lexical reads and prevent successful sync receipts", async () => {
+test("wiki:10 native close failures stay structured after real lexical reads and prevent successful sync receipts", async () => {
   const root = fresh();
   const good = inventory([note("first", "# First\nQuasar\n")]);
   assert.equal((await syncQmdText(root, good)).state, "successful");
-  process.env.OKF_QMD_FAIL_CLOSE = "yes";
+  process.env.WIKI_QMD_FAIL_CLOSE = "yes";
   let found;
   try { found = await searchQmdLex(root, "quasar"); }
-  finally { delete process.env.OKF_QMD_FAIL_CLOSE; }
+  finally { delete process.env.WIKI_QMD_FAIL_CLOSE; }
   assert.equal(found.state, "unavailable", JSON.stringify(found));
   assert.match(JSON.stringify(found), /injected native SQLITE_IOERR/);
   assert.equal(fs.existsSync(path.join(root, ".wiki/search/writer.lock")), false);
-  process.env.OKF_QMD_FAIL_CLOSE = "yes";
+  process.env.WIKI_QMD_FAIL_CLOSE = "yes";
   let sync;
   try { sync = await syncQmdText(root, good); }
-  finally { delete process.env.OKF_QMD_FAIL_CLOSE; }
+  finally { delete process.env.WIKI_QMD_FAIL_CLOSE; }
   assert.equal(sync.state, "unavailable", JSON.stringify(sync));
   assert.match(JSON.stringify(sync), /injected native SQLITE_IOERR/);
   assert.equal(fs.existsSync(receipt(root)), false);
@@ -259,7 +259,7 @@ test("okf:10 native close failures stay structured after real lexical reads and 
 });
 
 
-test("okf:10 checked staged mapping rejects forged, duplicate, or unmapped canonical identities", async () => {
+test("wiki:10 checked staged mapping rejects forged, duplicate, or unmapped canonical identities", async () => {
   const root = fresh();
   const good = inventory([note("first", "# First\nQuasar\n")]);
   assert.equal((await syncQmdText(root, good)).state, "successful");

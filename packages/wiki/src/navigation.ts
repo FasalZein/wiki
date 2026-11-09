@@ -82,7 +82,7 @@ function indexFreshnessProblem(root: string, relative: string, bytes: string): D
     rule = "index.stale";
     message = "Generated navigation differs from current topic metadata";
   } else return undefined;
-  return { path: relative, rule, message, fix: "Run okf-wiki --vault <dir> index to regenerate navigation" };
+  return { path: relative, rule, message, fix: "Run wiki --vault <dir> index to regenerate navigation" };
 }
 export function indexFreshnessDiagnostics(root: string, expected: Map<string, string>): Diagnostic[] {
   const diagnostics = indexDestinationDiagnostics(root, expected.keys());

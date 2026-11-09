@@ -5,9 +5,9 @@ stripping (Node >=22.18). It does not use the installed legacy `wiki` binary.
 Do not run the root build or install this CLI globally for development.
 
 ```sh
-node packages/okf-wiki/bin/okf-wiki.js init /explicit/disposable/vault --json
-node packages/okf-wiki/bin/okf-wiki.js --vault /explicit/disposable/vault init --json
-WIKI_VAULT=/explicit/disposable/vault node packages/okf-wiki/bin/okf-wiki.js init --json
+node packages/wiki/bin/wiki.js init /explicit/disposable/vault --json
+node packages/wiki/bin/wiki.js --vault /explicit/disposable/vault init --json
+WIKI_VAULT=/explicit/disposable/vault node packages/wiki/bin/wiki.js init --json
 ```
 
 Implemented commands are `init`, `type list`, `type add`, `index`, `index --check`, `doctor`,
@@ -57,7 +57,7 @@ Install the package-local, pinned dependencies without changing the root depende
 set or lockfile:
 
 ```sh
-heavy -- npm ci --prefix packages/okf-wiki --ignore-scripts
+heavy -- npm ci --prefix packages/wiki --ignore-scripts
 ```
 
 This package owns its npm lockfile. Ajv evaluates draft-2020-12 schemas with
@@ -66,10 +66,10 @@ timestamps as strings, rejects unknown tags and duplicate keys, and has no parse
 cache. Plain `---` delimiters cannot select a language engine.
 
 ```sh
-node packages/okf-wiki/bin/okf-wiki.js --vault /explicit/disposable/vault type list --json
-node packages/okf-wiki/bin/okf-wiki.js --vault /explicit/disposable/vault type add glossary --folder glossary --json
-node packages/okf-wiki/bin/okf-wiki.js --vault /explicit/disposable/vault lint --json
-node packages/okf-wiki/bin/okf-wiki.js --vault /explicit/disposable/vault lint projects/wiki/glossary/terms.md --json
+node packages/wiki/bin/wiki.js --vault /explicit/disposable/vault type list --json
+node packages/wiki/bin/wiki.js --vault /explicit/disposable/vault type add glossary --folder glossary --json
+node packages/wiki/bin/wiki.js --vault /explicit/disposable/vault lint --json
+node packages/wiki/bin/wiki.js --vault /explicit/disposable/vault lint projects/wiki/glossary/terms.md --json
 ```
 
 The registry, not CLI source, defines accepted type names. Each schema may use
@@ -134,8 +134,8 @@ applies registry edits to all existing notes. Lint never rewrites files.
 ## Generated navigation
 
 ```sh
-node packages/okf-wiki/bin/okf-wiki.js --vault /explicit/disposable/vault index --json
-node packages/okf-wiki/bin/okf-wiki.js --vault /explicit/disposable/vault index --check --json
+node packages/wiki/bin/wiki.js --vault /explicit/disposable/vault index --json
+node packages/wiki/bin/wiki.js --vault /explicit/disposable/vault index --check --json
 ```
 
 `index` validates the current registry and authored concepts once, then overwrites
@@ -161,8 +161,8 @@ state; it creates no commit or operation-log entry.
 ## Current note reads
 
 ```sh
-node packages/okf-wiki/bin/okf-wiki.js --vault /explicit/disposable/vault show personal/notes/topic.md --json
-node packages/okf-wiki/bin/okf-wiki.js --vault /explicit/disposable/vault show personal/notes/topic.md --section "Next steps" --json
+node packages/wiki/bin/wiki.js --vault /explicit/disposable/vault show personal/notes/topic.md --json
+node packages/wiki/bin/wiki.js --vault /explicit/disposable/vault show personal/notes/topic.md --section "Next steps" --json
 ```
 
 Full show returns the current UTF-8 Markdown, including frontmatter, BOM if
@@ -201,25 +201,25 @@ boundary as the other commands, not protection against hostile concurrent swaps.
 From the repository root:
 
 ```sh
-OKF_TEST_PATTERN="okf:01|okf:02" heavy -- bun run test:okf
-OKF_TEST_PATTERN="okf:06" heavy -- bun run test:okf
-heavy -- bun run typecheck:okf
+WIKI_TEST_PATTERN="wiki:01|wiki:02" heavy -- bun run test:wiki
+WIKI_TEST_PATTERN="wiki:06" heavy -- bun run test:wiki
+heavy -- bun run typecheck:wiki
 ```
 
-The test runner reads `OKF_TEST_PATTERN` and passes its name-pattern option before
-file arguments to Node. `verify:okf` checks this package and all its tests. The
+The test runner reads `WIKI_TEST_PATTERN` and passes its name-pattern option before
+file arguments to Node. `verify:wiki` checks this package and all its tests. The
 existing `verify:next` wildcard also runs these tests, and its TypeScript project
 includes this package source and tests. Full suites run at the batch gate, not
 after every slice. Current process tests use disposable fixtures only.
 
-### Planned `boot:okf` contract (B20, not executable yet)
+### Planned `boot:wiki` contract (B20, not executable yet)
 
 There is **no boot script** yet. Do not add a passing placeholder to the
-manifest. B20 will supply `heavy -- bun run boot:okf`: start the source Node CLI
+manifest. B20 will supply `heavy -- bun run boot:wiki`: start the source Node CLI
 in temporary storage, run init/new/show/lint/index-check, assert their results,
 clean up, and exit. Any search smoke must use isolated qmd state and explicitly
 selected local models. This contract requires no root build, global install,
-archive access, or blanket Git staging. Until then, `okf:01` provides the concrete
+archive access, or blanket Git staging. Until then, `wiki:01` provides the concrete
 real-process init smoke, preservation checks, and refusal fixtures.
 
 
@@ -228,8 +228,8 @@ real-process init smoke, preservation checks, and refusal fixtures.
 The new command requires a registered type, exactly one explicit scope, title, and description:
 
 ~~~sh
-node packages/okf-wiki/bin/okf-wiki.js --vault /explicit/disposable/vault new procedure --project wiki --title "Run safely" --description "Use safe steps" --tags local --tags cli --status draft --json
-node packages/okf-wiki/bin/okf-wiki.js --vault /explicit/disposable/vault new note --personal --title "Local knowledge" --description "A local topic" --slug local-knowledge --body-file /explicit/body.md --json
+node packages/wiki/bin/wiki.js --vault /explicit/disposable/vault new procedure --project wiki --title "Run safely" --description "Use safe steps" --tags local --tags cli --status draft --json
+node packages/wiki/bin/wiki.js --vault /explicit/disposable/vault new note --personal --title "Local knowledge" --description "A local topic" --slug local-knowledge --body-file /explicit/body.md --json
 ~~~
 
 Without --body-file, creation uses the registry's inert body template. A supplied
@@ -296,9 +296,9 @@ load models, start qmd, or change global configuration.
 ## Expected-digest topic updates (#22)
 
 ~~~sh
-node packages/okf-wiki/bin/okf-wiki.js --vault /explicit/disposable/vault show personal/notes/topic.md --json
-node packages/okf-wiki/bin/okf-wiki.js --vault /explicit/disposable/vault update personal/notes/topic.md --expect sha256:<64-lowercase-hex-digits> --file /explicit/complete-candidate.md --dry-run --json
-node packages/okf-wiki/bin/okf-wiki.js --vault /explicit/disposable/vault update personal/notes/topic.md --expect sha256:<64-lowercase-hex-digits> --file /explicit/complete-candidate.md --json
+node packages/wiki/bin/wiki.js --vault /explicit/disposable/vault show personal/notes/topic.md --json
+node packages/wiki/bin/wiki.js --vault /explicit/disposable/vault update personal/notes/topic.md --expect sha256:<64-lowercase-hex-digits> --file /explicit/complete-candidate.md --dry-run --json
+node packages/wiki/bin/wiki.js --vault /explicit/disposable/vault update personal/notes/topic.md --expect sha256:<64-lowercase-hex-digits> --file /explicit/complete-candidate.md --json
 ~~~
 
 Replace the digest placeholder with the full digest returned by show. The file is
@@ -370,8 +370,8 @@ a multi-file transaction and no rollback overwrites external changes.
 ## Explicit UTF-8 document capture (#28)
 
 ~~~sh
-node packages/okf-wiki/bin/okf-wiki.js --vault /explicit/disposable/vault capture /explicit/document.md --project wiki --title "Selected document" --description "An external observation" --json
-node packages/okf-wiki/bin/okf-wiki.js --vault /explicit/disposable/vault capture /explicit/document.txt --personal --title "Other observation" --description "A separate capture" --slug other-observation
+node packages/wiki/bin/wiki.js --vault /explicit/disposable/vault capture /explicit/document.md --project wiki --title "Selected document" --description "An external observation" --json
+node packages/wiki/bin/wiki.js --vault /explicit/disposable/vault capture /explicit/document.txt --personal --title "Other observation" --description "A separate capture" --slug other-observation
 ~~~
 
 Capture requires one explicit scope, title, and description. Optional slugs use the
@@ -441,13 +441,13 @@ to repair navigation when a source note exists, and inspect log.md before manual
 adding any missing historical entry. Never invent a log timestamp or retry a
 partially published capture automatically.
 
-Real-process text capture proof lives in test/capture-cli.test.ts (okf:14); preparation,
+Real-process text capture proof lives in test/capture-cli.test.ts (wiki:14); preparation,
 FIFO, byte-fidelity, and planned-asset checks live in test/capture-text.test.ts.
 
 ## PDF capture (#29)
 
 ~~~sh
-node packages/okf-wiki/bin/okf-wiki.js --vault /explicit/disposable/vault capture /explicit/document.pdf --personal --title "Selected PDF" --description "An external observation" --json
+node packages/wiki/bin/wiki.js --vault /explicit/disposable/vault capture /explicit/document.pdf --personal --title "Selected PDF" --description "An external observation" --json
 ~~~
 
 PDF capture uses the same scope, registry, literal rendering, asset validation,
@@ -483,19 +483,19 @@ using the partial-publication guidance above. Input, output, and rendered source
 remain in memory, so callers must select resources appropriate for available memory.
 
 Synthetic fixtures and real CLI/extractor checks live in test/capture-pdf.test.ts
-(okf:15). Expected text comes from authored PDF content, not recorded tool output.
+(wiki:15). Expected text comes from authored PDF content, not recorded tool output.
 Tool failures and in-flight process boundaries use disposable program doubles.
-For a bounded affected run equivalent to the okf:15 wrapper selection:
+For a bounded affected run equivalent to the wiki:15 wrapper selection:
 
 ~~~sh
-heavy --slots 2 -- node --test --test-concurrency=1 --test-name-pattern "okf:15" packages/okf-wiki/test/capture-pdf.test.ts
-heavy -- bun run typecheck:okf
+heavy --slots 2 -- node --test --test-concurrency=1 --test-name-pattern "wiki:15" packages/wiki/test/capture-pdf.test.ts
+heavy -- bun run typecheck:wiki
 ~~~
 
 ## Explicit web capture (#30)
 
 ~~~sh
-node packages/okf-wiki/bin/okf-wiki.js --vault /explicit/disposable/vault capture 'http://127.0.0.1:8080/selected-resource' --personal --title "Selected resource" --description "An external observation" --json
+node packages/wiki/bin/wiki.js --vault /explicit/disposable/vault capture 'http://127.0.0.1:8080/selected-resource' --personal --title "Selected resource" --description "An external observation" --json
 ~~~
 
 Select exactly one HTTP/HTTPS resource. Supported response media types are
@@ -559,22 +559,22 @@ rendered source, and parsing structures remain in memory; callers must select
 resources appropriate for available memory.
 
 Real CLI/local HTTP cases are test/capture-web.test.ts; focused malformed/unknown
-AST checks are test/html.test.ts, all named okf:16. Normal extraction uses real
+AST checks are test/html.test.ts, all named wiki:16. Normal extraction uses real
 Pandoc and pdftotext on synthetic content. Failure and signal interleavings use
 faithful disposable process doubles; cancellation is coordinated at observed
 request/body/tool events, not polling delays. The bounded command below selects
 all named web cases without the directory-wide wrapper's default fanout:
 
 ~~~sh
-heavy --slots 2 -- node --test --test-concurrency=1 --test-name-pattern "okf:16" packages/okf-wiki/test/capture-web.test.ts packages/okf-wiki/test/html.test.ts
-heavy -- bun run typecheck:okf
+heavy --slots 2 -- node --test --test-concurrency=1 --test-name-pattern "wiki:16" packages/wiki/test/capture-web.test.ts packages/wiki/test/html.test.ts
+heavy -- bun run typecheck:wiki
 ~~~
 
 
 ## Read-only foundation inspection (#31)
 
 ```sh
-node packages/okf-wiki/bin/okf-wiki.js --vault /explicit/disposable/vault doctor --json
+node packages/wiki/bin/wiki.js --vault /explicit/disposable/vault doctor --json
 ```
 
 Doctor reports the actual Node, installed qmd package/native, Pandoc and pdftotext
@@ -622,7 +622,7 @@ The first detected error sets the exit: usage 2, retained lock 3, missing vault 
 unsupported profile 5, damaged retained state 6, unavailable dependency or
 uninspectable search 7. Human output includes the same diagnostics.
 
-Run `OKF_TEST_PATTERN='okf:17' heavy -- bun run test:okf` for real CLI checks.
+Run `WIKI_TEST_PATTERN='wiki:17' heavy -- bun run test:wiki` for real CLI checks.
 They compare byte digests and complete entry listings, including `.wiki/`, against
 before/after vault and decoy HOME/XDG snapshots on healthy and damaged state.
 
@@ -630,8 +630,8 @@ before/after vault and decoy HOME/XDG snapshots on healthy and damaged state.
 
 Run the source CLI against an explicit disposable or owned profile vault:
 
-    node packages/okf-wiki/bin/okf-wiki.js --vault <dir> search sync
-    node packages/okf-wiki/bin/okf-wiki.js --vault <dir> search sync --json
+    node packages/wiki/bin/wiki.js --vault <dir> search sync
+    node packages/wiki/bin/wiki.js --vault <dir> search sync --json
 
 This command validates a complete registry-aware inventory, retaining the exact
 full Markdown read for validation. It reads file contents on every sync, even
@@ -683,7 +683,7 @@ tokenizer reads QMD_EMBED_MODEL separately from per-store config; #25 must bind
 both safely before model use. The unchanged opt-in native proof is documented in
 test/qmd-model-proof.md; it does not implement that product configuration.
 
-Real CLI-process e2e cases live in test/qmd-cli.test.ts in the okf:10 group.
+Real CLI-process e2e cases live in test/qmd-cli.test.ts in the wiki:10 group.
 They use disposable vaults and actual SDK indexing/retrieval. Only dependency,
 I/O-failure, captured-read replacement, and signal-event boundaries are injected.
 There is still no boot script; B20/#34 owns the final boot check.
@@ -724,4 +724,4 @@ adds literal matching to qmd retrieval:
   matched literal token, else the first line that contains a lexical term, else
   the first body line. An excerpt is a whole line with no fixed length.
 
-Real CLI-process cases live in test/qmd-literal.test.ts in the okf:13 group.
+Real CLI-process cases live in test/qmd-literal.test.ts in the wiki:13 group.

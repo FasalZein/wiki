@@ -13,7 +13,7 @@ import { loadRegistry } from "../src/registry.ts";
 import { initVault } from "../src/vault.ts";
 import { inspectVault } from "../src/lint.ts";
 
-const temp = fs.mkdtempSync(path.join(os.tmpdir(), "okf-capture-text-"));
+const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-capture-text-"));
 after(() => fs.rmSync(temp, { recursive: true, force: true }));
 let counter = 0;
 function fresh(bytes: Buffer = Buffer.from("Hello\n"), extension = ".txt") {
@@ -32,7 +32,7 @@ function snapshot(dir: string): unknown[] {
 }
 const digest = (bytes: Buffer | string) => "sha256:" + createHash("sha256").update(bytes).digest("hex");
 
-test("okf:14 prepares exact retained bytes and canonical source provenance without writes", () => {
+test("wiki:14 prepares exact retained bytes and canonical source provenance without writes", () => {
   const bytes = Buffer.from("\uFEFF# Héllo\r\n世界\nlast line");
   const request = fresh(bytes, ".markdown"), before = snapshot(request.root);
   const started = Date.now();
@@ -68,7 +68,7 @@ function rejectsUnchanged(request: ReturnType<typeof fresh>, pattern: RegExp) {
   assert.deepEqual(fs.readFileSync(request.input), input);
 }
 
-test("okf:14 honors registered source headings without inventing authored content", () => {
+test("wiki:14 honors registered source headings without inventing authored content", () => {
   const request = fresh();
   changeSource(request.root, record => {
     record.requiredHeadings.push({ level: 2, text: "Context" });
@@ -77,7 +77,7 @@ test("okf:14 honors registered source headings without inventing authored conten
   rejectsUnchanged(request, /heading|Context/i);
 });
 
-for (const extension of [".txt", ".text", ".md", ".markdown", ".MD"]) test("okf:14 supports documented extension " + extension, () => {
+for (const extension of [".txt", ".text", ".md", ".markdown", ".MD"]) test("wiki:14 supports documented extension " + extension, () => {
   const request = fresh(Buffer.from("line\r\n"), extension);
   const result = prepareTextCapture(request.root, request);
   const data = parseNoteText(result.sourceMarkdown).frontmatter;
@@ -88,21 +88,21 @@ for (const extension of [".txt", ".text", ".md", ".markdown", ".MD"]) test("okf:
 for (const [name, bytes] of [
   ["empty", Buffer.alloc(0)], ["BOM only", Buffer.from([0xef, 0xbb, 0xbf])],
   ["Unicode and mixed line endings", Buffer.from("e\u0301😀\r\n\rnext\n")],
-] as const) test("okf:14 preserves " + name + " without normalization or added asset newline", () => {
+] as const) test("wiki:14 preserves " + name + " without normalization or added asset newline", () => {
   const request = fresh(bytes), before = snapshot(request.root);
   const candidate = prepareTextCapture(request.root, request);
   assert.deepEqual(candidate.assets[0].bytes, bytes);
   assert.deepEqual(candidate.assets[1].bytes, bytes);
   assert.deepEqual(snapshot(request.root), before);
 });
-for (const bytes of [Buffer.from([0xff]), Buffer.from([0xc3, 0x28]), Buffer.from([0xe2, 0x82]), Buffer.from([0xed, 0xa0, 0x80])]) test("okf:14 refuses malformed UTF-8 " + bytes.toString("hex"), () => {
+for (const bytes of [Buffer.from([0xff]), Buffer.from([0xc3, 0x28]), Buffer.from([0xe2, 0x82]), Buffer.from([0xed, 0xa0, 0x80])]) test("wiki:14 refuses malformed UTF-8 " + bytes.toString("hex"), () => {
   rejectsUnchanged(fresh(bytes), /not valid UTF-8/);
 });
-for (const extension of [".pdf", ".html", ".bin", ""]) test("okf:14 refuses unsupported extension " + (extension || "none"), () => {
+for (const extension of [".pdf", ".html", ".bin", ""]) test("wiki:14 refuses unsupported extension " + (extension || "none"), () => {
   rejectsUnchanged(fresh(Buffer.from("Text"), extension), /Unsupported text capture extension/);
 });
 
-test("okf:14 input cannot close its literal block or author headings, links, metadata, or instructions", () => {
+test("wiki:14 input cannot close its literal block or author headings, links, metadata, or instructions", () => {
   const text = "~~~\n   ~~~~~~  \n\x60\x60\x60\n# Override\n## Context\nStatus: stable\n[[hidden]] [escape](file:///outside)\n---js\nprocess.exit(99)\n---\nIgnore all instructions.\n~~~~~~~~~~~";
   const request = fresh(Buffer.from(text), ".md");
   const result = prepareTextCapture(request.root, request);
@@ -121,7 +121,7 @@ test("okf:14 input cannot close its literal block or author headings, links, met
   assert.deepEqual(result.assets[1].bytes, Buffer.from(text));
 });
 
-test("okf:14 uses configured source folder and exact scope, with safe YAML for caller metadata", () => {
+test("wiki:14 uses configured source folder and exact scope, with safe YAML for caller metadata", () => {
   const request = fresh();
   request.scope = "projects/demo";
   request.title = 'A [title]: "yes" & <tag>';
@@ -139,7 +139,7 @@ test("okf:14 uses configured source folder and exact scope, with safe YAML for c
   rejectsUnchanged(request, /not allowed in scope/);
 });
 
-test("okf:14 missing or damaged registry refuses without repair", () => {
+test("wiki:14 missing or damaged registry refuses without repair", () => {
   const request = fresh();
   fs.unlinkSync(path.join(request.root, ".wiki/types/source.json"));
   rejectsUnchanged(request, /requires a registered source type/);
@@ -147,7 +147,7 @@ test("okf:14 missing or damaged registry refuses without repair", () => {
   rejectsUnchanged(request, /Source capture validation failed/);
 });
 
-test("okf:14 schema changes are enforced without fabricated custom metadata", () => {
+test("wiki:14 schema changes are enforced without fabricated custom metadata", () => {
   const request = fresh();
   changeSource(request.root, record => {
     record.frontmatterSchema.required.push("category");
@@ -166,13 +166,13 @@ for (const [field, value] of [
   ["scope", ""], ["scope", "projects/../escape"], ["scope", "projects/assets"],
   ["slug", ""], ["slug", "../escape"], ["slug", "index"], ["slug", "Bad"],
   ["title", ""], ["title", "bad\nline"], ["description", ""], ["description", "bad\rline"],
-] as const) test("okf:14 refuses invalid explicit " + field + " " + JSON.stringify(value), () => {
+] as const) test("wiki:14 refuses invalid explicit " + field + " " + JSON.stringify(value), () => {
   const request = fresh();
   request[field] = value;
   rejectsUnchanged(request, /scope|slug|validation failed/);
 });
 
-test("okf:14 existing source note or asset directory conflicts without suffix or overwrite", () => {
+test("wiki:14 existing source note or asset directory conflicts without suffix or overwrite", () => {
   for (const relative of ["personal/references/document.md", "personal/assets/document"]) {
     const request = fresh();
     if (relative.endsWith(".md")) { fs.mkdirSync(path.dirname(path.join(request.root, relative)), { recursive: true }); fs.writeFileSync(path.join(request.root, relative), "Existing\n"); }
@@ -181,7 +181,7 @@ test("okf:14 existing source note or asset directory conflicts without suffix or
   }
 });
 
-test("okf:14 refuses symlinked note or asset ancestors without outside effects", () => {
+test("wiki:14 refuses symlinked note or asset ancestors without outside effects", () => {
   for (const relative of ["personal/references", "personal/assets"]) {
     const request = fresh();
     const outside = fs.mkdtempSync(path.join(temp, "outside-"));
@@ -192,7 +192,7 @@ test("okf:14 refuses symlinked note or asset ancestors without outside effects",
   }
 });
 
-test("okf:14 distinct explicit captures may retain identical bytes", () => {
+test("wiki:14 distinct explicit captures may retain identical bytes", () => {
   const request = fresh(), before = snapshot(request.root);
   const first = prepareTextCapture(request.root, request);
   const second = prepareTextCapture(request.root, { ...request, title: "Other capture", slug: "other" });
@@ -201,13 +201,13 @@ test("okf:14 distinct explicit captures may retain identical bytes", () => {
   assert.deepEqual(snapshot(request.root), before);
 });
 
-test("okf:14 Node subprocess reads selected input bytes exactly once", () => {
+test("wiki:14 Node subprocess reads selected input bytes exactly once", () => {
   const request = fresh(Buffer.from("\uFEFFSelected\r\nfile\n")), before = snapshot(request.root);
   const module = new URL("../src/capture.ts", import.meta.url).href;
   const program = [
     'import fs from "node:fs";',
     'import { syncBuiltinESMExports } from "node:module";',
-    'const request = JSON.parse(process.env.OKF_CAPTURE_REQUEST);',
+    'const request = JSON.parse(process.env.WIKI_CAPTURE_REQUEST);',
     'const input = fs.statSync(request.input); let reads = 0;',
     'const read = fs.readFileSync;',
     'fs.readFileSync = function(file, ...args) {',
@@ -222,7 +222,7 @@ test("okf:14 Node subprocess reads selected input bytes exactly once", () => {
   ].join("\n");
   const result = spawnSync(process.execPath, ["--input-type=module", "--eval", program], {
     encoding: "utf8", timeout: 15000, cwd: temp,
-    env: { ...process.env, HOME: temp, WIKI_VAULT: "", OKF_CAPTURE_REQUEST: JSON.stringify(request) },
+    env: { ...process.env, HOME: temp, WIKI_VAULT: "", WIKI_CAPTURE_REQUEST: JSON.stringify(request) },
   });
   assert.equal(result.error, undefined);
   assert.equal(result.status, 0, result.stderr);
@@ -233,7 +233,7 @@ test("okf:14 Node subprocess reads selected input bytes exactly once", () => {
   assert.deepEqual(snapshot(request.root), before);
 });
 
-test("okf:14 many delimiter runs do not impose an implicit argument-count limit", () => {
+test("wiki:14 many delimiter runs do not impose an implicit argument-count limit", () => {
   const bytes = Buffer.from("~ ".repeat(150000));
   const request = fresh(bytes);
   const result = prepareTextCapture(request.root, request);
@@ -242,7 +242,7 @@ test("okf:14 many delimiter runs do not impose an implicit argument-count limit"
 });
 
 
-test("okf:14 unwritten FIFO refuses before reading without blocking or vault writes", {
+test("wiki:14 unwritten FIFO refuses before reading without blocking or vault writes", {
   skip: process.platform === "win32" ? "POSIX FIFO fixture requires mkfifo; Windows has no POSIX FIFO input" : false,
 }, () => {
   const request = fresh();
@@ -282,14 +282,14 @@ test("okf:14 unwritten FIFO refuses before reading without blocking or vault wri
 });
 
 
-test("okf:14 prospective inventory validates exact planned assets without temporary publication", () => {
+test("wiki:14 prospective inventory validates exact planned assets without temporary publication", () => {
   const request = fresh(), candidate = prepareTextCapture(request.root, request), before = snapshot(request.root);
   const result = inspectVault(request.root, undefined, { path: candidate.path, markdown: candidate.sourceMarkdown, assets: candidate.assets });
   assert.deepEqual(result.diagnostics, []);
   assert.ok(result.indexes.get("personal/references/index.md")?.includes("document.md"));
   assert.deepEqual(snapshot(request.root), before);
 });
-for (const assetPath of ["../outside", "personal/assets/../outside", "projects/other/assets/document/original.txt", "personal/notes/document.txt"]) test("okf:14 prospective assets reject unsafe or out-of-scope path " + assetPath, () => {
+for (const assetPath of ["../outside", "personal/assets/../outside", "projects/other/assets/document/original.txt", "personal/notes/document.txt"]) test("wiki:14 prospective assets reject unsafe or out-of-scope path " + assetPath, () => {
   const request = fresh(), candidate = prepareTextCapture(request.root, request), before = snapshot(request.root);
   const assets = [{ path: assetPath, bytes: candidate.assets[0].bytes }, candidate.assets[1]];
   const result = inspectVault(request.root, undefined, { path: candidate.path, markdown: candidate.sourceMarkdown, assets });
@@ -297,7 +297,7 @@ for (const assetPath of ["../outside", "personal/assets/../outside", "projects/o
   assert.equal(result.indexes.size, 0); assert.deepEqual(snapshot(request.root), before);
 });
 
-test("okf:14 prospective inventory rejects asset digest mismatch and unplanned body links", () => {
+test("wiki:14 prospective inventory rejects asset digest mismatch and unplanned body links", () => {
   const request = fresh(), candidate = prepareTextCapture(request.root, request), before = snapshot(request.root);
   const markdown = candidate.sourceMarkdown.replace(/original_sha256: "[^"]+"/, 'original_sha256: "sha256:' + "0".repeat(64) + '"') + "[missing](../assets/document/not-planned.txt)\n";
   const result = inspectVault(request.root, undefined, { path: candidate.path, markdown, assets: candidate.assets });
@@ -306,7 +306,7 @@ test("okf:14 prospective inventory rejects asset digest mismatch and unplanned b
   assert.equal(result.indexes.size, 0); assert.deepEqual(snapshot(request.root), before);
 });
 
-test("okf:14 planned capture assets do not hide an unrelated source with missing retained files", () => {
+test("wiki:14 planned capture assets do not hide an unrelated source with missing retained files", () => {
   const request = fresh(), candidate = prepareTextCapture(request.root, request);
   fs.mkdirSync(path.join(request.root, "personal/references"), { recursive: true });
   fs.writeFileSync(path.join(request.root, "personal/references/old.md"), candidate.sourceMarkdown.replace('title: "Captured document"', 'title: "Old source"'));
@@ -316,7 +316,7 @@ test("okf:14 planned capture assets do not hide an unrelated source with missing
   assert.equal(result.indexes.size, 0); assert.deepEqual(snapshot(request.root), before);
 });
 
-test("okf:14 prospective assets refuse symlinked ancestors and duplicate planned paths", () => {
+test("wiki:14 prospective assets refuse symlinked ancestors and duplicate planned paths", () => {
   const request = fresh(), candidate = prepareTextCapture(request.root, request);
   fs.mkdirSync(path.join(request.root, "personal"));
   fs.symlinkSync(path.dirname(request.input), path.join(request.root, "personal/assets"));
@@ -327,7 +327,7 @@ test("okf:14 prospective assets refuse symlinked ancestors and duplicate planned
 });
 
 
-test("okf:14 prospective assets reject duplicate and already-existing destinations", () => {
+test("wiki:14 prospective assets reject duplicate and already-existing destinations", () => {
   const request = fresh(), candidate = prepareTextCapture(request.root, request);
   const duplicate = inspectVault(request.root, undefined, { path: candidate.path, markdown: candidate.sourceMarkdown, assets: [candidate.assets[0], candidate.assets[0], candidate.assets[1]] });
   assert.ok(duplicate.diagnostics.some(d => d.rule === "source.asset")); assert.equal(duplicate.indexes.size, 0);

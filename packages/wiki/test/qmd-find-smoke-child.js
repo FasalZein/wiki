@@ -1,4 +1,4 @@
-// Child of qmd-model-proof.js when OKF_QMD_PROOF=find. Real local-model smoke of
+// Child of qmd-model-proof.js when WIKI_QMD_PROOF=find. Real local-model smoke of
 // the product CLI: search sync --embed, fast find and deep find, under the parent's
 // OS sandbox (no network, writes only in the sandbox). Never downloads models.
 import assert from "node:assert/strict";
@@ -8,14 +8,14 @@ import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-const supplied = process.env.OKF_QMD_MODEL_DIR, sandbox = process.env.OKF_QMD_SANDBOX;
+const supplied = process.env.WIKI_QMD_MODEL_DIR, sandbox = process.env.WIKI_QMD_SANDBOX;
 assert.ok(supplied && sandbox, "Supply existing local models and the parent sandbox");
 const models = {
   embed: path.resolve(supplied, "hf_ggml-org_embeddinggemma-300M-Q8_0.gguf"),
   generate: path.resolve(supplied, "hf_tobil_qmd-query-expansion-1.7B-q4_k_m.gguf"),
   rerank: path.resolve(supplied, "hf_ggml-org_qwen3-reranker-0.6b-q8_0.gguf"),
 };
-const BIN = fileURLToPath(new URL("../bin/okf-wiki.js", import.meta.url));
+const BIN = fileURLToPath(new URL("../bin/wiki.js", import.meta.url));
 // Decoy user home: absent, inside the sandbox so any creation is observable rather
 // than denied. No XDG values: the product itself must bind SDK state vault-locally.
 const home = path.join(sandbox, "decoy-home");

@@ -12,14 +12,14 @@ import net from "node:net";
 import tls from "node:tls";
 import cp from "node:child_process";
 
-const supplied = process.env.OKF_QMD_MODEL_DIR;
-assert.ok(supplied, "Supply existing local models through OKF_QMD_MODEL_DIR");
+const supplied = process.env.WIKI_QMD_MODEL_DIR;
+assert.ok(supplied, "Supply existing local models through WIKI_QMD_MODEL_DIR");
 const models = {
   embed: path.resolve(supplied, "hf_ggml-org_embeddinggemma-300M-Q8_0.gguf"),
   generate: path.resolve(supplied, "hf_tobil_qmd-query-expansion-1.7B-q4_k_m.gguf"),
   rerank: path.resolve(supplied, "hf_ggml-org_qwen3-reranker-0.6b-q8_0.gguf"),
 };
-const sandbox = process.env.OKF_QMD_SANDBOX;
+const sandbox = process.env.WIKI_QMD_SANDBOX;
 assert.ok(sandbox);
 const home = path.join(sandbox, "home");
 fs.mkdirSync(home);

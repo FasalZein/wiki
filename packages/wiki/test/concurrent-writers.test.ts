@@ -9,9 +9,9 @@ import { createInterface } from "node:readline";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-const BIN = fileURLToPath(new URL("../bin/okf-wiki.js", import.meta.url));
+const BIN = fileURLToPath(new URL("../bin/wiki.js", import.meta.url));
 const GUARD = fileURLToPath(new URL("./concurrency-io-guard.js", import.meta.url));
-const temp = fs.mkdtempSync(path.join(os.tmpdir(), "okf-concurrent-"));
+const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-concurrent-"));
 after(() => fs.rmSync(temp, { recursive: true, force: true }));
 const relative = "personal/notes/topic.md";
 let counter = 0;
@@ -40,7 +40,7 @@ function candidate(bytes: string) {
 function args(expected: string, file: string) { return ["update", relative, "--expect", expected, "--file", file]; }
 function start(vault: string, expected: string, file: string, mode: string) {
   const child = spawn(process.execPath, ["--import", GUARD, BIN, "--json", "--vault", vault, ...args(expected, file)], {
-    cwd: temp, env: { ...env(), OKF_CONCURRENCY_GUARD: mode }, stdio: ["pipe", "pipe", "pipe", "pipe"],
+    cwd: temp, env: { ...env(), WIKI_CONCURRENCY_GUARD: mode }, stdio: ["pipe", "pipe", "pipe", "pipe"],
     timeout: 15000, killSignal: "SIGKILL",
   });
   let stdout = "", stderr = "", failure: Error | undefined;
@@ -77,7 +77,7 @@ function clean(vault: string) {
   assert.deepEqual(fs.readdirSync(path.join(vault, ".wiki/tmp")), []);
 }
 
-test("okf:09 overlapping CLI updates observing one base yield one success and one stale conflict, not busy", async () => {
+test("wiki:09 overlapping CLI updates observing one base yield one success and one stale conflict, not busy", async () => {
   const { vault, note, bytes } = fresh();
   const firstBytes = bytes.replace("Original description", "Winning description") + "First candidate\n";
   const first = start(vault, note.digest, candidate(firstBytes), "candidate");
@@ -108,7 +108,7 @@ test("okf:09 overlapping CLI updates observing one base yield one success and on
   } finally { await Promise.all([first.stop(), second.stop()]); }
 });
 
-test("okf:09 live-owner busy and crash-left locks require inspected explicit recovery, never age stealing", async () => {
+test("wiki:09 live-owner busy and crash-left locks require inspected explicit recovery, never age stealing", async () => {
   const { vault, note, bytes } = fresh(), file = candidate(bytes + "Recovered update\n");
   const lock = path.join(vault, ".wiki/locks/mutation.lock"), beforeLog = read(vault, "log.md");
   const owner = start(vault, note.digest, file, "prepared");
@@ -149,12 +149,12 @@ test("okf:09 live-owner busy and crash-left locks require inspected explicit rec
   } finally { await owner.stop(); }
 });
 
-for (const mode of ["index-fail", "log-fail"]) test("okf:09 index recovery preserves later edits and does not invent omitted update history: " + mode, () => {
+for (const mode of ["index-fail", "log-fail"]) test("wiki:09 index recovery preserves later edits and does not invent omitted update history: " + mode, () => {
   const { vault, note, bytes } = fresh();
   const published = bytes.replace("Original description", "Published description") + "Published fact\n";
   const log = read(vault, "log.md");
   const result = spawnSync(process.execPath, ["--import", fileURLToPath(new URL("./update-io-guard.js", import.meta.url)), BIN, "--json", "--vault", vault, ...args(note.digest, candidate(published))], {
-    cwd: temp, env: { ...env(), OKF_UPDATE_GUARD: mode }, encoding: "utf8", timeout: 15000,
+    cwd: temp, env: { ...env(), WIKI_UPDATE_GUARD: mode }, encoding: "utf8", timeout: 15000,
   });
   assert.equal(result.error, undefined); assert.equal(result.stderr, "");
   assert.equal(result.stdout.trim().split("\n").length, 1);

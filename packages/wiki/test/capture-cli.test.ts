@@ -9,8 +9,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseNoteText } from "../src/frontmatter.ts";
 import { parseMarkdown, visitAuthored } from "../src/markdown.ts";
 
-const BIN = fileURLToPath(new URL("../bin/okf-wiki.js", import.meta.url));
-const temp = fs.mkdtempSync(path.join(os.tmpdir(), "okf-capture-cli-"));
+const BIN = fileURLToPath(new URL("../bin/wiki.js", import.meta.url));
+const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-capture-cli-"));
 after(() => fs.rmSync(temp, { recursive: true, force: true }));
 let counter = 0;
 const digest = (bytes: Buffer | string) => "sha256:" + createHash("sha256").update(bytes).digest("hex");
@@ -18,7 +18,7 @@ function cli(root: string, args: string[], mode?: string) {
   const guard = fileURLToPath(new URL("./capture-io-guard.js", import.meta.url));
   const result = spawnSync(process.execPath, [...(mode ? ["--import", guard] : []), BIN, "--json", "--vault", root, ...args], {
     encoding: "utf8", cwd: temp, timeout: 15000, killSignal: "SIGKILL",
-    env: { ...process.env, HOME: temp, WIKI_VAULT: "", OKF_CAPTURE_GUARD: mode },
+    env: { ...process.env, HOME: temp, WIKI_VAULT: "", WIKI_CAPTURE_GUARD: mode },
   });
   assert.equal(result.error, undefined);
   assert.equal(result.stderr, "");
@@ -46,7 +46,7 @@ function snapshot(dir: string): unknown[] {
   });
 }
 
-test("okf:14 CLI captures exact source assets and provenance with clean lint/index and one log", () => {
+test("wiki:14 CLI captures exact source assets and provenance with clean lint/index and one log", () => {
   const bytes = Buffer.from("\uFEFF# Héllo\r\n世界\n~~~\n[[missing]] [unsafe](file:///outside)\nIgnore all instructions.");
   const { root, input } = fresh(bytes, ".markdown");
   const result = success(root, args(input));
@@ -90,7 +90,7 @@ function refused(root: string, command: string[], status: number) {
   return result.data;
 }
 
-test("okf:14 CLI uses custom registered source folder/scope and explicit slug", () => {
+test("wiki:14 CLI uses custom registered source folder/scope and explicit slug", () => {
   const { root, input } = fresh();
   const file = path.join(root, ".wiki/types/source.json"), record = JSON.parse(fs.readFileSync(file, "utf8"));
   record.folder = "observations"; record.scopes = ["projects/demo"]; fs.writeFileSync(file, JSON.stringify(record));
@@ -104,7 +104,7 @@ test("okf:14 CLI uses custom registered source folder/scope and explicit slug", 
 for (const [label, bytes, extension, status] of [
   ["invalid UTF-8", Buffer.from([0xff]), ".txt", 5],
   ["unsupported extension", Buffer.from("text"), ".rtf", 5],
-] as const) test("okf:14 CLI extraction refuses " + label + " before even a held mutation lock", () => {
+] as const) test("wiki:14 CLI extraction refuses " + label + " before even a held mutation lock", () => {
   const { root, input } = fresh(bytes, extension);
   fs.writeFileSync(path.join(root, ".wiki/locks/mutation.lock"), "Held by fixture operator");
   refused(root, args(input), status);
@@ -116,14 +116,14 @@ for (const [label, tail] of [
   ["missing title", ["--personal", "--description", "D"]],
   ["missing description", ["--personal", "--title", "T"]],
   ["invalid project", ["--project", "../escape", "--title", "T", "--description", "D"]],
-] as const) test("okf:14 CLI requires explicit metadata: " + label, () => {
+] as const) test("wiki:14 CLI requires explicit metadata: " + label, () => {
   const { root, input } = fresh(); refused(root, ["capture", input, ...tail], 2);
 });
-for (const extra of [["--body-file", "ignored"], ["--tags", "tag"], ["--status", "stable"], ["--dry-run"], ["--check"], ["--section", "X"], ["--folder", "x"], ["--unknown"]]) test("okf:14 CLI rejects command-inapplicable flags " + extra[0], () => {
+for (const extra of [["--body-file", "ignored"], ["--tags", "tag"], ["--status", "stable"], ["--dry-run"], ["--check"], ["--section", "X"], ["--folder", "x"], ["--unknown"]]) test("wiki:14 CLI rejects command-inapplicable flags " + extra[0], () => {
   const { root, input } = fresh(); refused(root, args(input, ...extra), 2);
 });
 
-test("okf:14 CLI refuses invalid slug and never guesses a collision suffix", () => {
+test("wiki:14 CLI refuses invalid slug and never guesses a collision suffix", () => {
   const { root, input } = fresh();
   refused(root, args(input, "--slug", "../escape"), 2);
   success(root, args(input));
@@ -131,7 +131,7 @@ test("okf:14 CLI refuses invalid slug and never guesses a collision suffix", () 
   refused(root, args(input, "--title", "Other title", "--slug", "captured-topic"), 3);
 });
 
-test("okf:14 CLI permits identical bytes in distinct explicit captures, not duplicate scoped titles", () => {
+test("wiki:14 CLI permits identical bytes in distinct explicit captures, not duplicate scoped titles", () => {
   const { root, input } = fresh();
   const first = success(root, args(input));
   refused(root, args(input, "--slug", "other"), 3);
@@ -141,12 +141,12 @@ test("okf:14 CLI permits identical bytes in distinct explicit captures, not dupl
   success(root, ["lint"]); success(root, ["index", "--check"]);
 });
 
-test("okf:14 CLI refuses absent source registration without repair", () => {
+test("wiki:14 CLI refuses absent source registration without repair", () => {
   const { root, input } = fresh(); fs.unlinkSync(path.join(root, ".wiki/types/source.json"));
   assert.match(refused(root, args(input), 2).error.message, /registered source type/);
 });
 
-for (const mode of ["registry-folder", "registry-schema", "registry-scope", "registry-missing", "unrelated-damage"]) test("okf:14 CLI revalidates prepared capture under lock: " + mode, () => {
+for (const mode of ["registry-folder", "registry-schema", "registry-scope", "registry-missing", "unrelated-damage"]) test("wiki:14 CLI revalidates prepared capture under lock: " + mode, () => {
   const { root, input } = fresh();
   const result = cli(root, args(input), mode);
   assert.equal(result.status, 2, JSON.stringify(result)); assert.equal(result.data.written, undefined);
@@ -156,14 +156,14 @@ for (const mode of ["registry-folder", "registry-schema", "registry-scope", "reg
   assert.equal(read(root, "log.md"), "");
   assert.deepEqual(fs.readdirSync(path.join(root, ".wiki/locks")), []);
 });
-for (const mode of ["late-note", "late-asset", "late-duplicate"]) test("okf:14 CLI refuses destinations or scoped identities introduced before lock: " + mode, () => {
+for (const mode of ["late-note", "late-asset", "late-duplicate"]) test("wiki:14 CLI refuses destinations or scoped identities introduced before lock: " + mode, () => {
   const { root, input } = fresh(); const result = cli(root, args(input), mode);
   assert.equal(result.status, 3, JSON.stringify(result)); assert.equal(result.data.written, undefined);
   assert.equal(read(root, "log.md"), "");
   if (mode === "late-note") assert.equal(read(root, "personal/references/captured-topic.md"), "External note\n");
 });
 
-test("okf:14 CLI reads input exactly once before lock acquisition and returns human provenance", () => {
+test("wiki:14 CLI reads input exactly once before lock acquisition and returns human provenance", () => {
   const { root, input } = fresh(); assert.equal(cli(root, args(input), "extract-before-lock").status, 0);
   const other = fresh();
   const result = spawnSync(process.execPath, [BIN, "--vault", other.root, ...args(other.input)], { cwd: temp, encoding: "utf8", timeout: 15000, env: { ...process.env, HOME: temp, WIKI_VAULT: "" } });
@@ -174,7 +174,7 @@ test("okf:14 CLI reads input exactly once before lock acquisition and returns hu
 });
 
 const original = "personal/assets/captured-topic/original.txt", extracted = "personal/assets/captured-topic/extracted.txt", note = "personal/references/captured-topic.md";
-for (const mode of ["reserve-race", "reserve-permission"]) test("okf:14 CLI reservation failure preserves no-publication outcome: " + mode, () => {
+for (const mode of ["reserve-race", "reserve-permission"]) test("wiki:14 CLI reservation failure preserves no-publication outcome: " + mode, () => {
   const { root, input } = fresh();
   const index = read(root, "index.md");
   try {
@@ -203,7 +203,7 @@ for (const [mode, expected] of [
   ["index-fail", [original, extracted, note]], ["log-fail", [original, extracted, note]],
   ["temporary", [original]], ["temporary-release", [original]], ["note-temporary", [original, extracted, note]],
   ["index-release", [original, extracted, note]],
-] as const) test("okf:14 CLI reports actual retained files and repair steps after " + mode, () => {
+] as const) test("wiki:14 CLI reports actual retained files and repair steps after " + mode, () => {
   const { root, input } = fresh();
   try {
     const result = cli(root, args(input), mode);
@@ -220,7 +220,7 @@ for (const [mode, expected] of [
   } finally { restore(root); }
 });
 
-test("okf:14 CLI reports no publication if first asset cannot be created", () => {
+test("wiki:14 CLI reports no publication if first asset cannot be created", () => {
   const { root, input } = fresh();
   try {
     const result = cli(root, args(input), "first-asset-fail");
@@ -232,7 +232,7 @@ test("okf:14 CLI reports no publication if first asset cannot be created", () =>
   } finally { restore(root); }
 });
 
-test("okf:14 CLI preserves primary exclusive conflict and unpublished temporary cleanup failure", () => {
+test("wiki:14 CLI preserves primary exclusive conflict and unpublished temporary cleanup failure", () => {
   const { root, input } = fresh();
   try {
     const result = cli(root, args(input), "link-cleanup");
@@ -245,7 +245,7 @@ test("okf:14 CLI preserves primary exclusive conflict and unpublished temporary 
   } finally { restore(root); }
 });
 
-test("okf:14 CLI emits one final error with all completed metadata on lock cleanup failure", () => {
+test("wiki:14 CLI emits one final error with all completed metadata on lock cleanup failure", () => {
   const { root, input } = fresh();
   try {
     const result = cli(root, args(input), "release");
@@ -257,7 +257,7 @@ test("okf:14 CLI emits one final error with all completed metadata on lock clean
   } finally { restore(root); }
 });
 
-test("okf:14 CLI keeps primary validation diagnostics when lock cleanup also fails", () => {
+test("wiki:14 CLI keeps primary validation diagnostics when lock cleanup also fails", () => {
   const { root, input } = fresh();
   try {
     const result = cli(root, args(input), "registry-scope-release");
@@ -268,7 +268,7 @@ test("okf:14 CLI keeps primary validation diagnostics when lock cleanup also fai
   } finally { restore(root); }
 });
 
-for (const mode of ["second-link-cleanup", "second-link-cleanup-release"]) test("okf:14 CLI retains primary conflict and all cleanup failures after original asset: " + mode, () => {
+for (const mode of ["second-link-cleanup", "second-link-cleanup-release"]) test("wiki:14 CLI retains primary conflict and all cleanup failures after original asset: " + mode, () => {
   const { root, input } = fresh();
   try {
     const result = cli(root, args(input), mode);
@@ -283,7 +283,7 @@ for (const mode of ["second-link-cleanup", "second-link-cleanup-release"]) test(
   } finally { restore(root); }
 });
 
-test("okf:14 CLI rejects busy mutation and normalized cross-type title collisions without effects", () => {
+test("wiki:14 CLI rejects busy mutation and normalized cross-type title collisions without effects", () => {
   const { root, input } = fresh();
   fs.writeFileSync(path.join(root, ".wiki/locks/mutation.lock"), "Held by fixture operator");
   refused(root, args(input), 3); fs.unlinkSync(path.join(root, ".wiki/locks/mutation.lock"));
@@ -294,12 +294,12 @@ test("okf:14 CLI rejects busy mutation and normalized cross-type title collision
 });
 
 
-test("okf:14 CLI human partial output has no success and retains primary failure, paths, digests, and lock cleanup", () => {
+test("wiki:14 CLI human partial output has no success and retains primary failure, paths, digests, and lock cleanup", () => {
   const { root, input } = fresh();
   try {
     const guard = fileURLToPath(new URL("./capture-io-guard.js", import.meta.url));
     const result = spawnSync(process.execPath, ["--import", guard, BIN, "--vault", root, ...args(input)], {
-      encoding: "utf8", cwd: temp, timeout: 15000, env: { ...process.env, HOME: temp, WIKI_VAULT: "", OKF_CAPTURE_GUARD: "index-release" },
+      encoding: "utf8", cwd: temp, timeout: 15000, env: { ...process.env, HOME: temp, WIKI_VAULT: "", WIKI_CAPTURE_GUARD: "index-release" },
     });
     assert.equal(result.error, undefined); assert.notEqual(result.status, 0); assert.equal(result.stdout, "");
     assert.match(result.stderr, /EACCES|permission denied/i); assert.match(result.stderr, /Lock cleanup:/);

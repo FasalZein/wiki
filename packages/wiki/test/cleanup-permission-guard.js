@@ -4,9 +4,9 @@ import path from "node:path";
 import { syncBuiltinESMExports } from "node:module";
 const link = fs.linkSync;
 const write = fs.writeFileSync;
-const vault = fs.realpathSync(process.env.OKF_GUARD_VAULT);
+const vault = fs.realpathSync(process.env.WIKI_GUARD_VAULT);
 function denyRelease() { fs.chmodSync(path.join(vault, ".wiki/locks"), 0o500); }
-const mode = process.env.OKF_CLEANUP_MODE;
+const mode = process.env.WIKI_CLEANUP_MODE;
 fs.linkSync = (source, target) => {
   const result = link(source, target);
   if ((mode === "temporary" || mode === "both") && (String(target).endsWith("/notes/topic.md") || String(target).endsWith("/types/glossary.json"))) fs.chmodSync(path.dirname(source), 0o500);

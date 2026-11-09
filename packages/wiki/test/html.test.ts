@@ -21,7 +21,7 @@ for (const [label, ast] of [
   ["missing table fields", doc([{ t: "Table", c: [[], [null, []]] }])],
   ["malformed table cell", doc([{ t: "Table", c: [["", [], []], [null, []], [], [["", [], []], [[["", [], []], [["lost cell"]]]]], [], [["", [], []], []]] }])],
   ["malformed Figure caption", doc([{ t: "Figure", c: [["", [], []], "lost caption", []] }])],
-] as const) test("okf:16 Pandoc boundary fails closed: " + label, () => {
+] as const) test("wiki:16 Pandoc boundary fails closed: " + label, () => {
   assert.throws(() => renderPandocDocument(ast), /pandoc.*(refusing|not extracted)/);
 });
 
@@ -34,11 +34,11 @@ for (const [label, ast] of [
   ["non-text CodeBlock", doc([{ t: "CodeBlock", c: [["", [], []], 7] }])],
   ["non-object title", doc([], { title: null })],
   ["unsupported title", doc([], { title: { t: "MetaBool", c: true } })],
-] as const) test("okf:16 renderer rejects invalid node shapes: " + label, () => {
+] as const) test("wiki:16 renderer rejects invalid node shapes: " + label, () => {
   assert.throws(() => renderPandocDocument(ast), /pandoc.*(refusing|not extracted)/);
 });
 
-test("okf:16 inline shapes preserve text and whitespace without link targets", () => {
+test("wiki:16 inline shapes preserve text and whitespace without link targets", () => {
   const word = [{ t: "Str", c: "word" }];
   const attr = ["", [], []];
   const inlines = [
@@ -54,7 +54,7 @@ test("okf:16 inline shapes preserve text and whitespace without link targets", (
     "code " + "word".repeat(7) + "\n\n" + "word".repeat(5));
 });
 
-test("okf:16 block shapes and title forms preserve text and line endings", () => {
+test("wiki:16 block shapes and title forms preserve text and line endings", () => {
   const attr = ["", [], []];
   const word = [{ t: "Str", c: "word" }];
   const plain = [{ t: "Plain", c: word }];
@@ -71,7 +71,7 @@ test("okf:16 block shapes and title forms preserve text and line endings", () =>
   }
 });
 
-test("okf:16 known raw HTML omissions are explicit limitations, not executable text", () => {
+test("wiki:16 known raw HTML omissions are explicit limitations, not executable text", () => {
   const rendered = renderPandocDocument(doc([{ t: "RawBlock", c: ["html", "<script>unsafe()</script>"] }, { t: "Para", c: [{ t: "Str", c: "Visible" }, { t: "RawInline", c: ["html", "<i>"] }] }]));
   assert.equal(rendered.text, "Visible");
   assert.deepEqual(rendered.limitations, ["omitted RawBlock; raw HTML was not extracted or executed", "omitted RawInline; raw HTML was not extracted or executed"]);

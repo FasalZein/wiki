@@ -158,7 +158,7 @@ export async function doctorVault(selected: string) {
       const relative = path.relative(base, scratch);
       if (!relative || relative !== ".." && !relative.startsWith(".." + path.sep) && !path.isAbsolute(relative)) throw new Error("Diagnostic scratch directory must be outside the vault and HOME/XDG; set TMPDIR to an isolated temporary directory");
     }
-    temporary = fs.mkdtempSync(path.join(scratch, "okf-doctor-db-"));
+    temporary = fs.mkdtempSync(path.join(scratch, "wiki-doctor-db-"));
     const copied = path.join(temporary, "qmd.sqlite");
     fs.writeFileSync(copied, bytes, { flag: "wx" });
     probe.internal.db.prepare("ATTACH DATABASE ? AS inspected").run(copied);

@@ -7,8 +7,8 @@ import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { declaresProperty } from "../src/registry.ts";
 
-const BIN = fileURLToPath(new URL("../bin/okf-wiki.js", import.meta.url));
-const temp = fs.mkdtempSync(path.join(os.tmpdir(), "okf-registry-"));
+const BIN = fileURLToPath(new URL("../bin/wiki.js", import.meta.url));
+const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-registry-"));
 after(() => fs.rmSync(temp, { recursive: true, force: true }));
 let counter = 0;
 function cli(vault: string, ...args: string[]) {
@@ -60,7 +60,7 @@ function diagnostic(vault: string, rule: string, file: string, message: RegExp) 
   assert.deepEqual(cli(vault, "lint"), result, "diagnostics are deterministic");
 }
 
-test("okf:02 real init/list/add/custom-schema/lint flow accepts an eighth data-defined type", () => {
+test("wiki:02 real init/list/add/custom-schema/lint flow accepts an eighth data-defined type", () => {
   const vault = fresh();
   const list = cli(vault, "type", "list");
   assert.equal(list.status, 0);
@@ -91,7 +91,7 @@ test("okf:02 real init/list/add/custom-schema/lint flow accepts an eighth data-d
   diagnostic(vault, "frontmatter.schema", relative, /category/);
 });
 
-test("okf:02 literal fenced shell placeholders remain inert template body data", () => {
+test("wiki:02 literal fenced shell placeholders remain inert template body data", () => {
   const vault = fresh();
   const procedure = record(vault, "procedure");
   procedure.template = ['## Steps', '', '~~~sh', 'echo "$' + '{USER}"', '{{ literal }}', '<% literal %>', '~~~', ''].join("\n");
@@ -102,7 +102,7 @@ test("okf:02 literal fenced shell placeholders remain inert template body data",
   assert.equal(fs.readFileSync(path.join(vault, ".wiki/types/procedure.json"), "utf8"), before);
 });
 
-test("okf:02 Markdown thematic breaks and fenced frontmatter examples are literal template bodies", () => {
+test("wiki:02 Markdown thematic breaks and fenced frontmatter examples are literal template bodies", () => {
   const vault = fresh();
   for (const template of [
     "Introductory prose\n\n---\n\nMore prose\n",
@@ -117,7 +117,7 @@ test("okf:02 Markdown thematic breaks and fenced frontmatter examples are litera
   }
 });
 
-test("okf:02 registry errors name independent causes without rewriting input", () => {
+test("wiki:02 registry errors name independent causes without rewriting input", () => {
   const cases: { rule: string; change: (r: ReturnType<typeof record>) => void; message: RegExp }[] = [
     { rule: "registry.schema", change: r => { r.frontmatterSchema = { type: "not-a-schema-type" }; }, message: /schema.*invalid|invalid.*schema/i },
     { rule: "registry.schema", change: r => { r.frontmatterSchema.$async = true; }, message: /async|executable/i },
@@ -151,7 +151,7 @@ test("okf:02 registry errors name independent causes without rewriting input", (
   diagnostic(vault, "registry.json", ".wiki/types/note.json", /malformed JSON/i);
 });
 
-test("okf:02 common profile stays mandatory with a permissive custom schema", () => {
+test("wiki:02 common profile stays mandatory with a permissive custom schema", () => {
   const invalid = [
     ["title: Terms\n", "", /title/],
     ["description: Local terms\n", "", /description/],
@@ -178,7 +178,7 @@ test("okf:02 common profile stays mandatory with a permissive custom schema", ()
   }
 });
 
-test("okf:02 rejects unknown types, undeclared fields, nested data, unsafe YAML, and scope mismatch", () => {
+test("wiki:02 rejects unknown types, undeclared fields, nested data, unsafe YAML, and scope mismatch", () => {
   const vault = fresh();
   const custom = record(vault);
   custom.name = "glossary"; custom.folder = "glossary";
@@ -204,7 +204,7 @@ test("okf:02 rejects unknown types, undeclared fields, nested data, unsafe YAML,
   diagnostic(vault, "frontmatter.flat", relative, /category/);
 });
 
-test("okf:02 disjoint exact scopes share folders but overlapping scopes fail", () => {
+test("wiki:02 disjoint exact scopes share folders but overlapping scopes fail", () => {
   const vault = fresh();
   const first = record(vault); first.scopes = ["personal"]; save(vault, "note", first);
   const second = record(vault); second.name = "custom"; second.scopes = ["projects/wiki"];
@@ -216,7 +216,7 @@ test("okf:02 disjoint exact scopes share folders but overlapping scopes fail", (
   assert.equal(cli(vault, "type", "list").status, 0, "an empty exact scope set overlaps no scopes");
 });
 
-test("okf:02 list and validation retain required fields reached through a local schema reference", () => {
+test("wiki:02 list and validation retain required fields reached through a local schema reference", () => {
   const vault = fresh();
   const custom = record(vault); custom.name = "glossary"; custom.folder = "glossary";
   custom.frontmatterSchema = {
@@ -233,7 +233,7 @@ test("okf:02 list and validation retain required fields reached through a local 
   assert.equal(indexedLint(vault).status, 0);
 });
 
-test("okf:02 schema references resolve escaped pointers, arrays, root and named anchors without inventing properties", () => {
+test("wiki:02 schema references resolve escaped pointers, arrays, root and named anchors without inventing properties", () => {
   const fields = { properties: { category: { type: "string" } } };
   for (const schema of [
     { $ref: "#", ...fields },
@@ -252,7 +252,7 @@ test("okf:02 schema references resolve escaped pointers, arrays, root and named 
   ]) assert.equal(declaresProperty(schema, "category"), false);
 });
 
-test("okf:02 source profile keeps required locator and retrieval time with a weakened registry", () => {
+test("wiki:02 source profile keeps required locator and retrieval time with a weakened registry", () => {
   const vault = fresh();
   const source = record(vault, "source"); source.frontmatterSchema = true; save(vault, "source", source);
   const relative = note(vault, valid.replace("type: glossary", "type: source").replace("category: engineering\n", ""), "personal/references/source.md");
@@ -260,7 +260,7 @@ test("okf:02 source profile keeps required locator and retrieval time with a wea
   diagnostic(vault, "frontmatter.schema", relative, /retrieved/);
 });
 
-test("okf:02 existing symlink scaffold destinations are conflicts, never followed or replaced", () => {
+test("wiki:02 existing symlink scaffold destinations are conflicts, never followed or replaced", () => {
   const vault = fresh();
   const target = path.join(temp, "missing-outside.json");
   const destination = path.join(vault, ".wiki/types/custom.json");
@@ -270,7 +270,7 @@ test("okf:02 existing symlink scaffold destinations are conflicts, never followe
   assert.equal(fs.existsSync(target), false);
 });
 
-test("okf:02 log failure reports the published registry path and digest instead of success", () => {
+test("wiki:02 log failure reports the published registry path and digest instead of success", () => {
   const vault = fresh();
   const log = path.join(vault, "log.md");
   fs.chmodSync(log, 0o400);
@@ -285,7 +285,7 @@ test("okf:02 log failure reports the published registry path and digest instead 
   } finally { fs.chmodSync(log, 0o600); }
 });
 
-test("okf:02 human CLI exposes requirements and the honest lint boundary", () => {
+test("wiki:02 human CLI exposes requirements and the honest lint boundary", () => {
   const vault = fresh();
   function human(...args: string[]) { return spawnSync(process.execPath, [BIN, "--vault", vault, ...args], { encoding: "utf8", cwd: temp }); }
   const list = human("type", "list");
@@ -303,7 +303,7 @@ test("okf:02 human CLI exposes requirements and the honest lint boundary", () =>
   assert.match(bad.stderr, /fix:/);
 });
 
-test("okf:02 path-scoped lint still checks registry and refuses symlink ancestors", () => {
+test("wiki:02 path-scoped lint still checks registry and refuses symlink ancestors", () => {
   const vault = fresh();
   const outside = path.join(temp, "outside"); fs.mkdirSync(outside);
   fs.writeFileSync(path.join(outside, "outside.md"), "Not vault content");
@@ -316,7 +316,7 @@ test("okf:02 path-scoped lint still checks registry and refuses symlink ancestor
   assert.ok(cli(vault, "lint", "personal/outside.md").data.diagnostics.some((d: {rule: string}) => d.rule === "registry.json"));
 });
 
-test("okf:02 scaffolding rejects unsafe input without effects and logs only successful publication", () => {
+test("wiki:02 scaffolding rejects unsafe input without effects and logs only successful publication", () => {
   const vault = fresh();
   const before = fs.readFileSync(path.join(vault, "log.md"), "utf8");
   for (const [name, folder] of [["../escape", "safe"], ["safe", "assets"], ["safe", "notes"]] as const) {

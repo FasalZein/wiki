@@ -6,13 +6,13 @@ import * as path from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-const BIN = fileURLToPath(new URL("../bin/okf-wiki.js", import.meta.url));
-const temp = fs.mkdtempSync(path.join(os.tmpdir(), "okf-links-"));
+const BIN = fileURLToPath(new URL("../bin/wiki.js", import.meta.url));
+const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-links-"));
 after(() => fs.rmSync(temp, { recursive: true, force: true }));
 let counter = 0;
 function cli(vault: string, ...args: string[]) {
   const result = spawnSync(process.execPath, ["--import", fileURLToPath(new URL("./link-network-guard.js", import.meta.url)), BIN, "--json", "--vault", vault, ...args], {
-    encoding: "utf8", cwd: temp, env: { ...process.env, HOME: temp, WIKI_VAULT: "", OKF_TEST_ROOT: temp, OKF_TEST_VAULT: vault },
+    encoding: "utf8", cwd: temp, env: { ...process.env, HOME: temp, WIKI_VAULT: "", WIKI_TEST_ROOT: temp, WIKI_TEST_VAULT: vault },
   });
   assert.equal(result.stderr, "");
   return { status: result.status, data: JSON.parse(result.stdout) };
@@ -42,7 +42,7 @@ function rejects(vault: string, rule: string, selected?: string) {
   return result;
 }
 
-test("okf:04 broken direct, reference and image targets fail in whole and selected lint", () => {
+test("wiki:04 broken direct, reference and image targets fail in whole and selected lint", () => {
   const vault = fresh();
   for (const body of ["[missing](missing.md)", "[missing][target]\n\n[target]: missing.md", "![missing](missing.png)"]) {
     note(vault, body);
@@ -50,7 +50,7 @@ test("okf:04 broken direct, reference and image targets fail in whole and select
   }
 });
 
-test("okf:04 direct, reference, collapsed, shortcut, image, parent, fragment, index and asset links validate without network", () => {
+test("wiki:04 direct, reference, collapsed, shortcut, image, parent, fragment, index and asset links validate without network", () => {
   const vault = fresh();
   note(vault, "Replacement", "personal/architecture/other.md", "", "architecture");
   write(vault, "personal/index.md", "# Personal\n");
@@ -73,7 +73,7 @@ test("okf:04 direct, reference, collapsed, shortcut, image, parent, fragment, in
   assert.equal(fs.readFileSync(path.join(vault, TOPIC), "utf8"), before, "fragments and authored bytes are unchanged");
 });
 
-test("okf:04 unsafe schemes, root links, malformed encoding and non-content targets have actionable diagnostics", () => {
+test("wiki:04 unsafe schemes, root links, malformed encoding and non-content targets have actionable diagnostics", () => {
   const vault = fresh();
   for (const [url, rule] of [
     ["/personal/notes/topic.md", "link.unsafe"], ["//example.invalid/note.md", "link.unsafe"],
@@ -88,7 +88,7 @@ test("okf:04 unsafe schemes, root links, malformed encoding and non-content targ
   }
 });
 
-test("okf:04 escaped, fenced, inline, quoted and literal captures are not authored links or wikilinks", () => {
+test("wiki:04 escaped, fenced, inline, quoted and literal captures are not authored links or wikilinks", () => {
   const vault = fresh();
   note(vault, [
     "\\[[escaped]] and \\[example](missing.md) and &#91;&#91;entity example&#93;&#93;",
@@ -105,7 +105,7 @@ test("okf:04 escaped, fenced, inline, quoted and literal captures are not author
   }
 });
 
-test("okf:04 traversal and decoded escapes never inspect an outside sentinel", () => {
+test("wiki:04 traversal and decoded escapes never inspect an outside sentinel", () => {
   const vault = fresh();
   const sentinel = path.join(temp, "sentinel.md");
   const bytes = "---\ninvalid: [\n---\noutside content must not be parsed\n";
@@ -118,7 +118,7 @@ test("okf:04 traversal and decoded escapes never inspect an outside sentinel", (
   assert.equal(fs.readFileSync(sentinel, "utf8"), bytes);
 });
 
-test("okf:04 canonical CLI paths reject traversal, empty segments, absolute and encoded unsafe components", () => {
+test("wiki:04 canonical CLI paths reject traversal, empty segments, absolute and encoded unsafe components", () => {
   const vault = fresh();
   note(vault, "Valid body");
   for (const selected of ["", ".", "..", "../sentinel.md", "/personal/notes/topic.md", "personal//notes/topic.md", "personal/./notes/topic.md", "personal/notes/../notes/topic.md", "personal\\notes\\topic.md", "personal/%2e%2e/topic.md", "C:/outside.md"]) {
@@ -127,7 +127,7 @@ test("okf:04 canonical CLI paths reject traversal, empty segments, absolute and 
   }
 });
 
-test("okf:04 symlinked notes, link targets and ancestors are refused before reading outside content", () => {
+test("wiki:04 symlinked notes, link targets and ancestors are refused before reading outside content", () => {
   const vault = fresh();
   const outside = path.join(temp, "outside-" + counter);
   fs.mkdirSync(outside);
@@ -147,7 +147,7 @@ test("okf:04 symlinked notes, link targets and ancestors are refused before read
   assert.equal(fs.readFileSync(sentinel, "utf8"), "---\ninvalid: [\n---\n");
 });
 
-test("okf:04 canonical lifecycle metadata differs from contained parent links and custom strings are not guessed as paths", () => {
+test("wiki:04 canonical lifecycle metadata differs from contained parent links and custom strings are not guessed as paths", () => {
   const vault = fresh();
   const target = "personal/architecture/replacement.md";
   note(vault, "Replacement", target, "", "architecture");
@@ -164,7 +164,7 @@ test("okf:04 canonical lifecycle metadata differs from contained parent links an
   assert.equal(indexedLint(vault).status, 0);
 });
 
-test("okf:04 retained source metadata requires canonical asset paths, unlike body destinations and resource locators", () => {
+test("wiki:04 retained source metadata requires canonical asset paths, unlike body destinations and resource locators", () => {
   const vault = fresh();
   const relative = "personal/references/source.md";
   const original = "personal/assets/capture/original.txt", extracted = "personal/assets/capture/extracted.txt";
@@ -188,13 +188,13 @@ test("okf:04 retained source metadata requires canonical asset paths, unlike bod
   assert.equal(fs.readFileSync(outside, "utf8"), "outside retained bytes");
 });
 
-test("okf:04 authored references still validate definitions declared in quoted source", () => {
+test("wiki:04 authored references still validate definitions declared in quoted source", () => {
   const vault = fresh();
   note(vault, "[authored][target]\n\n> [target]: file:///outside\n");
   rejects(vault, "link.scheme", TOPIC);
 });
 
-test("okf:04 formatted wikilink labels remain forbidden but inline-code examples do not join into syntax", () => {
+test("wiki:04 formatted wikilink labels remain forbidden but inline-code examples do not join into syntax", () => {
   const vault = fresh();
   for (const body of ["[[note|*label*]]", "[[note|**label**]]"]) {
     note(vault, body);
@@ -204,7 +204,7 @@ test("okf:04 formatted wikilink labels remain forbidden but inline-code examples
   assert.equal(indexedLint(vault).status, 0);
 });
 
-for (const prefix of ["", "!"]) for (const selected of [undefined, TOPIC]) test("okf:04 matching reference definitions cannot hide authored " + prefix + "[[topic]] in " + (selected ? "selected" : "whole") + " lint", () => {
+for (const prefix of ["", "!"]) for (const selected of [undefined, TOPIC]) test("wiki:04 matching reference definitions cannot hide authored " + prefix + "[[topic]] in " + (selected ? "selected" : "whole") + " lint", () => {
   const vault = fresh();
   for (const reference of ["[topic]", "[topic][]", "[label][topic]"]) {
     const wiki = prefix + "[" + reference + "]";
@@ -217,7 +217,7 @@ for (const prefix of ["", "!"]) for (const selected of [undefined, TOPIC]) test(
   }
 });
 
-test("okf:04 matching definitions preserve standard references and escaped, code and quoted examples", () => {
+test("wiki:04 matching definitions preserve standard references and escaped, code and quoted examples", () => {
   const vault = fresh();
   const body = [
     "[topic]", "[topic][]", "[label][topic]", "![topic]", "![topic][]", "![label][topic]",
@@ -234,7 +234,7 @@ test("okf:04 matching definitions preserve standard references and escaped, code
   }
 });
 
-test("okf:04 current registry writes refuse symlinked managed ancestors and preserve outside sentinels", () => {
+test("wiki:04 current registry writes refuse symlinked managed ancestors and preserve outside sentinels", () => {
   for (const relative of [".wiki/types", ".wiki/tmp"]) {
     const vault = fresh();
     const outside = path.join(temp, "write-sentinel-" + counter);

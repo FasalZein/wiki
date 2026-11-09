@@ -22,7 +22,7 @@ test("uses serial native Node tests for the Node CLI plan", () => {
   assert.notEqual(options.incrementalFile, mutationOptions("src/cli/output.ts", { HEAVY_CPUS: "15" }).incrementalFile);
 });
 
-test("supports all eleven OKF capture/update risk boundaries with serial sandbox-relative tests", () => {
+test("supports all eleven wiki capture/update risk boundaries with serial sandbox-relative tests", () => {
   const plans = {
     "capture.ts": ["capture-text", "capture-cli", "capture-pdf", "capture-web", "concurrent-writers"],
     "update.ts": ["update", "concurrent-writers"],
@@ -38,11 +38,11 @@ test("supports all eleven OKF capture/update risk boundaries with serial sandbox
   };
   const caches = new Set();
   for (const [file, tests] of Object.entries(plans)) {
-    const target = "packages/okf-wiki/src/" + file;
+    const target = "packages/wiki/src/" + file;
     const options = mutationOptions(target, { HEAVY_CPUS: "8" });
     assert.deepEqual(options.mutate, [target]);
-    const filter = file === "pdf.ts" ? "--test-name-pattern='okf:15|PDF|pdftotext' " : "";
-    assert.equal(options.commandRunner.command, "node --test --test-concurrency=1 " + filter + tests.map(name => "packages/okf-wiki/test/" + name + ".test.ts").join(" "));
+    const filter = file === "pdf.ts" ? "--test-name-pattern='wiki:15|PDF|pdftotext' " : "";
+    assert.equal(options.commandRunner.command, "node --test --test-concurrency=1 " + filter + tests.map(name => "packages/wiki/test/" + name + ".test.ts").join(" "));
     caches.add(options.incrementalFile);
   }
   assert.equal(caches.size, 11);

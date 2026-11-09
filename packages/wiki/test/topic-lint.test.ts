@@ -7,8 +7,8 @@ import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { inspectVault } from "../src/lint.ts";
 
-const BIN = fileURLToPath(new URL("../bin/okf-wiki.js", import.meta.url));
-const temp = fs.mkdtempSync(path.join(os.tmpdir(), "okf-topic-"));
+const BIN = fileURLToPath(new URL("../bin/wiki.js", import.meta.url));
+const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-topic-"));
 after(() => fs.rmSync(temp, { recursive: true, force: true }));
 let counter = 0;
 function cli(vault: string, ...args: string[]) {
@@ -40,7 +40,7 @@ function rejects(vault: string, relative: string, rule: string, ...args: string[
   return result;
 }
 
-test("okf:03 selected inventory hides unrelated diagnostics but never renders a partial index", () => {
+test("wiki:03 selected inventory hides unrelated diagnostics but never renders a partial index", () => {
   const vault = fresh();
   const selected = note(vault, "personal/notes/selected.md", "", "", "note", "Selected");
   const other = note(vault, "projects/wiki/notes/other.md", "status: deprecated\nsuperseded_by: missing.md\n", "", "note", "Other");
@@ -55,7 +55,7 @@ test("okf:03 selected inventory hides unrelated diagnostics but never renders a 
   assert.ok(repaired.indexes.has("index.md"));
 });
 
-test("okf:03 canonical placement requires scope, registered folder, safe project and exact slug depth", () => {
+test("wiki:03 canonical placement requires scope, registered folder, safe project and exact slug depth", () => {
   const vault = fresh();
   for (const relative of ["topic.md", "notes/topic.md", "personal/topic.md", "personal/decisions/topic.md", "personal/notes/deeper/topic.md", "personal/notes/deeper/index.md", "personal/unknown/index.md", "personal/notes/Bad.md", "personal/notes/index-name!.md", "projects/Bad/notes/topic.md", "projects/assets/notes/topic.md"]) {
     note(vault, relative);
@@ -68,7 +68,7 @@ test("okf:03 canonical placement requires scope, registered folder, safe project
 });
 
 
-test("okf:03 required headings are authored Markdown, including decision parent hierarchy", () => {
+test("wiki:03 required headings are authored Markdown, including decision parent hierarchy", () => {
   const vault = fresh();
   const relative = "personal/procedures/run.md";
   for (const body of ["No heading\n", "~~~md\n## Steps\n~~~\n", "    ## Steps\n", "> ## Steps\n", "\x60## Steps\x60\n", "## \x60Steps\x60\n", "<pre>\n## Steps\n</pre>\n"]) {
@@ -90,7 +90,7 @@ test("okf:03 required headings are authored Markdown, including decision parent 
   assert.equal(indexedLint(vault).status, 0);
 });
 
-test("okf:03 metadata repetition is rejected but prose and literal examples remain authored bytes", () => {
+test("wiki:03 metadata repetition is rejected but prose and literal examples remain authored bytes", () => {
   const vault = fresh();
   for (const body of ["Status: stable\n", "Type: note\n", "Intro.\nStatus: draft\n", "**Status:** stable\n", "- Type: note\n"]) {
     const relative = note(vault, undefined, "", body);
@@ -101,7 +101,7 @@ test("okf:03 metadata repetition is rejected but prose and literal examples rema
 });
 
 
-test("okf:03 duplicate titles use trimmed case normalization within scope, including selected-path context", () => {
+test("wiki:03 duplicate titles use trimmed case normalization within scope, including selected-path context", () => {
   const vault = fresh();
   const first = note(vault, "personal/notes/first.md", "", "", "note", " Shared Title ");
   const second = note(vault, "personal/architecture/second.md", "", "", "architecture", "shared title");
@@ -115,7 +115,7 @@ test("okf:03 duplicate titles use trimmed case normalization within scope, inclu
   assert.equal(indexedLint(vault).status, 0, "same title in another scope is valid");
 });
 
-test("okf:03 lifecycle dependencies cannot be removed by custom schemas and targets must be canonical topics", () => {
+test("wiki:03 lifecycle dependencies cannot be removed by custom schemas and targets must be canonical topics", () => {
   const vault = fresh();
   const registry = path.join(vault, ".wiki/types/note.json");
   const record = JSON.parse(fs.readFileSync(registry, "utf8"));
@@ -137,7 +137,7 @@ test("okf:03 lifecycle dependencies cannot be removed by custom schemas and targ
   }
 });
 
-test("okf:03 whole-vault lint applies registry edits to existing notes and templates use real headings", () => {
+test("wiki:03 whole-vault lint applies registry edits to existing notes and templates use real headings", () => {
   const vault = fresh();
   assert.equal(cli(vault, "type", "add", "glossary", "--folder", "glossary").status, 0);
   const relative = note(vault, "personal/glossary/terms.md", "", "## Terms\n", "glossary");
@@ -161,7 +161,7 @@ test("okf:03 whole-vault lint applies registry edits to existing notes and templ
 });
 
 
-test("okf:03 lint is read-only across success, failure, path selection, registry changes, and Git state", () => {
+test("wiki:03 lint is read-only across success, failure, path selection, registry changes, and Git state", () => {
   const vault = fresh();
   const git = spawnSync("git", ["init", "--quiet", vault], { encoding: "utf8", env: { ...process.env, HOME: temp, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" } });
   assert.equal(git.status, 0, git.stderr);
@@ -197,7 +197,7 @@ test("okf:03 lint is read-only across success, failure, path selection, registry
 });
 
 
-for (const mode of ["whole-vault", "selected-file", "selected-directory"]) test("okf:03 only canonical scope capture assets are excluded: " + mode, () => {
+for (const mode of ["whole-vault", "selected-file", "selected-directory"]) test("wiki:03 only canonical scope capture assets are excluded: " + mode, () => {
   const vault = fresh();
   for (const relative of ["personal/notes/assets/topic.md", "projects/wiki/notes/assets/topic.md", "assets/topic.md", "projects/Bad/assets/topic.md"]) {
     note(vault, relative);
@@ -216,7 +216,7 @@ for (const mode of ["whole-vault", "selected-file", "selected-directory"]) test(
 
 
 for (const [left, right] of [["Straße", "STRASSE"], ["ΟΣ", "οσ"]]) for (const mode of ["whole-vault", "selected-path"]) {
-  test("okf:03 Unicode case-fold duplicates " + left + "/" + right + ": " + mode, () => {
+  test("wiki:03 Unicode case-fold duplicates " + left + "/" + right + ": " + mode, () => {
     const vault = fresh();
     const first = note(vault, "personal/notes/one.md", "", "", "note", " " + left + " ");
     const second = note(vault, "personal/notes/two.md", "", "", "note", right);
@@ -235,7 +235,7 @@ for (const [left, right] of [["Straße", "STRASSE"], ["ΟΣ", "οσ"]]) for (con
 }
 
 
-test("okf:03 default case folding preserves accents and does not use Turkic locale tailoring", () => {
+test("wiki:03 default case folding preserves accents and does not use Turkic locale tailoring", () => {
   const vault = fresh();
   for (const [slug, title] of [["accented", "café"], ["plain", "cafe"], ["dotted", "İ"], ["undotted", "i"]]) note(vault, "personal/notes/" + slug + ".md", "", "", "note", title);
   assert.equal(indexedLint(vault).status, 0);

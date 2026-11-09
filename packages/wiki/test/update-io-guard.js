@@ -4,7 +4,7 @@ import path from "node:path";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { syncBuiltinESMExports } from "node:module";
-const mode = process.env.OKF_UPDATE_GUARD;
+const mode = process.env.WIKI_UPDATE_GUARD;
 const root = fs.realpathSync(process.argv[process.argv.indexOf("--vault") + 1]);
 const target = path.join(root, "personal/notes/topic.md");
 const write = fs.writeFileSync, open = fs.openSync, rename = fs.renameSync, rm = fs.rmSync, unlink = fs.unlinkSync;
@@ -14,7 +14,7 @@ if (mode.includes("permissions")) process.umask(0o022);
 function observePermissions(event, stat) {
   if (!mode.includes("permissions")) return;
   permissionEvents.push({ event, mode: stat.mode & 0o777, size: stat.size });
-  write(process.env.OKF_UPDATE_MODE_EVENTS, JSON.stringify(permissionEvents));
+  write(process.env.WIKI_UPDATE_MODE_EVENTS, JSON.stringify(permissionEvents));
 }
 function forbidden(file) {
   if (typeof file !== "string" || !file.startsWith(root + "/")) return false;

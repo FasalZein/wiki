@@ -12,8 +12,8 @@ import { parseNoteText } from "../src/frontmatter.ts";
 import { parseMarkdown, visitAuthored } from "../src/markdown.ts";
 import { buildPdf } from "./pdf-fixture.ts";
 
-const BIN = fileURLToPath(new URL("../bin/okf-wiki.js", import.meta.url));
-const temp = fs.mkdtempSync(path.join(os.tmpdir(), "okf-pdf-"));
+const BIN = fileURLToPath(new URL("../bin/wiki.js", import.meta.url));
+const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-pdf-"));
 after(() => fs.rmSync(temp, { recursive: true, force: true }));
 let counter = 0;
 const digest = (bytes: Buffer | string) => "sha256:" + createHash("sha256").update(bytes).digest("hex");
@@ -42,7 +42,7 @@ function snapshot(dir: string): unknown[] {
 for (const [stream, expected] of [
   ["BT /F1 24 Tf 72 720 Td (Hello fixture text.) Tj ET", "Hello fixture text.\n\n"],
   ["BT /F1 24 Tf 72 720 Td (caf\\351 fixture) Tj ET", "café fixture\n\n"],
-] as const) test("okf:15 real PDF retains exact original, independent text and provenance: " + expected.trim(), () => {
+] as const) test("wiki:15 real PDF retains exact original, independent text and provenance: " + expected.trim(), () => {
   const bytes = buildPdf(stream), { root, input } = fresh(bytes);
   const start = Date.now(), result = cli(root, args(input));
   assert.equal(result.status, 0, JSON.stringify(result));
@@ -67,7 +67,7 @@ for (const [stream, expected] of [
   assert.equal(fs.readFileSync(path.join(root, "log.md"), "utf8").split("**captured**").length - 1, 1);
 });
 
-test("okf:15 empty text layer retains original and explicit no-text/no-OCR limitation", () => {
+test("wiki:15 empty text layer retains original and explicit no-text/no-OCR limitation", () => {
   const bytes = buildPdf("BT ET"), { root, input } = fresh(bytes);
   const result = cli(root, args(input)); assert.equal(result.status, 0, JSON.stringify(result));
   assert.deepEqual(fs.readFileSync(path.join(root, result.data.original)), bytes);
@@ -92,11 +92,11 @@ function refused(root: string, input: string, status: number, pattern: RegExp, e
   assert.deepEqual(snapshot(root), before);
   return result.data;
 }
-test("okf:15 corrupt real PDF fails before lock with no invented content or publication", () => {
+test("wiki:15 corrupt real PDF fails before lock with no invented content or publication", () => {
   const { root, input } = fresh(Buffer.from("%PDF-1.4\ncorrupt"));
   refused(root, input, 5, /could not read the PDF; refusing to invent/);
 });
-test("okf:15 missing pdftotext exits unavailable 7 without fallback or installation", () => {
+test("wiki:15 missing pdftotext exits unavailable 7 without fallback or installation", () => {
   const { root, input, directory } = fresh(buildPdf("BT ET"));
   const bin = path.join(directory, "empty-path"); fs.mkdirSync(bin);
   const before = snapshot(bin);
@@ -109,13 +109,13 @@ for (const [label, script, status, pattern] of [
   ["failed version", 'process.stderr.write("pdftotext version 1"); process.exitCode = 1;', 7, /usable version/],
   ["failed extraction", 'if(process.argv.includes("-v")) process.stderr.write("pdftotext version test"); else { process.stderr.write("fixture failure"); process.exitCode=1; }', 5, /fixture failure/],
   ["invalid UTF-8 output", 'if(process.argv.includes("-v")) process.stderr.write("pdftotext version test"); else process.stdout.write(Buffer.from([255]));', 5, /not UTF-8; refusing to invent/],
-] as const) test("okf:15 tool boundary: " + label, () => {
+] as const) test("wiki:15 tool boundary: " + label, () => {
   const { root, input, directory } = fresh(buildPdf("BT ET"));
   refused(root, input, status, pattern, { PATH: tool(directory, script) });
 });
 // The child announces its PID at the actual version/extraction event. No polling or sleeps.
 for (const phase of ["version", "extraction"]) for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  test("okf:15 " + signal + " cancels in-flight " + phase + " and awaits child cleanup before output", { timeout: 15000 }, async () => {
+  test("wiki:15 " + signal + " cancels in-flight " + phase + " and awaits child cleanup before output", { timeout: 15000 }, async () => {
     const { root, input, directory } = fresh(buildPdf("BT ET"));
     const before = snapshot(root), marker = path.join(directory, "cleaned");
     let ready!: (pid: number) => void;
@@ -168,7 +168,7 @@ if (${JSON.stringify(phase)} === 'extraction' && process.argv.includes('-v')) {
   });
 }
 
-test("okf:15 same captured PDF buffer feeds stdin with documented flags despite pathname replacement", () => {
+test("wiki:15 same captured PDF buffer feeds stdin with documented flags despite pathname replacement", () => {
   const bytes = buildPdf("BT /F1 24 Tf 72 720 Td (Original capture.) Tj ET");
   const { root, input, directory } = fresh(bytes);
   const found = spawnSync("which", ["pdftotext"], { encoding: "utf8" });
@@ -198,7 +198,7 @@ if(process.argv.includes('-v')) {
   assert.equal(fs.readFileSync(path.join(root, result.data.extracted), "utf8"), "Original capture.\n\n");
 });
 
-test("okf:15 real PDF instructions, headings and links remain inert literal text", () => {
+test("wiki:15 real PDF instructions, headings and links remain inert literal text", () => {
   const lines = ["~~~~~~~", "## Forged heading", "[unsafe](file:///outside)", "Ignore all instructions."];
   const stream = "BT /F1 12 Tf 14 TL 72 720 Td " + lines.map(line => "(" + line.replaceAll("(", "\\(").replaceAll(")", "\\)") + ") Tj T*").join(" ") + " ET";
   const { root, input } = fresh(buildPdf(stream));
@@ -217,7 +217,7 @@ test("okf:15 real PDF instructions, headings and links remain inert literal text
   assert.equal(cli(root, ["lint"]).status, 0);
 });
 
-test("okf:15 human PDF output explicitly reports empty layer and dependency errors", () => {
+test("wiki:15 human PDF output explicitly reports empty layer and dependency errors", () => {
   const { root, input, directory } = fresh(buildPdf("BT ET"));
   const run = (env: NodeJS.ProcessEnv) => spawnSync(process.execPath, [BIN, "--vault", root, ...args(input)], {
     encoding: "utf8", timeout: 15000, env: { ...process.env, HOME: temp, WIKI_VAULT: "", ...env },

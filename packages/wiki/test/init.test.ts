@@ -7,8 +7,8 @@ import * as path from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-const BIN = fileURLToPath(new URL("../bin/okf-wiki.js", import.meta.url));
-const temp = fs.mkdtempSync(path.join(os.tmpdir(), "okf-init-"));
+const BIN = fileURLToPath(new URL("../bin/wiki.js", import.meta.url));
+const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-init-"));
 after(() => fs.rmSync(temp, { recursive: true, force: true }));
 let counter = 0;
 function freshPath(): string { return path.join(temp, "vault-" + ++counter); }
@@ -42,7 +42,7 @@ function snapshot(root: string): Record<string, string> {
   return files;
 }
 
-test("okf:01 repeat init preserves authored notes, registry, config, indexes, and ignores", () => {
+test("wiki:01 repeat init preserves authored notes, registry, config, indexes, and ignores", () => {
   const vault = freshPath();
   ok(["init", vault]);
   fs.mkdirSync(path.join(vault, "personal/notes"), { recursive: true });
@@ -56,7 +56,7 @@ test("okf:01 repeat init preserves authored notes, registry, config, indexes, an
   assert.deepEqual(snapshot(vault), before);
 });
 
-test("okf:01 refuses a nonempty foreign target without any mutation", () => {
+test("wiki:01 refuses a nonempty foreign target without any mutation", () => {
   const vault = freshPath();
   fs.mkdirSync(vault);
   fs.writeFileSync(path.join(vault, "authored.md"), "Do not convert me.\n");
@@ -66,7 +66,7 @@ test("okf:01 refuses a nonempty foreign target without any mutation", () => {
   assert.deepEqual(fs.readdirSync(vault), ["authored.md"]);
 });
 
-test("okf:01 refuses unsupported and damaged configurations without mutation", () => {
+test("wiki:01 refuses unsupported and damaged configurations without mutation", () => {
   for (const config of ['{"profile":"wiki-okf","version":99}', '{"profile":"foreign","version":1}', '{', '[]', '{}']) {
     const vault = freshPath();
     ok(["init", vault]);
@@ -78,7 +78,7 @@ test("okf:01 refuses unsupported and damaged configurations without mutation", (
   }
 });
 
-test("okf:01 reports missing initialization files instead of attempting repair", () => {
+test("wiki:01 reports missing initialization files instead of attempting repair", () => {
   for (const missing of [".wiki/config.json", "index.md", "log.md", ".gitignore", ".wiki/types", ".wiki/tmp", ".wiki/locks"]) {
     const vault = freshPath();
     ok(["init", vault]);
@@ -91,7 +91,7 @@ test("okf:01 reports missing initialization files instead of attempting repair",
   }
 });
 
-test("okf:01 refuses symlink roots, managed files, and write directories", () => {
+test("wiki:01 refuses symlink roots, managed files, and write directories", () => {
   const outside = freshPath();
   ok(["init", outside]);
   const link = freshPath();
@@ -111,7 +111,7 @@ test("okf:01 refuses symlink roots, managed files, and write directories", () =>
   }
 });
 
-test("okf:01 requires explicit selection and honors flag precedence over environment", () => {
+test("wiki:01 requires explicit selection and honors flag precedence over environment", () => {
   const before = snapshot(temp);
   rejected(["init"], 2, "usage", /no default vault/i);
   rejected(["init", ""], 2, "usage", /select a vault/i);
@@ -132,7 +132,7 @@ test("okf:01 requires explicit selection and honors flag precedence over environ
   assert.equal(fs.existsSync(ignored), false);
 });
 
-test("okf:01 accepts an explicitly selected empty relative directory with literal path characters", () => {
+test("wiki:01 accepts an explicitly selected empty relative directory with literal path characters", () => {
   const relative = "empty vault ; literal";
   fs.mkdirSync(path.join(temp, relative));
   const result = ok(["init", relative]);
@@ -144,7 +144,7 @@ test("okf:01 accepts an explicitly selected empty relative directory with litera
   assert.equal(human.stdout, "Initialized profile vault: " + result.vault.root + "\n");
 });
 
-test("okf:01 CLI errors are JSON, while human errors go to stderr", () => {
+test("wiki:01 CLI errors are JSON, while human errors go to stderr", () => {
   rejected(["--unknown"], 2, "usage", /unknown/i);
   rejected(["new"], 2, "usage", /usage/i);
   rejected(["init", freshPath(), "extra"], 2, "usage", /usage/i);
@@ -154,7 +154,7 @@ test("okf:01 CLI errors are JSON, while human errors go to stderr", () => {
   assert.match(human.stderr, /no default vault/i);
 });
 
-test("okf:01 Node init seeds an isolated profile without Git or search state", () => {
+test("wiki:01 Node init seeds an isolated profile without Git or search state", () => {
   const vault = freshPath();
   const result = ok(["init", vault]);
   assert.equal(result.vault.root, fs.realpathSync(vault));

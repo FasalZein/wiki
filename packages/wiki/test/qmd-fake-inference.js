@@ -7,15 +7,15 @@ import fs from "node:fs";
 import * as real from "@tobilu/qmd";
 export * from "@tobilu/qmd";
 
-const mode = process.env.OKF_QMD_CLI_GUARD ?? "";
-const log = (entry) => fs.appendFileSync(process.env.OKF_QMD_CALL_LOG, JSON.stringify(entry) + "\n");
+const mode = process.env.WIKI_QMD_CLI_GUARD ?? "";
+const log = (entry) => fs.appendFileSync(process.env.WIKI_QMD_CALL_LOG, JSON.stringify(entry) + "\n");
 // Source event: deliver the CLI's real SIGTERM handler while inference is in flight.
 const interrupt = (seam) => { if (mode === "fake-inference-interrupt-" + seam && !process.emit("SIGTERM")) throw new Error("No cooperative SIGTERM listener"); };
 // Injected local inference failure: vector/rerank search and expansion throw.
-const vectorFail = () => { if (process.env.OKF_QMD_FAKE_VECTOR === "fail") throw new Error("Injected local vector inference failure"); };
+const vectorFail = () => { if (process.env.WIKI_QMD_FAKE_VECTOR === "fail") throw new Error("Injected local vector inference failure"); };
 // Source event: another editor changes or removes a note while search inference runs.
 const move = () => {
-  const target = process.env.OKF_QMD_MOVE_PATH;
+  const target = process.env.WIKI_QMD_MOVE_PATH;
   if (mode === "fake-inference-move-edit") fs.appendFileSync(target, "Concurrent edit\n");
   if (mode === "fake-inference-move-delete") fs.unlinkSync(target);
 };
@@ -66,7 +66,7 @@ export async function createStore(options) {
     llm.ensureModelCacheDir();
     log({ op: "embed", args });
     interrupt("embed");
-    if (process.env.OKF_QMD_FAKE_EMBED === "fail") throw new Error("Injected local embedding failure");
+    if (process.env.WIKI_QMD_FAKE_EMBED === "fail") throw new Error("Injected local embedding failure");
     return { docsProcessed: 0, chunksEmbedded: 0, errors: 0 };
   };
   return store;

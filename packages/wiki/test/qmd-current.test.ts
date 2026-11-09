@@ -9,9 +9,9 @@ import { fileURLToPath } from "node:url";
 
 // B12: real CLI processes over real QMD storage. Only inference is faked
 // (qmd-fake-inference.js: expansion, vector/rerank search, document embedding).
-const BIN = fileURLToPath(new URL("../bin/okf-wiki.js", import.meta.url));
+const BIN = fileURLToPath(new URL("../bin/wiki.js", import.meta.url));
 const GUARD = fileURLToPath(new URL("./qmd-cli-guard.js", import.meta.url));
-const temp = fs.mkdtempSync(path.join(os.tmpdir(), "okf-qmd-current-"));
+const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-qmd-current-"));
 after(() => {
   try {
     for (const dir of ["cache", "config", "data"]) assert.equal(fs.existsSync(path.join(temp, dir)), false, "No global-default search state: " + dir);
@@ -20,7 +20,7 @@ after(() => {
 let counter = 0;
 type Match = { path: string; score: number; digest: string; title: string; description: string; excerpt: string };
 const argv = (vault: string, args: string[], json: boolean) => ["--import", GUARD, BIN, "--vault", vault, ...(json ? ["--json"] : []), ...args];
-const environment = (vault: string, mode: string, extraEnv: Record<string, string>) => ({ ...process.env, HOME: temp, XDG_CACHE_HOME: path.join(temp, "cache"), XDG_CONFIG_HOME: path.join(temp, "config"), XDG_DATA_HOME: path.join(temp, "data"), WIKI_VAULT: "", QMD_EMBED_MODEL: "", CI: "", OKF_QMD_CLI_GUARD: mode, OKF_QMD_CALL_LOG: vault + ".calls.jsonl", OKF_QMD_DENY_SUBPROCESS: "1", ...extraEnv });
+const environment = (vault: string, mode: string, extraEnv: Record<string, string>) => ({ ...process.env, HOME: temp, XDG_CACHE_HOME: path.join(temp, "cache"), XDG_CONFIG_HOME: path.join(temp, "config"), XDG_DATA_HOME: path.join(temp, "data"), WIKI_VAULT: "", QMD_EMBED_MODEL: "", CI: "", WIKI_QMD_CLI_GUARD: mode, WIKI_QMD_CALL_LOG: vault + ".calls.jsonl", WIKI_QMD_DENY_SUBPROCESS: "1", ...extraEnv });
 function cli(vault: string, args: string[], mode = "fake-inference", extraEnv: Record<string, string> = {}, json = true, quiet = true) {
   const log = vault + ".calls.jsonl";
   fs.rmSync(log, { force: true });
@@ -50,7 +50,7 @@ const sha = (bytes: Buffer | string) => "sha256:" + createHash("sha256").update(
 const current = (vault: string, relative: string) => sha(fs.readFileSync(path.join(vault, relative)));
 const paths = (matches: Match[]) => matches.map(m => m.path).sort();
 
-test("okf:12 add, equal-size restored-mtime edit, rename and delete between finds render only current revisions", () => {
+test("wiki:12 add, equal-size restored-mtime edit, rename and delete between finds render only current revisions", () => {
   const vault = fresh(), star = note(vault, "Observatory", "Observatory telescope", "Violet photon detector");
   const file = path.join(vault, star), time = new Date("2026-01-01T00:00:00Z"); fs.utimesSync(file, time, time);
   let found = succeeds(vault, ["find", "photon"]).data;
@@ -77,9 +77,9 @@ test("okf:12 add, equal-size restored-mtime edit, rename and delete between find
   assert.equal(human.status, 0); assert.match(human.stdout, new RegExp(renamed + " \\S+ " + sha(edited) + "\\n  Observatory: Observatory telescope\\n  Yellow photon detector"));
 });
 
-for (const kind of ["edit", "delete"] as const) test("okf:12 a note that " + (kind === "edit" ? "changes" : "disappears") + " during search is omitted with a moving-target diagnostic and incomplete text coverage", () => {
+for (const kind of ["edit", "delete"] as const) test("wiki:12 a note that " + (kind === "edit" ? "changes" : "disappears") + " during search is omitted with a moving-target diagnostic and incomplete text coverage", () => {
   const vault = fresh(), moving = note(vault, "Observatory", "Observatory telescope", "Photon detector"), stable = note(vault, "Garden", "Garden soil", "Photon lamp");
-  const result = succeeds(vault, ["find", "photon"], "fake-inference-move-" + kind, { OKF_QMD_MOVE_PATH: path.join(vault, moving) });
+  const result = succeeds(vault, ["find", "photon"], "fake-inference-move-" + kind, { WIKI_QMD_MOVE_PATH: path.join(vault, moving) });
   assert.ok(result.ops.includes("search"), "The change happened at the search inference seam");
   assert.deepEqual(paths(result.data.matches), [stable]); assert.equal(result.data.matches[0].digest, current(vault, stable));
   assert.equal(result.data.textCoverage.state, "incomplete");
@@ -93,9 +93,9 @@ for (const kind of ["edit", "delete"] as const) test("okf:12 a note that " + (ki
   assert.deepEqual(paths(next.matches), kind === "edit" ? [moving, stable].sort() : [stable]);
 });
 
-test("okf:12 vector failure returns labelled degraded lexical matches; a degraded miss is not exhaustive", () => {
+test("wiki:12 vector failure returns labelled degraded lexical matches; a degraded miss is not exhaustive", () => {
   const vault = fresh(), star = note(vault, "Observatory", "Observatory telescope", "Photon detector");
-  const env = { OKF_QMD_FAKE_VECTOR: "fail" };
+  const env = { WIKI_QMD_FAKE_VECTOR: "fail" };
   for (const args of [["find", "photon"], ["find", "--deep", "Which detector?", "--terms", "photon"]]) {
     const result = succeeds(vault, args, "fake-inference", env);
     assert.equal(result.data.ok, true); assert.equal(result.data.mode, args[1] === "--deep" ? "deep" : "fast");
@@ -114,7 +114,7 @@ test("okf:12 vector failure returns labelled degraded lexical matches; a degrade
   assert.match(human.stdout, /Embedding coverage: unavailable/);
 });
 
-test("okf:12 a native embedding failure swallowed by QMD is labelled degraded with unavailable embedding coverage", () => {
+test("wiki:12 a native embedding failure swallowed by QMD is labelled degraded with unavailable embedding coverage", () => {
   const vault = fresh(), star = note(vault, "Observatory", "Observatory telescope", "Photon detector");
   for (const args of [["find", "photon"], ["find", "zzzunmatched"]]) {
     const result = cli(vault, args, "fake-inference-native-fail", {}, true, false);
@@ -128,7 +128,7 @@ test("okf:12 a native embedding failure swallowed by QMD is labelled degraded wi
   }
 });
 
-test("okf:12 a deep expansion failure swallowed by QMD falls back to labelled degraded lexical search without claiming rerank", () => {
+test("wiki:12 a deep expansion failure swallowed by QMD falls back to labelled degraded lexical search without claiming rerank", () => {
   const vault = fresh(), star = note(vault, "Observatory", "Observatory telescope", "Photon detector");
   // Uncached questions: QMD caches only nonempty expansions, and each question is new.
   for (const args of [["find", "--deep", "photon"], ["find", "--deep", "Which detector counts photons?", "--terms", "photon"]]) {
@@ -148,10 +148,10 @@ test("okf:12 a deep expansion failure swallowed by QMD falls back to labelled de
 
 /** FIFO under the test temp directory; opening it blocks until the peer opens it (a source event, not polling). */
 function fifos(dir: string) { fs.mkdirSync(dir); for (const name of ["b-captured", "b-go", "a-go"]) assert.equal(spawnSync("mkfifo", [path.join(dir, name)]).status, 0); }
-for (const [query, label] of [["betaword", "term only in the newer revision"], ["photon", "term in both revisions (indexed body differs)"]] as const) test("okf:12 another sync replacing the index between this find's sync and query never reports complete coverage: " + label, async () => {
+for (const [query, label] of [["betaword", "term only in the newer revision"], ["photon", "term in both revisions (indexed body differs)"]] as const) test("wiki:12 another sync replacing the index between this find's sync and query never reports complete coverage: " + label, async () => {
   const vault = fresh(), relative = note(vault, "Observatory", "Observatory telescope", "Photon alphaword");
   const file = path.join(vault, relative), dir = path.join(temp, "fifo-" + counter); fifos(dir);
-  const env = { OKF_QMD_FIFO_DIR: dir };
+  const env = { WIKI_QMD_FIFO_DIR: dir };
   // B captures R0, then blocks before its index lock.
   const b = spawn(process.execPath, argv(vault, ["search", "sync"], true), { env: environment(vault + ".b", "stale-b", env), stdio: ["ignore", "pipe", "pipe"] });
   let bOut = "", bErr = ""; b.stdout.on("data", d => { bOut += d; }); b.stderr.on("data", d => { bErr += d; });
@@ -171,7 +171,7 @@ for (const [query, label] of [["betaword", "term only in the newer revision"], [
   assert.equal(next.textCoverage.state, "complete"); assert.deepEqual(next.matches.map((m: Match) => m.digest), [sha(r1)]);
 });
 
-test("okf:12 incomplete or failed synchronization never reports complete text coverage; unusable search exits 7", () => {
+test("wiki:12 incomplete or failed synchronization never reports complete text coverage; unusable search exits 7", () => {
   const vault = fresh(), good = note(vault, "Observatory", "Observatory telescope", "Photon detector"), broken = note(vault, "Garden", "Garden soil", "Photon lamp");
   fs.writeFileSync(path.join(vault, broken), fs.readFileSync(path.join(vault, broken), "utf8").replace(/description:.*\n/, ""));
   const partial = succeeds(vault, ["find", "photon"]).data;

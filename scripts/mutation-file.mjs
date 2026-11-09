@@ -4,17 +4,17 @@ import { resolve } from "node:path";
 
 // Explicit plans avoid pretending that a command runner discovers affected tests.
 const testCommands = new Map([
-  ["packages/okf-wiki/src/capture.ts", "node --test --test-concurrency=1 packages/okf-wiki/test/capture-text.test.ts packages/okf-wiki/test/capture-cli.test.ts packages/okf-wiki/test/capture-pdf.test.ts packages/okf-wiki/test/capture-web.test.ts packages/okf-wiki/test/concurrent-writers.test.ts"],
-  ["packages/okf-wiki/src/update.ts", "node --test --test-concurrency=1 packages/okf-wiki/test/update.test.ts packages/okf-wiki/test/concurrent-writers.test.ts"],
-  ["packages/okf-wiki/src/charset.ts", "node --test --test-concurrency=1 packages/okf-wiki/test/capture-web.test.ts"],
-  ["packages/okf-wiki/src/extract-process.ts", "node --test --test-concurrency=1 packages/okf-wiki/test/capture-pdf.test.ts packages/okf-wiki/test/capture-web.test.ts"],
-  ["packages/okf-wiki/src/html.ts", "node --test --test-concurrency=1 packages/okf-wiki/test/html.test.ts packages/okf-wiki/test/capture-web.test.ts"],
-  ["packages/okf-wiki/src/pdf.ts", "node --test --test-concurrency=1 --test-name-pattern='okf:15|PDF|pdftotext' packages/okf-wiki/test/capture-pdf.test.ts packages/okf-wiki/test/capture-web.test.ts"],
-  ["packages/okf-wiki/src/web.ts", "node --test --test-concurrency=1 packages/okf-wiki/test/capture-web.test.ts"],
-  ["packages/okf-wiki/src/paths.ts", "node --test --test-concurrency=1 packages/okf-wiki/test/links-paths.test.ts packages/okf-wiki/test/update.test.ts packages/okf-wiki/test/capture-cli.test.ts"],
-  ["packages/okf-wiki/src/mutation.ts", "node --test --test-concurrency=1 packages/okf-wiki/test/concurrent-writers.test.ts packages/okf-wiki/test/write-boundaries.test.ts packages/okf-wiki/test/update.test.ts packages/okf-wiki/test/capture-cli.test.ts"],
-  ["packages/okf-wiki/src/vault.ts", "node --test --test-concurrency=1 packages/okf-wiki/test/init.test.ts packages/okf-wiki/test/write-boundaries.test.ts packages/okf-wiki/test/capture-cli.test.ts packages/okf-wiki/test/update.test.ts"],
-  ["packages/okf-wiki/src/create.ts", "node --test --test-concurrency=1 packages/okf-wiki/test/create.test.ts packages/okf-wiki/test/write-boundaries.test.ts packages/okf-wiki/test/capture-cli.test.ts packages/okf-wiki/test/update.test.ts"],
+  ["packages/wiki/src/capture.ts", "node --test --test-concurrency=1 packages/wiki/test/capture-text.test.ts packages/wiki/test/capture-cli.test.ts packages/wiki/test/capture-pdf.test.ts packages/wiki/test/capture-web.test.ts packages/wiki/test/concurrent-writers.test.ts"],
+  ["packages/wiki/src/update.ts", "node --test --test-concurrency=1 packages/wiki/test/update.test.ts packages/wiki/test/concurrent-writers.test.ts"],
+  ["packages/wiki/src/charset.ts", "node --test --test-concurrency=1 packages/wiki/test/capture-web.test.ts"],
+  ["packages/wiki/src/extract-process.ts", "node --test --test-concurrency=1 packages/wiki/test/capture-pdf.test.ts packages/wiki/test/capture-web.test.ts"],
+  ["packages/wiki/src/html.ts", "node --test --test-concurrency=1 packages/wiki/test/html.test.ts packages/wiki/test/capture-web.test.ts"],
+  ["packages/wiki/src/pdf.ts", "node --test --test-concurrency=1 --test-name-pattern='wiki:15|PDF|pdftotext' packages/wiki/test/capture-pdf.test.ts packages/wiki/test/capture-web.test.ts"],
+  ["packages/wiki/src/web.ts", "node --test --test-concurrency=1 packages/wiki/test/capture-web.test.ts"],
+  ["packages/wiki/src/paths.ts", "node --test --test-concurrency=1 packages/wiki/test/links-paths.test.ts packages/wiki/test/update.test.ts packages/wiki/test/capture-cli.test.ts"],
+  ["packages/wiki/src/mutation.ts", "node --test --test-concurrency=1 packages/wiki/test/concurrent-writers.test.ts packages/wiki/test/write-boundaries.test.ts packages/wiki/test/update.test.ts packages/wiki/test/capture-cli.test.ts"],
+  ["packages/wiki/src/vault.ts", "node --test --test-concurrency=1 packages/wiki/test/init.test.ts packages/wiki/test/write-boundaries.test.ts packages/wiki/test/capture-cli.test.ts packages/wiki/test/update.test.ts"],
+  ["packages/wiki/src/create.ts", "node --test --test-concurrency=1 packages/wiki/test/create.test.ts packages/wiki/test/write-boundaries.test.ts packages/wiki/test/capture-cli.test.ts packages/wiki/test/update.test.ts"],
   ["src/cli/output.ts", "bun test tests/cli-links.test.ts tests/cli-search.test.ts"],
   ["packages/wiki-cli/src/cli.ts", "node --test --test-concurrency=1 packages/wiki-cli/test/cli.test.ts packages/wiki-cli/test/capture-sources.test.ts"],
 ]);

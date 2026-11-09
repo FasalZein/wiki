@@ -7,8 +7,8 @@ import * as path from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-const BIN = fileURLToPath(new URL("../bin/okf-wiki.js", import.meta.url));
-const temp = fs.mkdtempSync(path.join(os.tmpdir(), "okf-show-"));
+const BIN = fileURLToPath(new URL("../bin/wiki.js", import.meta.url));
+const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-show-"));
 after(() => fs.rmSync(temp, { recursive: true, force: true }));
 const TOPIC = "personal/notes/topic.md";
 const FRONT = "\uFEFF---\r\ntype: note\r\ntitle: Café\r\ndescription: Current bytes\r\ncreated: 2026-11-06T12:00:00Z\r\n---\r\n";
@@ -34,7 +34,7 @@ function show(vault: string, ...args: string[]) {
 }
 function digest(bytes: string | Buffer) { return "sha256:" + createHash("sha256").update(bytes).digest("hex"); }
 
-test("okf:06 full show returns exact current UTF-8 Markdown and full-byte digest in JSON and human modes", () => {
+test("wiki:06 full show returns exact current UTF-8 Markdown and full-byte digest in JSON and human modes", () => {
   const markdown = FRONT + "# Café\r\n\r\nText with trailing spaces  \r\nNo final newline";
   const vault = fresh(markdown);
   assert.deepEqual(show(vault), { ok: true, path: TOPIC, markdown, digest: digest(markdown) });
@@ -44,7 +44,7 @@ test("okf:06 full show returns exact current UTF-8 Markdown and full-byte digest
   assert.equal(human.stderr, "");
 });
 
-test("okf:06 exact rendered heading selects its source subtree through equal or higher headings", () => {
+test("wiki:06 exact rendered heading selects its source subtree through equal or higher headings", () => {
   const selected = "## *Use* &amp; \x60code\x60 [link](https://example.invalid) ![alt](image.png) <em>text</em>\r\n\r\n" +
     "Keep 😀 and trailing spaces  \r\n### Child\r\nNested text\r\n\r\n~~~md\r\n## Stop\r\n~~~\r\n\r\n";
   const markdown = FRONT + "# Root\r\nIntro\r\n" + selected + "## Stop\r\nExcluded\r\n# End\r\n";
@@ -61,7 +61,7 @@ test("okf:06 exact rendered heading selects its source subtree through equal or 
 });
 
 for (const style of ["ATX", "setext"]) for (const human of [false, true]) {
-  test("okf:06 indented " + style + " sections preserve physical line boundaries in " + (human ? "human" : "JSON") + " output", () => {
+  test("wiki:06 indented " + style + " sections preserve physical line boundaries in " + (human ? "human" : "JSON") + " output", () => {
     for (const newline of ["\r\n", "\n", "\r"]) {
       const selected = (style === "ATX" ? ["  ## Selected", "Body", " ### Nested", "Nested body", ""] : ["  Selected", "  --------", "Body", ""]).join(newline) + newline;
       const next = (style === "ATX" ? ["   ## Next", "Other"] : ["   Next", "   ----", "Other"]).join(newline);
@@ -94,7 +94,7 @@ function rejected(vault: string, args: string[], status: number, code: string, m
   assert.match(data.error.message, message);
 }
 
-test("okf:06 missing and duplicate rendered headings fail explicitly without matching code examples", () => {
+test("wiki:06 missing and duplicate rendered headings fail explicitly without matching code examples", () => {
   const vault = fresh(FRONT + "# Root\n\n~~~md\n## Example\n~~~\n\n    ## Indented\n\n> ## Quoted\n\n- ## Listed\n\n## **Same**\nFirst\n## Same\nSecond\n");
   for (const heading of ["Missing", "Example", "Indented", "Quoted", "Listed", "same", "**Same**"]) {
     rejected(vault, ["show", TOPIC, "--section", heading], 4, "not_found", /missing requested section/i);
@@ -107,7 +107,7 @@ test("okf:06 missing and duplicate rendered headings fail explicitly without mat
   assert.match(human.stderr, /^not_found: Missing requested section/);
 });
 
-test("okf:06 full digest tracks frontmatter and outside-section whitespace and same-size restored-mtime edits", () => {
+test("wiki:06 full digest tracks frontmatter and outside-section whitespace and same-size restored-mtime edits", () => {
   const selected = "## Selected\nKeep this\n";
   const original = FRONT + selected + "## Outside\nText\n";
   const vault = fresh(original);
@@ -128,7 +128,7 @@ test("okf:06 full digest tracks frontmatter and outside-section whitespace and s
   assert.equal(Buffer.byteLength(edits[2] ?? ""), Buffer.byteLength(original));
 });
 
-test("okf:06 unsafe canonical paths and symlinked notes or ancestors are refused", () => {
+test("wiki:06 unsafe canonical paths and symlinked notes or ancestors are refused", () => {
   const vault = fresh(FRONT + "# Root\n");
   const outside = path.join(temp, "outside.md");
   fs.writeFileSync(outside, "Outside sentinel");
@@ -142,7 +142,7 @@ test("okf:06 unsafe canonical paths and symlinked notes or ancestors are refused
   assert.equal(fs.readFileSync(outside, "utf8"), "Outside sentinel");
 });
 
-test("okf:06 rejects invalid UTF-8 instead of returning replacement characters or a misleading success", () => {
+test("wiki:06 rejects invalid UTF-8 instead of returning replacement characters or a misleading success", () => {
   const vault = fresh(FRONT + "# Selected\n");
   for (const invalid of [Buffer.from([0xc3, 0x28]), Buffer.from([0xed, 0xa0, 0x80]), Buffer.from([0xe2, 0x82])]) {
     fs.writeFileSync(path.join(vault, TOPIC), Buffer.concat([Buffer.from(FRONT + "# Selected\n"), invalid]));
@@ -152,7 +152,7 @@ test("okf:06 rejects invalid UTF-8 instead of returning replacement characters o
   rejected(vault, ["show", TOPIC, "--section", "Selected"], 6, "damaged", /Cannot select a section/);
 });
 
-test("okf:06 show and section flags reject incomplete or unrelated command forms", () => {
+test("wiki:06 show and section flags reject incomplete or unrelated command forms", () => {
   const vault = fresh(FRONT + "# Root\n");
   for (const args of [["show"], ["show", TOPIC, "extra"], ["show", TOPIC, "--section"], ["lint", "--section", "Root"], ["init", "--section", "Root"], ["show", TOPIC, "--check"], ["show", TOPIC, "--folder", "notes"]]) {
     rejected(vault, args, 2, "usage", /usage|section|check/i);
@@ -170,7 +170,7 @@ function snapshot(root: string): Record<string, string> {
   return files;
 }
 
-test("okf:06 show reads one actual note without inventory, unrelated validation, writes, network or legacy imports", () => {
+test("wiki:06 show reads one actual note without inventory, unrelated validation, writes, network or legacy imports", () => {
   const markdown = FRONT + "# Root\n\n## Selected\nCurrent text\n";
   const vault = fresh(markdown);
   // Deliberately invalid siblings/registry and stale/missing navigation must not block an exact read.
@@ -181,7 +181,7 @@ test("okf:06 show reads one actual note without inventory, unrelated validation,
   for (const args of [[], ["--section", "Selected"]]) {
     const result = spawnSync(process.execPath, ["--import", fileURLToPath(new URL("./show-io-guard.js", import.meta.url)), BIN, "--vault", vault, "--json", "show", TOPIC, ...args], {
       encoding: "utf8", cwd: temp,
-      env: { ...process.env, HOME: temp, WIKI_VAULT: "", OKF_TEST_ROOT: temp, OKF_TEST_VAULT: vault, OKF_TEST_NOTE: TOPIC },
+      env: { ...process.env, HOME: temp, WIKI_VAULT: "", WIKI_TEST_ROOT: temp, WIKI_TEST_VAULT: vault, WIKI_TEST_NOTE: TOPIC },
     });
     assert.equal(result.status, 0, result.stderr + result.stdout);
     assert.equal(result.stderr, "");

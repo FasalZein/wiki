@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { syncBuiltinESMExports } from "node:module";
-const mode = process.env.OKF_CONCURRENCY_GUARD;
+const mode = process.env.WIKI_CONCURRENCY_GUARD;
 const root = fs.realpathSync(process.argv[process.argv.indexOf("--vault") + 1]);
 const candidate = process.argv[process.argv.indexOf("--file") + 1];
 const target = path.join(root, "personal/notes/topic.md");

@@ -7,8 +7,8 @@ import * as path from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-const BIN = fileURLToPath(new URL("../bin/okf-wiki.js", import.meta.url));
-const temp = fs.mkdtempSync(path.join(os.tmpdir(), "okf-create-"));
+const BIN = fileURLToPath(new URL("../bin/wiki.js", import.meta.url));
+const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-create-"));
 after(() => fs.rmSync(temp, { recursive: true, force: true }));
 let counter = 0;
 function cli(vault: string, ...args: string[]) {
@@ -40,7 +40,7 @@ function snapshot(dir: string): unknown[] {
   });
 }
 
-test("okf:07 template create returns canonical metadata and digest, current indexes and one created log", () => {
+test("wiki:07 template create returns canonical metadata and digest, current indexes and one created log", () => {
   const vault = fresh();
   const result = succeeds(vault, "new", "procedure", "--project", "wiki", "--title", "Run safely", "--description", "Use safe steps", "--tags", "local", "--tags", "cli", "--status", "draft");
   assert.equal(result.path, "projects/wiki/procedures/run-safely.md");
@@ -72,7 +72,7 @@ function rejectsUnchanged(vault: string, status: number, ...args: string[]) {
   return result.data;
 }
 
-test("okf:07 explicit inert body supports self and planned navigation links with safe YAML and Markdown labels", () => {
+test("wiki:07 explicit inert body supports self and planned navigation links with safe YAML and Markdown labels", () => {
   const vault = fresh();
   const title = 'A [title] *bold* <tag> & "quote": yes';
   const description = 'A [description] <tag> & \\ literal';
@@ -90,7 +90,7 @@ test("okf:07 explicit inert body supports self and planned navigation links with
   succeeds(vault, "index", "--check");
 });
 
-test("okf:07 seed templates and custom data types obey actual schema requirements", () => {
+test("wiki:07 seed templates and custom data types obey actual schema requirements", () => {
   const vault = fresh();
   for (const type of ["architecture", "decision", "procedure", "research", "reference", "note"]) {
     succeeds(vault, "new", type, "--personal", "--title", type, "--description", "Seed template");
@@ -114,7 +114,7 @@ test("okf:07 seed templates and custom data types obey actual schema requirement
   assert.ok(missing.diagnostics.some((d: { message: string }) => d.message.includes("category")));
 });
 
-test("okf:07 explicit scopes and slug derivation reject ambiguity and never suffix collisions", () => {
+test("wiki:07 explicit scopes and slug derivation reject ambiguity and never suffix collisions", () => {
   const vault = fresh();
   for (const scope of [[], ["--personal", "--project", "wiki"], ["--project", "../escape"], ["--project", "assets"]]) {
     rejectsUnchanged(vault, 2, "new", "note", ...scope, "--title", "Topic", "--description", "A topic");
@@ -128,7 +128,7 @@ test("okf:07 explicit scopes and slug derivation reject ambiguity and never suff
   succeeds(vault, "lint");
 });
 
-for (const [first, second] of [["Straße", " STRASSE "], ["Café", "Cafe\u0301"], ["ΟΣ", "οσ"]] as const) test("okf:07 normalized scoped title collision preserves authored files: " + first, () => {
+for (const [first, second] of [["Straße", " STRASSE "], ["Café", "Cafe\u0301"], ["ΟΣ", "οσ"]] as const) test("wiki:07 normalized scoped title collision preserves authored files: " + first, () => {
   const vault = fresh();
   assert.equal(create(vault, first, "--slug", "first").status, 0);
   rejectsUnchanged(vault, 3, "new", "architecture", "--personal", "--title", second, "--description", "Duplicate", "--slug", "second");
@@ -142,12 +142,12 @@ for (const [label, body] of [
   ["metadata", "Status: draft\n"], ["wikilink", "[[missing]]\n"],
   ["missing-note", "[missing](missing.md)\n"], ["missing-generated", "[missing](../unknown/index.md)\n"],
   ["escape", "[outside](../../../outside.md)\n"],
-] as const) test("okf:07 malformed or invalid body refuses before publication: " + label, () => {
+] as const) test("wiki:07 malformed or invalid body refuses before publication: " + label, () => {
   const vault = fresh();
   rejectsUnchanged(vault, 2, "new", "note", "--personal", "--title", "Topic", "--description", "A topic", "--body-file", bodyFile(body));
 });
 
-test("okf:07 malformed fields, missing headings and unrelated invalid concepts are not hidden by new indexes", () => {
+test("wiki:07 malformed fields, missing headings and unrelated invalid concepts are not hidden by new indexes", () => {
   const vault = fresh();
   for (const [option, value] of [["--title", "bad\nline"], ["--description", ""], ["--status", "accepted"], ["--tags", "UPPER"]] as const) {
     rejectsUnchanged(vault, 2, "new", "note", "--personal", "--title", "Topic", "--description", "A topic", option, value);
@@ -159,7 +159,7 @@ test("okf:07 malformed fields, missing headings and unrelated invalid concepts a
   assert.ok(result.diagnostics.some((d: { path: string; rule: string }) => d.path === "personal/notes/old.md" && d.rule === "frontmatter.yaml"));
 });
 
-test("okf:07 held and stale locks refuse new, type add and index promptly without stealing", () => {
+test("wiki:07 held and stale locks refuse new, type add and index promptly without stealing", () => {
   const vault = fresh();
   const lock = path.join(vault, ".wiki/locks/mutation.lock");
   for (const owner of [{ token: "held", pid: process.pid }, { token: "stale", pid: 2147483647 }, {}]) {
@@ -180,14 +180,14 @@ test("okf:07 held and stale locks refuse new, type add and index promptly withou
 
 function guarded(vault: string, mode: string) {
   const result = spawnSync(process.execPath, ["--import", fileURLToPath(new URL("./create-io-guard.js", import.meta.url)), BIN, "--json", "--vault", vault, "new", "note", "--personal", "--title", "Topic", "--description", "A topic"], {
-    cwd: temp, encoding: "utf8", env: { ...process.env, HOME: temp, WIKI_VAULT: "", OKF_CREATE_GUARD: mode }, timeout: 15000,
+    cwd: temp, encoding: "utf8", env: { ...process.env, HOME: temp, WIKI_VAULT: "", WIKI_CREATE_GUARD: mode }, timeout: 15000,
   });
   assert.equal(result.error, undefined);
   assert.equal(result.stderr, "");
   return { status: result.status, data: JSON.parse(result.stdout) };
 }
 
-test("okf:07 exclusive complete-file publication preserves a destination created at the publication event", () => {
+test("wiki:07 exclusive complete-file publication preserves a destination created at the publication event", () => {
   const vault = fresh();
   const result = guarded(vault, "exclusive");
   assert.equal(result.status, 3, JSON.stringify(result));
@@ -198,7 +198,7 @@ test("okf:07 exclusive complete-file publication preserves a destination created
   assert.deepEqual(fs.readdirSync(path.join(vault, ".wiki/locks")), []);
 });
 
-for (const mode of ["token", "replacement"]) test("okf:07 release retains a lock whose ownership changed: " + mode, () => {
+for (const mode of ["token", "replacement"]) test("wiki:07 release retains a lock whose ownership changed: " + mode, () => {
   const vault = fresh();
   const result = guarded(vault, mode);
   assert.equal(result.status, 0, JSON.stringify(result));
@@ -207,7 +207,7 @@ for (const mode of ["token", "replacement"]) test("okf:07 release retains a lock
   succeeds(vault, "lint");
 });
 
-test("okf:07 post-note failure reports written path and current digest without success or fabricated log", () => {
+test("wiki:07 post-note failure reports written path and current digest without success or fabricated log", () => {
   const vault = fresh();
   const result = guarded(vault, "partial");
   assert.notEqual(result.status, 0);
@@ -222,7 +222,7 @@ test("okf:07 post-note failure reports written path and current digest without s
   assert.equal(read(vault, "log.md"), "");
 });
 
-test("okf:07 create has no Git, model, qmd or global configuration effects", () => {
+test("wiki:07 create has no Git, model, qmd or global configuration effects", () => {
   const vault = fresh();
   const git = spawnSync("git", ["init", "--quiet", vault], { encoding: "utf8", env: { ...process.env, HOME: temp, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" } });
   assert.equal(git.status, 0, git.stderr);
@@ -239,7 +239,7 @@ test("okf:07 create has no Git, model, qmd or global configuration effects", () 
 });
 
 
-test("okf:07 invalid UTF-8 body and unsafe write ancestors refuse without authored effects", () => {
+test("wiki:07 invalid UTF-8 body and unsafe write ancestors refuse without authored effects", () => {
   const vault = fresh();
   const invalid = path.join(temp, "invalid-utf8.md");
   fs.writeFileSync(invalid, Buffer.from([0xff, 0xfe]));
@@ -251,7 +251,7 @@ test("okf:07 invalid UTF-8 body and unsafe write ancestors refuse without author
 });
 
 
-test("okf:07 human create output includes canonical identity, title, description and full digest", () => {
+test("wiki:07 human create output includes canonical identity, title, description and full digest", () => {
   const vault = fresh();
   const result = spawnSync(process.execPath, [BIN, "--vault", vault, "new", "note", "--personal", "--title", "Human topic", "--description", "Human description"], { encoding: "utf8", cwd: temp, env: { ...process.env, HOME: temp, WIKI_VAULT: "" } });
   assert.equal(result.status, 0, result.stderr);
@@ -260,7 +260,7 @@ test("okf:07 human create output includes canonical identity, title, description
 });
 
 
-test("okf:07 sequential creates retain one line per mutation under one UTC log heading", () => {
+test("wiki:07 sequential creates retain one line per mutation under one UTC log heading", () => {
   const vault = fresh();
   assert.equal(create(vault, "First").status, 0);
   assert.equal(create(vault, "Second").status, 0);

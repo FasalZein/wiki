@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { syncBuiltinESMExports } from "node:module";
 const link = fs.linkSync;
 const write = fs.writeFileSync;
-const mode = process.env.OKF_CREATE_GUARD;
+const mode = process.env.WIKI_CREATE_GUARD;
 let published = false;
 fs.linkSync = (source, target) => {
   if (String(target).endsWith("/notes/topic.md")) {

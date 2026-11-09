@@ -1,5 +1,5 @@
 // Opt-in macOS proof. Run through heavy with existing local GGUFs only:
-// OKF_QMD_MODEL_DIR=/existing/models heavy -- node packages/okf-wiki/test/qmd-model-proof.js
+// WIKI_QMD_MODEL_DIR=/existing/models heavy -- node packages/wiki/test/qmd-model-proof.js
 // The parent checks external state even if the isolated child fails or receives a signal.
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -10,9 +10,9 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 assert.equal(process.platform, "darwin", "This proof requires macOS sandbox-exec; do not run without OS isolation");
-assert.ok(process.env.OKF_QMD_MODEL_DIR, "Supply existing local GGUFs; this proof never downloads models");
+assert.ok(process.env.WIKI_QMD_MODEL_DIR, "Supply existing local GGUFs; this proof never downloads models");
 const packageRoot = fileURLToPath(new URL("../", import.meta.url));
-const modelDir = fs.realpathSync(process.env.OKF_QMD_MODEL_DIR);
+const modelDir = fs.realpathSync(process.env.WIKI_QMD_MODEL_DIR);
 const roots = [...new Set([
   modelDir,
   path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), ".cache"), "qmd"),
@@ -68,10 +68,10 @@ function stop(signal) {
 const onTerm = () => stop("SIGTERM");
 const onInt = () => stop("SIGINT");
 try {
-  child = spawn("/usr/bin/sandbox-exec", ["-f", profile, process.execPath, fileURLToPath(new URL(process.env.OKF_QMD_PROOF === "find" ? "qmd-find-smoke-child.js" : "qmd-model-proof-child.js", import.meta.url))], {
+  child = spawn("/usr/bin/sandbox-exec", ["-f", profile, process.execPath, fileURLToPath(new URL(process.env.WIKI_QMD_PROOF === "find" ? "qmd-find-smoke-child.js" : "qmd-model-proof-child.js", import.meta.url))], {
     detached: true,
     stdio: "inherit",
-    env: { ...process.env, OKF_QMD_MODEL_DIR: modelDir, OKF_QMD_SANDBOX: sandbox },
+    env: { ...process.env, WIKI_QMD_MODEL_DIR: modelDir, WIKI_QMD_SANDBOX: sandbox },
   });
   process.on("SIGTERM", onTerm);
   process.on("SIGINT", onInt);

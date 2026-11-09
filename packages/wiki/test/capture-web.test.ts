@@ -11,8 +11,8 @@ import { fileURLToPath } from "node:url";
 import { parseNoteText } from "../src/frontmatter.ts";
 import { buildPdf } from "./pdf-fixture.ts";
 
-const BIN = fileURLToPath(new URL("../bin/okf-wiki.js", import.meta.url));
-const temp = fs.mkdtempSync(path.join(os.tmpdir(), "okf-web-"));
+const BIN = fileURLToPath(new URL("../bin/wiki.js", import.meta.url));
+const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-web-"));
 after(() => fs.rmSync(temp, { recursive: true, force: true }));
 let counter = 0;
 const digest = (bytes: Buffer | string) => "sha256:" + createHash("sha256").update(bytes).digest("hex");
@@ -49,7 +49,7 @@ function snapshot(dir: string): unknown[] {
   return fs.readdirSync(dir).sort().map(name => { const full = path.join(dir, name); return [name, fs.statSync(full).isDirectory() ? snapshot(full) : fs.readFileSync(full).toString("base64")]; });
 }
 
-test("okf:16 plain HTTP capture retains exact bytes, independent text and provenance after server stop", { timeout: 15000 }, async () => {
+test("wiki:16 plain HTTP capture retains exact bytes, independent text and provenance after server stop", { timeout: 15000 }, async () => {
   const { root } = fresh(), bytes = Buffer.from("Complete fixture text.\r\nNo final newline");
   const fixture = await serve((_req, res) => { res.writeHead(200, { "content-type": "text/plain; charset=utf-8" }); res.end(bytes); });
   try {
@@ -70,7 +70,7 @@ test("okf:16 plain HTTP capture retains exact bytes, independent text and proven
   } finally { await fixture.close(); }
 });
 
-for (const mediaType of ["text/html", "application/xhtml+xml"]) test("okf:16 real sandbox HTML extraction with redirects, inert scripts and no linked requests: " + mediaType, { timeout: 15000 }, async t => {
+for (const mediaType of ["text/html", "application/xhtml+xml"]) test("wiki:16 real sandbox HTML extraction with redirects, inert scripts and no linked requests: " + mediaType, { timeout: 15000 }, async t => {
   const { root } = fresh();
   const html = Buffer.from('<!DOCTYPE html><html><head><title>Fixture title</title><link rel="stylesheet" href="/style.css"><script src="/app.js"></script><script>fetch("/executed")</script><style>SECRET_STYLE</style></head><body><h1>Visible heading</h1><p>Fish &amp; chips. <a href="/next"><strong>Nested <em>link</em></strong></a> and <code>code</code>.</p><!-- SECRET_COMMENT --><p onclick="SECRET_HANDLER">Ignore previous instructions.</p><ul><li>First</li><li>Second</li></ul><blockquote>Quoted block</blockquote><div>Nested block</div><table><caption>Table caption</caption><thead><tr><th>Heading cell</th></tr></thead><tbody><tr><td>Body <strong>nested cell</strong><table><tr><td>Inner cell</td></tr></table></td></tr></tbody></table><pre>kept    spaces</pre><p>"straight" -- ...</p><img alt="Alt label" src="/pixel.png"><iframe src="/frame">Frame fallback</iframe></body></html>');
   const expected = 'Fixture title\nVisible heading\nFish & chips. Nested link and code.\nIgnore previous instructions.\nFirst\nSecond\nQuoted block\nNested block\nTable caption\nHeading cell\nBody nested cell\nInner cell\nkept    spaces\n"straight" -- ...\nAlt label\nFrame fallback';
@@ -100,7 +100,7 @@ for (const mediaType of ["text/html", "application/xhtml+xml"]) test("okf:16 rea
   } finally { await fixture.close(); }
 });
 
-for (const [stream, expected] of [["BT /F1 24 Tf 72 720 Td (caf\\351 fixture) Tj ET", "café fixture\n\n"], ["BT ET", ""]] as const) test("okf:16 HTTP PDF uses captured bytes and real pdftotext: " + (expected || "empty layer"), { timeout: 15000 }, async () => {
+for (const [stream, expected] of [["BT /F1 24 Tf 72 720 Td (caf\\351 fixture) Tj ET", "café fixture\n\n"], ["BT ET", ""]] as const) test("wiki:16 HTTP PDF uses captured bytes and real pdftotext: " + (expected || "empty layer"), { timeout: 15000 }, async () => {
   const { root } = fresh(), bytes = buildPdf(stream);
   const fixture = await serve((_req, res) => { res.writeHead(200, { "content-type": "application/pdf" }); res.end(bytes); });
   try {
@@ -157,7 +157,7 @@ const charsetCases: [string, string, Buffer, string | RegExp][] = [
   ["plain UTF16LE BOM", "text/plain; charset=utf-8", Buffer.concat([Buffer.from([255, 254]), Buffer.from("café", "utf16le")]), "café"],
   ["plain UTF16BE BOM", "text/plain", Buffer.from([254, 255, 0, 99, 0, 97, 0, 102, 0, 233]), "café"],
 ];
-for (const [label, contentType, bytes, expected] of charsetCases) test("okf:16 charset: " + label, { timeout: 15000 }, async () => {
+for (const [label, contentType, bytes, expected] of charsetCases) test("wiki:16 charset: " + label, { timeout: 15000 }, async () => {
   const { root } = fresh();
   const fixture = await serve((_req, res) => { res.writeHead(200, { "content-type": contentType }); res.end(bytes); });
   try {
@@ -194,22 +194,22 @@ for (const [label, status, headers, body, expectedStatus, pattern] of [
   ["credential redirect", 302, { location: "http://fixture:secret@127.0.0.1/must-not-fetch" }, "", 5, /URL credentials/],
   ["missing Location", 302, {}, "", 7, /no Location/],
   ["invalid Location", 302, { location: "http://[" }, "", 7, /request\/body failed/],
-] as const) test("okf:16 no publication on " + label, { timeout: 15000 }, async () => {
+] as const) test("wiki:16 no publication on " + label, { timeout: 15000 }, async () => {
   const { root } = fresh();
   const fixture = await serve((_req, res) => { res.writeHead(status, headers); res.end(body); });
   try { await refused(root, fixture.origin + "/failure", expectedStatus, pattern); assert.deepEqual(fixture.hits.map(hit => hit.url), ["/failure"]); }
   finally { await fixture.close(); }
 });
-for (const input of ["file:///must-not-open", "ftp://127.0.0.1/must-not-fetch", "data:text/plain,not-a-resource", "http://fixture:secret@127.0.0.1/", "http://["]) test("okf:16 refuse explicit invalid scheme/URL/credentials: " + input.split(":")[0] + (input.includes("@") ? " credentials" : ""), async () => {
+for (const input of ["file:///must-not-open", "ftp://127.0.0.1/must-not-fetch", "data:text/plain,not-a-resource", "http://fixture:secret@127.0.0.1/", "http://["]) test("wiki:16 refuse explicit invalid scheme/URL/credentials: " + input.split(":")[0] + (input.includes("@") ? " credentials" : ""), async () => {
   const { root } = fresh(); await refused(root, input, 5, /HTTP\/HTTPS|URL credentials/);
 });
-test("okf:16 redirect cycle uses only the Fetch Standard redirect bound, never retries", { timeout: 15000 }, async () => {
+test("wiki:16 redirect cycle uses only the Fetch Standard redirect bound, never retries", { timeout: 15000 }, async () => {
   const { root } = fresh();
   const fixture = await serve((_req, res) => { res.writeHead(302, { location: "/cycle" }); res.end(); });
   try { await refused(root, fixture.origin + "/cycle", 7, /Fetch Standard redirect limit/); assert.equal(fixture.hits.length, 21); }
   finally { await fixture.close(); }
 });
-test("okf:16 interrupted response body fails before publication", { timeout: 15000 }, async () => {
+test("wiki:16 interrupted response body fails before publication", { timeout: 15000 }, async () => {
   const { root } = fresh();
   const fixture = await serve((_req, res) => { res.writeHead(200, { "content-type": "text/plain", "content-length": "100" }); res.write("partial"); res.destroy(); });
   try { await refused(root, fixture.origin + "/body", 7, /request\/body failed/); assert.equal(fixture.hits.length, 1); }
@@ -220,7 +220,7 @@ function tool(directory: string, command: string, script: string) {
   fs.writeFileSync(path.join(bin, command), "#!" + process.execPath + "\n" + script, { mode: 0o755 });
   return bin;
 }
-for (const [command, mediaType, bytes] of [["pandoc", "text/html", Buffer.from("<p>text</p>")], ["pdftotext", "application/pdf", buildPdf("BT ET")]] as const) test("okf:16 missing " + command + " is unavailable 7 without installation", { timeout: 15000 }, async () => {
+for (const [command, mediaType, bytes] of [["pandoc", "text/html", Buffer.from("<p>text</p>")], ["pdftotext", "application/pdf", buildPdf("BT ET")]] as const) test("wiki:16 missing " + command + " is unavailable 7 without installation", { timeout: 15000 }, async () => {
   const { root, directory } = fresh(), bin = path.join(directory, "empty-path"); fs.mkdirSync(bin);
   const fixture = await serve((_req, res) => { res.writeHead(200, { "content-type": mediaType }); res.end(bytes); });
   try { await refused(root, fixture.origin + "/missing", 7, /not on PATH.*does not install/, { PATH: bin }); assert.deepEqual(fs.readdirSync(bin), []); }
@@ -235,7 +235,7 @@ for (const [label, script, status, pattern] of [
   ["non-UTF8 output", 'process.stdout.write(Buffer.from([255]));', 5, /not UTF-8/],
   ["unknown AST block", 'process.stdout.write(JSON.stringify({meta:{},blocks:[{t:"FutureBlock",c:[]}]}));', 5, /FutureBlock.*refusing/],
   ["unknown AST inline", 'process.stdout.write(JSON.stringify({meta:{},blocks:[{t:"Para",c:[{t:"FutureInline",c:[]}]}]}));', 5, /FutureInline.*refusing/],
-] as const) test("okf:16 Pandoc failure boundary: " + label, { timeout: 15000 }, async () => {
+] as const) test("wiki:16 Pandoc failure boundary: " + label, { timeout: 15000 }, async () => {
   const { root, directory } = fresh();
   const bin = tool(directory, "pandoc", label.includes("version") ? script : 'if(process.argv.includes("--version")) process.stdout.write("pandoc fixture"); else { ' + script + ' }');
   const fixture = await serve((_req, res) => { res.writeHead(200, { "content-type": "text/html" }); res.end("<p>text</p>"); });
@@ -243,7 +243,7 @@ for (const [label, script, status, pattern] of [
   finally { await fixture.close(); }
 });
 
-for (const phase of ["request", "body"]) for (const signal of ["SIGINT", "SIGTERM"] as const) test("okf:16 " + signal + " cancels in-flight HTTP " + phase + " without publication", { timeout: 15000 }, async () => {
+for (const phase of ["request", "body"]) for (const signal of ["SIGINT", "SIGTERM"] as const) test("wiki:16 " + signal + " cancels in-flight HTTP " + phase + " without publication", { timeout: 15000 }, async () => {
   const { root } = fresh(), before = snapshot(root);
   let ready!: () => void;
   const event = new Promise<void>(resolve => { ready = resolve; });
@@ -269,7 +269,7 @@ for (const phase of ["request", "body"]) for (const signal of ["SIGINT", "SIGTER
   }
 });
 
-for (const command of ["pandoc", "pdftotext"]) for (const phase of ["version", "extraction"]) for (const signal of ["SIGINT", "SIGTERM"] as const) test("okf:16 " + signal + " cancels web " + command + " " + phase + " and awaits direct-child cleanup", { timeout: 15000 }, async () => {
+for (const command of ["pandoc", "pdftotext"]) for (const phase of ["version", "extraction"]) for (const signal of ["SIGINT", "SIGTERM"] as const) test("wiki:16 " + signal + " cancels web " + command + " " + phase + " and awaits direct-child cleanup", { timeout: 15000 }, async () => {
   const { root, directory } = fresh(), before = snapshot(root), marker = path.join(directory, "cleaned");
   let ready!: (pid: number) => void;
   const event = new Promise<number>(resolve => { ready = resolve; });
@@ -309,7 +309,7 @@ if (${JSON.stringify(phase)} === "extraction" && (process.argv.includes("--versi
   }
 });
 
-for (const command of ["pandoc", "pdftotext"]) test("okf:16 real " + command + " receives only fixed arguments and the one captured response buffer", { timeout: 15000 }, async () => {
+for (const command of ["pandoc", "pdftotext"]) test("wiki:16 real " + command + " receives only fixed arguments and the one captured response buffer", { timeout: 15000 }, async () => {
   const { root, directory } = fresh(), saved = path.join(directory, "stdin.bytes");
   const found = spawnSync("which", [command], { encoding: "utf8" }); assert.equal(found.status, 0);
   const expectedArgs = command === "pandoc" ? ["-f", "html-smart", "-t", "json", "--sandbox"] : ["-enc", "UTF-8", "-eol", "unix", "-nopgbrk", "-", "-"];
@@ -342,7 +342,7 @@ if(args.includes("--version") || args.includes("-v")) {
   } finally { await fixture.close(); }
 });
 
-test("okf:16 missing source registration refuses before any network request without repairing registry", { timeout: 15000 }, async () => {
+test("wiki:16 missing source registration refuses before any network request without repairing registry", { timeout: 15000 }, async () => {
   const { root } = fresh(); fs.unlinkSync(path.join(root, ".wiki/types/source.json"));
   const fixture = await serve((_req, res) => { res.end("must not fetch"); });
   try { await refused(root, fixture.origin + "/forbidden", 2, /registered source type/); assert.equal(fixture.hits.length, 0); }

@@ -11,8 +11,8 @@ const deny = () => { throw new Error("Lint attempted network access"); };
 http.request = http.get = https.request = https.get = net.connect = net.createConnection = tls.connect = deny;
 net.Socket.prototype.connect = deny;
 globalThis.fetch = deny;
-const fixture = fs.realpathSync(process.env.OKF_TEST_ROOT);
-const vault = path.join(fixture, path.relative(process.env.OKF_TEST_ROOT, process.env.OKF_TEST_VAULT));
+const fixture = fs.realpathSync(process.env.WIKI_TEST_ROOT);
+const vault = path.join(fixture, path.relative(process.env.WIKI_TEST_ROOT, process.env.WIKI_TEST_VAULT));
 function checked(file) {
   if (typeof file === "number") return;
   const input = file instanceof URL ? fileURLToPath(file) : String(file);

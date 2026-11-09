@@ -5,8 +5,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { registerHooks, syncBuiltinESMExports } from "node:module";
 
-const vault = fs.realpathSync(process.env.OKF_TEST_VAULT);
-const note = path.join(vault, process.env.OKF_TEST_NOTE);
+const vault = fs.realpathSync(process.env.WIKI_TEST_VAULT);
+const note = path.join(vault, process.env.WIKI_TEST_NOTE);
 const config = path.join(vault, ".wiki/config.json");
 const packageRoot = fileURLToPath(new URL("../", import.meta.url));
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));

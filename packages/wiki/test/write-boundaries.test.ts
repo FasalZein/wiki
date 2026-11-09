@@ -7,14 +7,14 @@ import * as path from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-const BIN = fileURLToPath(new URL("../bin/okf-wiki.js", import.meta.url));
+const BIN = fileURLToPath(new URL("../bin/wiki.js", import.meta.url));
 const GUARD = fileURLToPath(new URL("./cleanup-permission-guard.js", import.meta.url));
-const temp = fs.mkdtempSync(path.join(os.tmpdir(), "okf-boundaries-"));
+const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-boundaries-"));
 after(() => fs.rmSync(temp, { recursive: true, force: true }));
 let counter = 0;
 function cli(vault: string, args: string[], mode?: string) {
   const result = spawnSync(process.execPath, [...(mode ? ["--import", GUARD] : []), BIN, "--json", "--vault", vault, ...args], {
-    encoding: "utf8", cwd: temp, env: { ...process.env, HOME: temp, WIKI_VAULT: "", OKF_CLEANUP_MODE: mode, OKF_GUARD_VAULT: vault },
+    encoding: "utf8", cwd: temp, env: { ...process.env, HOME: temp, WIKI_VAULT: "", WIKI_CLEANUP_MODE: mode, WIKI_GUARD_VAULT: vault },
   });
   assert.equal(result.error, undefined);
   assert.equal(result.stderr, "");
@@ -41,7 +41,7 @@ function restore(vault: string) {
 const NEW = ["new", "note", "--personal", "--title", "Topic", "--description", "A topic"];
 const ADD = ["type", "add", "glossary", "--folder", "glossary"];
 
-test("okf:07 lock acquisition permission errors preserve the original failure and perform no publication", () => {
+test("wiki:07 lock acquisition permission errors preserve the original failure and perform no publication", () => {
   const vault = fresh();
   const beforeIndex = fs.readFileSync(path.join(vault, "index.md"));
   fs.chmodSync(path.join(vault, ".wiki/locks"), 0o500);
@@ -61,7 +61,7 @@ test("okf:07 lock acquisition permission errors preserve the original failure an
   } finally { restore(vault); }
 });
 
-for (const [command, args, relative] of [["new", NEW, "personal/notes/topic.md"], ["type add", ADD, ".wiki/types/glossary.json"]] as const) test("okf:07 F1 published " + command + " survives failed temporary-name cleanup with truthful metadata", () => {
+for (const [command, args, relative] of [["new", NEW, "personal/notes/topic.md"], ["type add", ADD, ".wiki/types/glossary.json"]] as const) test("wiki:07 F1 published " + command + " survives failed temporary-name cleanup with truthful metadata", () => {
   const vault = fresh();
   try {
     const beforeIndex = fs.readFileSync(path.join(vault, "index.md"));
@@ -88,7 +88,7 @@ for (const [command, args, relative, mode, action] of [
   ["new", NEW, "personal/notes/topic.md", "release-log", "created"],
   ["type add", ADD, ".wiki/types/glossary.json", "release-log", "type-added"],
   ["index", ["index"], "index.md", "release-index", undefined],
-] as const) test("okf:07 F2 " + command + " emits one final error with completed metadata when release fails", () => {
+] as const) test("wiki:07 F2 " + command + " emits one final error with completed metadata when release fails", () => {
   const vault = fresh();
   try {
     const result = cli(vault, [...args], mode);
@@ -110,7 +110,7 @@ for (const [command, args, relative, mode, action] of [
   } finally { restore(vault); }
 });
 
-for (const [command, args, relative] of [["new", NEW, "personal/notes/topic.md"], ["type add", ADD, ".wiki/types/glossary.json"]] as const) test("okf:07 F2 keeps primary publication-cleanup error and metadata when release also fails: " + command, () => {
+for (const [command, args, relative] of [["new", NEW, "personal/notes/topic.md"], ["type add", ADD, ".wiki/types/glossary.json"]] as const) test("wiki:07 F2 keeps primary publication-cleanup error and metadata when release also fails: " + command, () => {
   const vault = fresh();
   try {
     const result = cli(vault, [...args], "both");
@@ -127,7 +127,7 @@ for (const [command, args, relative] of [["new", NEW, "personal/notes/topic.md"]
   } finally { restore(vault); }
 });
 
-for (const command of ["new", "index"]) test("okf:07 F2 retains primary validation failure when release also fails: " + command, () => {
+for (const command of ["new", "index"]) test("wiki:07 F2 retains primary validation failure when release also fails: " + command, () => {
   const vault = fresh();
   try {
     let args = [...NEW, "--status", "invalid"];
@@ -156,7 +156,7 @@ function snapshot(directory: string): unknown[] {
     return [name, stat.mode, stat.isDirectory() ? snapshot(full) : fs.readFileSync(full).toString("base64")];
   });
 }
-for (const location of ["body", "title"]) test("okf:07 F3 damaged existing UTF-8 in " + location + " blocks lint, index and prospective create without publication", () => {
+for (const location of ["body", "title"]) test("wiki:07 F3 damaged existing UTF-8 in " + location + " blocks lint, index and prospective create without publication", () => {
   const vault = fresh();
   const relative = "personal/notes/existing.md";
   assert.equal(cli(vault, ["new", "note", "--personal", "--title", "Existing", "--description", "An existing topic"]).status, 0);
@@ -181,7 +181,7 @@ for (const location of ["body", "title"]) test("okf:07 F3 damaged existing UTF-8
   assert.deepEqual(snapshot(vault), before);
 });
 
-test("okf:07 F3 strict inventory decoding preserves supported UTF-8 BOM bytes", () => {
+test("wiki:07 F3 strict inventory decoding preserves supported UTF-8 BOM bytes", () => {
   const vault = fresh();
   const relative = "personal/notes/existing.md";
   assert.equal(cli(vault, ["new", "note", "--personal", "--title", "Existing", "--description", "An existing topic"]).status, 0);
@@ -198,7 +198,7 @@ test("okf:07 F3 strict inventory decoding preserves supported UTF-8 BOM bytes", 
 });
 
 
-for (const [command, args, relative] of [["new", NEW, "personal/notes/topic.md"], ["type add", ADD, ".wiki/types/glossary.json"]] as const) test("okf:07 F2 preserves primary post-publication failure and digest when release also fails: " + command, () => {
+for (const [command, args, relative] of [["new", NEW, "personal/notes/topic.md"], ["type add", ADD, ".wiki/types/glossary.json"]] as const) test("wiki:07 F2 preserves primary post-publication failure and digest when release also fails: " + command, () => {
   const vault = fresh();
   try {
     const result = cli(vault, [...args], "post-publication");
@@ -213,7 +213,7 @@ for (const [command, args, relative] of [["new", NEW, "personal/notes/topic.md"]
   } finally { restore(vault); }
 });
 
-test("okf:07 F2 index preserves primary I/O error and completed index digests when release also fails", () => {
+test("wiki:07 F2 index preserves primary I/O error and completed index digests when release also fails", () => {
   const vault = fresh();
   assert.equal(cli(vault, NEW).status, 0);
   try {
@@ -231,7 +231,7 @@ test("okf:07 F2 index preserves primary I/O error and completed index digests wh
 });
 
 
-for (const command of ["new", "index"]) test("okf:07 F2 human output keeps the action outcome and lock-release failure without success: " + command, () => {
+for (const command of ["new", "index"]) test("wiki:07 F2 human output keeps the action outcome and lock-release failure without success: " + command, () => {
   const vault = fresh();
   try {
     let args = NEW, mode = "release-log";
@@ -241,7 +241,7 @@ for (const command of ["new", "index"]) test("okf:07 F2 human output keeps the a
       args = ["index"]; mode = "release-record";
     }
     const result = spawnSync(process.execPath, ["--import", GUARD, BIN, "--vault", vault, ...args], {
-      encoding: "utf8", cwd: temp, env: { ...process.env, HOME: temp, WIKI_VAULT: "", OKF_GUARD_VAULT: vault, OKF_CLEANUP_MODE: mode },
+      encoding: "utf8", cwd: temp, env: { ...process.env, HOME: temp, WIKI_VAULT: "", WIKI_GUARD_VAULT: vault, WIKI_CLEANUP_MODE: mode },
     });
     assert.notEqual(result.status, 0);
     assert.equal(result.stdout, "");

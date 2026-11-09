@@ -8,7 +8,7 @@ Run from the repository root with each actual Node runtime being verified:
 
 Use this command (replace the model directory and Node executable as needed):
 
-    OKF_QMD_MODEL_DIR=/existing/models heavy -- node packages/okf-wiki/test/qmd-model-proof.js
+    WIKI_QMD_MODEL_DIR=/existing/models heavy -- node packages/wiki/test/qmd-model-proof.js
 
 The directory must contain these existing files:
 
@@ -41,7 +41,7 @@ global tokenizer. No remote model URI or alternate engine is used.
 
 ## Product find smoke (#25)
 
-    OKF_QMD_PROOF=find OKF_QMD_MODEL_DIR=/existing/models heavy -- node packages/okf-wiki/test/qmd-model-proof.js
+    WIKI_QMD_PROOF=find WIKI_QMD_MODEL_DIR=/existing/models heavy -- node packages/wiki/test/qmd-model-proof.js
 
 The same parent sandbox runs qmd-find-smoke-child.js. It drives the real CLI in a
 disposable vault whose .wiki/config.json names the three local files: search sync

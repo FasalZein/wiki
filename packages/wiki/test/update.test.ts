@@ -7,8 +7,8 @@ import * as path from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-const BIN = fileURLToPath(new URL("../bin/okf-wiki.js", import.meta.url));
-const temp = fs.mkdtempSync(path.join(os.tmpdir(), "okf-update-"));
+const BIN = fileURLToPath(new URL("../bin/wiki.js", import.meta.url));
+const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-update-"));
 after(() => fs.rmSync(temp, { recursive: true, force: true }));
 let counter = 0;
 const relative = "personal/notes/topic.md";
@@ -42,7 +42,7 @@ function snapshot(dir: string): unknown[] {
   });
 }
 
-test("okf:08 applies exact complete candidate bytes with resulting digest, navigation and one updated log", () => {
+test("wiki:08 applies exact complete candidate bytes with resulting digest, navigation and one updated log", () => {
   const { vault, note, bytes } = fresh();
   const proposed = "\uFEFF" + bytes.replace('"Topic"', '"Revised topic"').replace("Original description", "Revised description").replace(/\n/g, "\r\n") + "Retained trailing spaces  ";
   const result = update(vault, note.digest, candidate(proposed));
@@ -65,7 +65,7 @@ function refused(vault: string, status: number, expect: string, file: string, ..
   return result.data;
 }
 
-test("okf:08 stale full-byte digest returns path and expected/current without effects", () => {
+test("wiki:08 stale full-byte digest returns path and expected/current without effects", () => {
   const { vault, note, bytes } = fresh();
   const current = bytes + "External edit\n"; fs.writeFileSync(path.join(vault, relative), current);
   const result = refused(vault, 3, note.digest, candidate(bytes + "Candidate\n"));
@@ -73,7 +73,7 @@ test("okf:08 stale full-byte digest returns path and expected/current without ef
   assert.match(result.error.message, /re-read.*do not retry/);
 });
 
-test("okf:08 dry-run gives focused diff and candidate digest without even attempting a vault write", () => {
+test("wiki:08 dry-run gives focused diff and candidate digest without even attempting a vault write", () => {
   const { vault, note, bytes } = fresh();
   const proposed = bytes + "Added fact\n", file = candidate(proposed), before = snapshot(vault);
   const result = guarded(vault, note.digest, file, "read-only", "--dry-run");
@@ -86,7 +86,7 @@ test("okf:08 dry-run gives focused diff and candidate digest without even attemp
   refused(vault, 3, note.digest, file);
 });
 
-test("okf:08 same-byte apply is an unchanged no-op with no new log or navigation writes", () => {
+test("wiki:08 same-byte apply is an unchanged no-op with no new log or navigation writes", () => {
   const { vault, note, bytes } = fresh(), before = snapshot(vault);
   const result = guarded(vault, note.digest, candidate(bytes), "no-op");
   assert.equal(result.status, 0, JSON.stringify(result)); assert.equal(result.data.outcome, "unchanged");
@@ -94,7 +94,7 @@ test("okf:08 same-byte apply is an unchanged no-op with no new log or navigation
   assert.equal(result.data.log, "unchanged"); assert.deepEqual(snapshot(vault), before);
 });
 
-for (const kind of ["missing", "directory", "symlink", "ancestor", "fifo"] as const) test("okf:08 missing or unsafe target is refused: " + kind, () => {
+for (const kind of ["missing", "directory", "symlink", "ancestor", "fifo"] as const) test("wiki:08 missing or unsafe target is refused: " + kind, () => {
   const { vault, note, bytes } = fresh(), full = path.join(vault, relative), file = candidate(bytes + "New\n");
   fs.unlinkSync(full);
   if (kind === "directory") fs.mkdirSync(full);
@@ -109,17 +109,17 @@ for (const [label, change] of [
   ["type-path", (s: string) => s.replace('"note"', '"procedure"')],
   ["body-link", (s: string) => s + "[missing](missing.md)\n"],
   ["schema", (s: string) => s.replace("description:", "unknown:")],
-] as const) test("okf:08 invalid complete candidate is refused: " + label, () => {
+] as const) test("wiki:08 invalid complete candidate is refused: " + label, () => {
   const { vault, note, bytes } = fresh(); refused(vault, 2, note.digest, candidate(change(bytes)));
 });
 
-test("okf:08 duplicate normalized scoped title is refused across type folders", () => {
+test("wiki:08 duplicate normalized scoped title is refused across type folders", () => {
   const { vault, note, bytes } = fresh();
   succeeds(vault, "new", "architecture", "--personal", "--title", "Straße", "--description", "Existing title");
   refused(vault, 3, note.digest, candidate(bytes.replace('"Topic"', '" STRASSE "')));
 });
 
-test("okf:08 replacement drops superseded diagnostics and validates incoming references and unrelated notes", () => {
+test("wiki:08 replacement drops superseded diagnostics and validates incoming references and unrelated notes", () => {
   const { vault, bytes } = fresh();
   fs.writeFileSync(path.join(vault, relative), "---\nbad: [\n---\n");
   const repaired = update(vault, digest(read(vault)), candidate(bytes)); assert.equal(repaired.status, 0, JSON.stringify(repaired));
@@ -132,7 +132,7 @@ test("okf:08 replacement drops superseded diagnostics and validates incoming ref
   assert.ok(result.diagnostics.some((d: { path: string }) => d.path === other));
 });
 
-for (const kind of ["directory", "fifo", "symlink", "utf8"] as const) test("okf:08 candidate consumption promptly refuses unsupported input: " + kind, () => {
+for (const kind of ["directory", "fifo", "symlink", "utf8"] as const) test("wiki:08 candidate consumption promptly refuses unsupported input: " + kind, () => {
   const { vault, note, bytes } = fresh();
   const file = path.join(temp, "unsupported-" + ++counter);
   if (kind === "directory") fs.mkdirSync(file);
@@ -144,14 +144,14 @@ for (const kind of ["directory", "fifo", "symlink", "utf8"] as const) test("okf:
 
 function guarded(vault: string, expect: string, file: string, mode: string, ...args: string[]) {
   const result = spawnSync(process.execPath, ["--import", fileURLToPath(new URL("./update-io-guard.js", import.meta.url)), BIN, "--json", "--vault", vault, "update", relative, "--expect", expect, "--file", file, ...args], {
-    encoding: "utf8", cwd: temp, env: { ...process.env, HOME: temp, WIKI_VAULT: "", OKF_UPDATE_GUARD: mode, OKF_UPDATE_MODE_EVENTS: file + ".events.json" }, timeout: 15000,
+    encoding: "utf8", cwd: temp, env: { ...process.env, HOME: temp, WIKI_VAULT: "", WIKI_UPDATE_GUARD: mode, WIKI_UPDATE_MODE_EVENTS: file + ".events.json" }, timeout: 15000,
   });
   assert.equal(result.error, undefined); assert.equal(result.stderr, "");
   assert.equal(result.stdout.trim().split("\n").length, 1);
   return { status: result.status, data: JSON.parse(result.stdout) };
 }
 
-for (const mode of ["stale-final", "missing-final", "unsafe-final"]) test("okf:08 final target recheck after temp preparation rejects: " + mode, () => {
+for (const mode of ["stale-final", "missing-final", "unsafe-final"]) test("wiki:08 final target recheck after temp preparation rejects: " + mode, () => {
   const { vault, note, bytes } = fresh(), log = read(vault, "log.md"), index = read(vault, "index.md");
   const result = guarded(vault, note.digest, candidate(bytes + "Candidate\n"), mode);
   assert.equal(result.status, mode === "stale-final" ? 3 : mode === "missing-final" ? 4 : 2, JSON.stringify(result));
@@ -165,7 +165,7 @@ for (const mode of ["stale-final", "missing-final", "unsafe-final"]) test("okf:0
   assert.deepEqual(fs.readdirSync(path.join(vault, ".wiki/locks")), []);
 });
 
-for (const mode of ["index-fail", "log-fail", "release-fail", "index-release-fail"]) test("okf:08 publication and release failures retain truthful final metadata: " + mode, () => {
+for (const mode of ["index-fail", "log-fail", "release-fail", "index-release-fail"]) test("wiki:08 publication and release failures retain truthful final metadata: " + mode, () => {
   const { vault, note, bytes } = fresh(), proposed = bytes + "Published\n", log = read(vault, "log.md");
   const result = guarded(vault, note.digest, candidate(proposed), mode);
   assert.notEqual(result.status, 0); assert.equal(result.data.ok, false); assert.equal(result.data.written, true);
@@ -175,7 +175,7 @@ for (const mode of ["index-fail", "log-fail", "release-fail", "index-release-fai
   if (mode === "release-fail") assert.equal(result.data.outcome, "completed");
 });
 
-test("okf:08 temporary cleanup failure preserves the primary stale conflict", () => {
+test("wiki:08 temporary cleanup failure preserves the primary stale conflict", () => {
   const { vault, note, bytes } = fresh();
   const result = guarded(vault, note.digest, candidate(bytes + "Candidate\n"), "stale-cleanup-fail");
   assert.equal(result.status, 3, JSON.stringify(result)); assert.equal(result.data.error.code, "conflict");
@@ -184,7 +184,7 @@ test("okf:08 temporary cleanup failure preserves the primary stale conflict", ()
   assert.equal(result.data.temporaryCleanup.retained, true);
 });
 
-test("okf:08 strict command-local flags and lowercase full digest syntax", () => {
+test("wiki:08 strict command-local flags and lowercase full digest syntax", () => {
   const { vault, note, bytes } = fresh(), file = candidate(bytes);
   for (const expect of ["sha256:abc", note.digest.toUpperCase(), note.digest + "0", ""]) refused(vault, 2, expect, file);
   for (const args of [["--project", "wiki"], ["--personal"], ["--title", "Other"], ["--section", "Body"], ["--check"], ["--folder", "notes"]]) refused(vault, 2, note.digest, file, ...args);
@@ -193,7 +193,7 @@ test("okf:08 strict command-local flags and lowercase full digest syntax", () =>
   }
 });
 
-test("okf:08 human update and conflict output contain identity and digests", () => {
+test("wiki:08 human update and conflict output contain identity and digests", () => {
   const { vault, note, bytes } = fresh(), file = candidate(bytes + "Fact\n");
   const args = [BIN, "--vault", vault, "update", relative, "--expect", note.digest, "--file", file];
   const result = spawnSync(process.execPath, args, { encoding: "utf8", timeout: 15000 });
@@ -205,21 +205,21 @@ test("okf:08 human update and conflict output contain identity and digests", () 
 });
 
 
-test("okf:08 candidate swapped to FIFO at open is refused without blocking", () => {
+test("wiki:08 candidate swapped to FIFO at open is refused without blocking", () => {
   const { vault, note, bytes } = fresh(), before = snapshot(vault);
   const result = guarded(vault, note.digest, candidate(bytes + "Candidate\n"), "candidate-fifo");
   assert.equal(result.status, 2, JSON.stringify(result)); assert.equal(result.data.written, undefined);
   assert.deepEqual(snapshot(vault), before);
 });
 
-test("okf:08 unsafe generated destination refuses update before content publication", () => {
+test("wiki:08 unsafe generated destination refuses update before content publication", () => {
   const { vault, note, bytes } = fresh(), index = path.join(vault, "personal/notes/index.md");
   fs.unlinkSync(index); fs.mkdirSync(index);
   const result = refused(vault, 2, note.digest, candidate(bytes + "Candidate\n"));
   assert.ok(result.diagnostics.some((d: { path: string }) => d.path === "personal/notes/index.md"));
 });
 
-test("okf:08 conflict plus temporary and lock cleanup failures preserve all diagnostics", () => {
+test("wiki:08 conflict plus temporary and lock cleanup failures preserve all diagnostics", () => {
   const { vault, note, bytes } = fresh();
   const result = guarded(vault, note.digest, candidate(bytes + "Candidate\n"), "stale-cleanup-release-fail");
   assert.equal(result.status, 3, JSON.stringify(result)); assert.equal(result.data.error.code, "conflict");
@@ -228,7 +228,7 @@ test("okf:08 conflict plus temporary and lock cleanup failures preserve all diag
   assert.equal(result.data.written, undefined);
 });
 
-test("okf:08 no-op release failure never reports written or adds a historical entry", () => {
+test("wiki:08 no-op release failure never reports written or adds a historical entry", () => {
   const { vault, note, bytes } = fresh(), log = read(vault, "log.md");
   const result = guarded(vault, note.digest, candidate(bytes), "release-fail");
   assert.notEqual(result.status, 0); assert.equal(result.data.written, undefined);
@@ -236,7 +236,7 @@ test("okf:08 no-op release failure never reports written or adds a historical en
 });
 
 
-for (const [targetMode, candidateMode] of [[0o600, 0o600], [0o640, 0o600], [0o400, 0o644]] as const) test("okf:08 permissions private first-write and target access preserved: " + targetMode.toString(8), () => {
+for (const [targetMode, candidateMode] of [[0o600, 0o600], [0o640, 0o600], [0o400, 0o644]] as const) test("wiki:08 permissions private first-write and target access preserved: " + targetMode.toString(8), () => {
   const { vault, note, bytes } = fresh(), proposed = bytes + "Synthetic private candidate\n", file = candidate(proposed);
   fs.chmodSync(path.join(vault, relative), targetMode); fs.chmodSync(file, candidateMode);
   fs.chmodSync(path.join(vault, ".wiki/tmp"), 0o755);
@@ -251,7 +251,7 @@ for (const [targetMode, candidateMode] of [[0o600, 0o600], [0o640, 0o600], [0o40
   assert.deepEqual(fs.readdirSync(path.join(vault, ".wiki/tmp")), []);
 });
 
-test("okf:08 permissions stale conflict retains private candidate after cleanup failure", () => {
+test("wiki:08 permissions stale conflict retains private candidate after cleanup failure", () => {
   const { vault, note, bytes } = fresh(), proposed = bytes + "Synthetic private candidate\n", file = candidate(proposed);
   fs.chmodSync(path.join(vault, relative), 0o600); fs.chmodSync(file, 0o600);
   fs.chmodSync(path.join(vault, ".wiki/tmp"), 0o755);

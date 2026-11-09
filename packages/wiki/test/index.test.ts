@@ -6,8 +6,8 @@ import * as path from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-const BIN = fileURLToPath(new URL("../bin/okf-wiki.js", import.meta.url));
-const temp = fs.mkdtempSync(path.join(os.tmpdir(), "okf-index-"));
+const BIN = fileURLToPath(new URL("../bin/wiki.js", import.meta.url));
+const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-index-"));
 after(() => fs.rmSync(temp, { recursive: true, force: true }));
 let counter = 0;
 function cli(vault: string, ...args: string[]) {
@@ -44,7 +44,7 @@ function snapshot(dir: string, ignoreLockActivity = false): unknown[] {
   });
 }
 
-test("okf:05 exact scoped indexes have deterministic rows, escaped labels, recursive counts and no operational entries", () => {
+test("wiki:05 exact scoped indexes have deterministic rows, escaped labels, recursive counts and no operational entries", () => {
   const vault = fresh();
   note(vault, "personal/notes/z-last.md", "A title", "Last path");
   note(vault, "personal/notes/a-first.md", "Z [title] *bold* <tag> & \\", "First path");
@@ -72,7 +72,7 @@ test("okf:05 exact scoped indexes have deterministic rows, escaped labels, recur
 });
 
 
-for (const mutation of ["description", "same-mtime", "rename", "delete", "missing-root", "missing-folder", "edited-row"]) test("okf:05 current bytes detect " + mutation + " and checks are read-only until regeneration", () => {
+for (const mutation of ["description", "same-mtime", "rename", "delete", "missing-root", "missing-folder", "edited-row"]) test("wiki:05 current bytes detect " + mutation + " and checks are read-only until regeneration", () => {
   const vault = fresh(), relative = "personal/notes/topic.md";
   note(vault, relative, "Topic", "First description");
   fs.utimesSync(path.join(vault, relative), 1700000000, 1700000000);
@@ -109,7 +109,7 @@ for (const mutation of ["description", "same-mtime", "rename", "delete", "missin
   assert.equal(read(vault, "log.md"), logBefore);
 });
 
-test("okf:05 missing planned indexes can be repaired but missing authored notes and assets cannot", () => {
+test("wiki:05 missing planned indexes can be repaired but missing authored notes and assets cannot", () => {
   const vault = fresh();
   note(vault, "personal/notes/topic.md", "Topic", "A topic", "note", "[parent](../index.md) [root](../../index.md) [folder](index.md)\n");
   fs.unlinkSync(path.join(vault, "index.md"));
@@ -144,7 +144,7 @@ test("okf:05 missing planned indexes can be repaired but missing authored notes 
   }
 });
 
-for (const invalid of ["yaml", "unknown", "title-newline", "description-newline", "heading", "layout"]) test("okf:05 refuses invalid concepts without publishing: " + invalid, () => {
+for (const invalid of ["yaml", "unknown", "title-newline", "description-newline", "heading", "layout"]) test("wiki:05 refuses invalid concepts without publishing: " + invalid, () => {
   const vault = fresh();
   note(vault, "personal/notes/topic.md", "Topic");
   succeeds(vault, "index");
@@ -163,7 +163,7 @@ for (const invalid of ["yaml", "unknown", "title-newline", "description-newline"
   }
 });
 
-for (const kind of ["symlink", "directory", "fifo"]) test("okf:05 refuses unsafe generated destinations before overwriting any index: " + kind, () => {
+for (const kind of ["symlink", "directory", "fifo"]) test("wiki:05 refuses unsafe generated destinations before overwriting any index: " + kind, () => {
   const vault = fresh();
   note(vault, "personal/notes/topic.md", "Topic");
   const sentinel = path.join(temp, "sentinel-" + counter);
@@ -183,7 +183,7 @@ for (const kind of ["symlink", "directory", "fifo"]) test("okf:05 refuses unsafe
   }
 });
 
-test("okf:05 child directories sort by registered type before path and custom metadata stays one line", () => {
+test("wiki:05 child directories sort by registered type before path and custom metadata stays one line", () => {
   const vault = fresh();
   succeeds(vault, "type", "add", "aaa", "--folder", "zzz");
   note(vault, "personal/zzz/topic.md", "Custom", "Tabs\tand Unicode\u2028spaces", "aaa");
@@ -194,7 +194,7 @@ test("okf:05 child directories sort by registered type before path and custom me
 });
 
 
-test("okf:05 human index diagnostics identify path, rule and fix, and command grammar is strict", () => {
+test("wiki:05 human index diagnostics identify path, rule and fix, and command grammar is strict", () => {
   const vault = fresh();
   note(vault, "personal/notes/topic.md", "Topic");
   function human(...args: string[]) {
@@ -210,7 +210,7 @@ test("okf:05 human index diagnostics identify path, rule and fix, and command gr
   const before = snapshot(vault), missing = human("index", "--check");
   assert.equal(missing.status, 1);
   assert.equal(missing.stdout, "");
-  assert.match(missing.stderr, /personal\/notes\/index.md: index.missing: Missing generated navigation index; fix: Run okf-wiki --vault <dir> index/);
+  assert.match(missing.stderr, /personal\/notes\/index.md: index.missing: Missing generated navigation index; fix: Run wiki --vault <dir> index/);
   for (const args of [["index", "personal"], ["lint", "--check"], ["type", "list", "--check"], ["index", "--folder", "notes"]]) {
     const result = cli(vault, ...args);
     assert.equal(result.status, 2, JSON.stringify(result));
