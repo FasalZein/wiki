@@ -21,7 +21,7 @@ test("derives two workers from fifteen CPUs and keeps one cache per target", () 
   assert.notEqual(options.incrementalFile, mutationOptions("packages/wiki/src/update.ts", { HEAVY_CPUS: "15" }).incrementalFile);
 });
 
-test("supports all twelve wiki capture/update risk boundaries with serial sandbox-relative tests", () => {
+test("supports all sixteen wiki risk boundaries with serial sandbox-relative tests", () => {
   const plans = {
     "capture.ts": ["capture-text", "capture-cli", "capture-pdf", "capture-web", "concurrent-writers"],
     "update.ts": ["update", "concurrent-writers"],
@@ -35,6 +35,10 @@ test("supports all twelve wiki capture/update risk boundaries with serial sandbo
     "vault.ts": ["init", "write-boundaries", "capture-cli", "update"],
     "create.ts": ["create", "write-boundaries", "capture-cli", "update"],
     "qmd.ts": ["qmd-sync"],
+    "publication.ts": ["create", "capture-text", "registry", "update"],
+    "inventory.ts": ["inventory-rules", "capture-text"],
+    "find.ts": ["find"],
+    "search.ts": ["find"],
   };
   const caches = new Set();
   for (const [file, tests] of Object.entries(plans)) {
@@ -45,7 +49,7 @@ test("supports all twelve wiki capture/update risk boundaries with serial sandbo
     assert.equal(options.commandRunner.command, "node --test --test-concurrency=1 " + filter + tests.map(name => "packages/wiki/test/" + name + ".test.ts").join(" "));
     caches.add(options.incrementalFile);
   }
-  assert.equal(caches.size, 12);
+  assert.equal(caches.size, 16);
 });
 
 test("the command rejects extra arguments and insufficient outer admission without starting Stryker", () => {
