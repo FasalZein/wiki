@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-export type PathProblem = { rule: "path.invalid" | "path.symlink" | "path.kind"; message: string };
+type PathProblem = { rule: "path.invalid" | "path.symlink" | "path.kind"; message: string };
 function invalidShape(relative: string): boolean {
   return !relative || relative.includes("\\") || relative.includes("\0") || path.posix.isAbsolute(relative) || path.win32.isAbsolute(relative) || relative.split("/").some(p => !p || p === "." || p === "..");
 }

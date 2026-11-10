@@ -1,26 +1,24 @@
-import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { linkDiagnostics } from "./links.ts";
 import { canonicalPathProblem, inspectContainedPath } from "./paths.ts";
 import { metadataLines, missingHeadings } from "./markdown.ts";
 import { declaresProperty, loadRegistry, safeName, schemaDiagnostics, sortDiagnostics, type Diagnostic, type Registry } from "./registry.ts";
-import type { Vault } from "./vault.ts";
-import { maintainedDirectory, renderIndexes, indexFreshnessDiagnostics, type NavigationDirectory, type NavigationTopic } from "./navigation.ts";
+import { sha256, type Vault } from "./vault.ts";
+import { maintainedDirectory, indexFreshnessDiagnostics, navigationIndexes, type NavigationDirectory } from "./navigation.ts";
 import { isCaptureAsset, scanVault, scopeOf, SKIP, type Inventory, type ParsedNote } from "./inventory.ts";
 
 // The validation step: the rules run over a scanned inventory and a compiled registry.
 
 /** A note with a registered type. canonical: registered folder and scope, one safe slug. */
-export interface CheckedNote extends ParsedNote { readonly scope: string | undefined; readonly canonical: boolean }
+interface CheckedNote extends ParsedNote { readonly scope: string | undefined; readonly canonical: boolean }
 /** An inventory after validation. diagnostics: every rule result over the whole vault, sorted. */
 export interface ValidatedInventory {
-  readonly inventory: Inventory;
   readonly registry: Registry;
   readonly notes: readonly CheckedNote[];
   readonly directories: readonly NavigationDirectory[];
   readonly diagnostics: readonly Diagnostic[];
 }
-export interface ValidateOptions {
+interface ValidateOptions {
   /** Selected-path lint requires link targets that exist now. Whole-vault validation also accepts generated
    * indexes and the pending note, because publication or index writes them. */
   existingLinkTargets?: boolean;
@@ -51,7 +49,7 @@ function sourceAssetDiagnostics(root: string, note: CheckedNote, field: string, 
   if (typeof value !== "string") return diagnostics; // The registered schema reports missing or non-string values.
   const problem = retainedAssetProblem(root, value, planned);
   const bytes = planned.get(value);
-  if (bytes && note.data[field + "_sha256"] !== "sha256:" + createHash("sha256").update(bytes).digest("hex")) diagnostics.push({ path: note.path, rule: "source.digest", message: field + ": digest does not match planned retained bytes", fix: "Use the digest of the exact retained asset bytes" });
+  if (bytes && note.data[field + "_sha256"] !== sha256(bytes)) diagnostics.push({ path: note.path, rule: "source.digest", message: field + ": digest does not match planned retained bytes", fix: "Use the digest of the exact retained asset bytes" });
   if (problem !== undefined) diagnostics.push({ path: note.path, rule: "source.path", message: field + ": " + problem, fix: "Use a canonical vault-relative retained asset path without dot segments or symlinks" });
   return diagnostics;
 }
@@ -171,7 +169,7 @@ export function validateInventory(inventory: Inventory, registry: Registry, opti
     if (checked) notes.push(checked);
   }
   diagnostics.push(...crossNoteDiagnostics(inventory, notes, indexes, assets, options));
-  return { inventory, registry, notes, directories, diagnostics: sortDiagnostics(diagnostics) };
+  return { registry, notes, directories, diagnostics: sortDiagnostics(diagnostics) };
 }
 
 /** Scan and validate the current vault. A caller that already compiled the registry passes it. */
@@ -190,18 +188,6 @@ export function searchConcepts(validated: ValidatedInventory): { path: string; m
     return false;
   };
   return validated.notes.filter(note => note.canonical && !touched(note.path)).map(({ path, markdown }) => ({ path, markdown }));
-}
-
-/** The navigation step: generated index bytes for a clean validated inventory. Any diagnostic anywhere blocks
- * all planned navigation (an empty map), so no caller renders a partial index. */
-export function navigationIndexes(validated: ValidatedInventory): Map<string, string> {
-  if (validated.diagnostics.length) return new Map();
-  const topics: NavigationTopic[] = [];
-  for (const note of validated.notes) {
-    const { type, title, description } = note.data;
-    if (note.canonical && typeof type === "string" && typeof title === "string" && typeof description === "string") topics.push({ path: note.path, type, title, description });
-  }
-  return renderIndexes([...validated.directories], topics);
 }
 
 /** The diagnostics a selected-path lint reports: the selection, registry records, and scoped-title conflicts

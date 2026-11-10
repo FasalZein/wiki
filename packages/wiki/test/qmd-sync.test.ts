@@ -11,7 +11,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { createHash } from "node:crypto";
 import "./qmd-cleanup-guard.js";
 import { DatabaseSync } from "node:sqlite";
-import { syncQmdText, searchQmdLex, findQmd, withRequestEnvironment } from "../src/qmd.ts";
+import { syncQmdText, searchQmdLex, findQmd, syncAndFindQmd, withRequestEnvironment } from "../src/qmd.ts";
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-qmd-"));
 // Importing the adapter does not import QMD. Sandbox all SDK defaults before first use.
@@ -253,6 +253,23 @@ test("wiki:10 exclusive writer lock rejects competing sync and lexical reads wit
   assert.equal((await first).state, "successful");
   assert.deepEqual(await paths(root, "Galaxy"), ["personal/notes/star.md"]);
   assert.equal(fs.readFileSync(path.join(root, ".wiki/mutation.lock"), "utf8"), "unrelated content operation");
+});
+
+test("wiki:10 an operation that throws outside the session failure boundary still releases the writer lock", async () => {
+  const root = fresh();
+  const concepts = [note("star", "# Star\nGalaxy\n")];
+  // The sync reads concepts before it publishes coverage.json; the follow-on find reads them after.
+  // Throwing on that second read (a source event: the published receipt) escapes the session's
+  // operations, so only the request wrapper can release the lock.
+  const throwing = { diagnostics: [], get concepts() {
+    if (fs.existsSync(receipt(root))) throw new Error("operation threw after synchronization");
+    return concepts;
+  } };
+  const request = { mode: "lexical" as const, requested: "fast" as const, question: "Galaxy", reason: [] };
+  await assert.rejects(syncAndFindQmd(root, throwing, {}, request, process.env), /operation threw after synchronization/);
+  assert.equal(fs.existsSync(path.join(root, ".wiki/search/writer.lock")), false, "the writer lock must not stay behind");
+  const next = await syncQmdText(root, inventory(concepts));
+  assert.equal(next.state, "successful", JSON.stringify(next));
 });
 
 test("wiki:10 native database failures, duplicate captures, and symlinks fail closed", async () => {

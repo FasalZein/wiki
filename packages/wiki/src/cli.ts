@@ -8,7 +8,8 @@ import { readUpdateCandidate, updateTopic, UpdateConflictError } from "./update.
 import { createTopic, type CreateRequest } from "./create.ts";
 import { withMutationLock, MutationReleaseError, type HeldLock } from "./mutation.ts";
 import { addType, publish, ValidationError } from "./publication.ts";
-import { checkVault, lintVault, navigationIndexes } from "./lint.ts";
+import { checkVault, lintVault } from "./lint.ts";
+import { navigationIndexes } from "./navigation.ts";
 import { QMD_DEFAULT_LIMIT, type QmdFindFilters } from "./qmd.ts";
 import { runSearch } from "./search.ts";
 import { prepareCapture, publishTextCapture, type TextCaptureRequest, type TextCaptureCandidate } from "./capture.ts";
@@ -149,7 +150,7 @@ export async function run(argv: readonly string[], options: RunOptions): Promise
       let captureRequest: TextCaptureRequest | undefined;
       reject("create");
       if ((create || capture) && arg !== undefined) {
-        if ((values.project !== undefined) === (values.personal === true) || values.personal === false || values.title === undefined || values.description === undefined) throw new WikiError("usage", (capture ? "Capture" : "Create") + " requires exactly one explicit --project or --personal scope, --title and --description");
+        if ((values.project !== undefined) === (values.personal === true) || values.title === undefined || values.description === undefined) throw new WikiError("usage", (capture ? "Capture" : "Create") + " requires exactly one explicit --project or --personal scope, --title and --description");
         if (values.project !== undefined && !safeName(values.project)) throw new WikiError("usage", "Use a safe non-reserved project name");
         let body: string | undefined;
         if (values["body-file"] !== undefined) {
@@ -168,7 +169,7 @@ export async function run(argv: readonly string[], options: RunOptions): Promise
       reject("find-query");
       if (find && (!arg.trim() || values.terms !== undefined && !values.terms.trim())) throw new WikiError("usage", "find requires a nonempty question and nonempty --terms when given");
       reject("find-filter");
-      if (find && (values.project !== undefined && values.personal !== undefined || values.personal === false || values.project !== undefined && !safeName(values.project))) throw new WikiError("usage", "find accepts at most one of --project <safe-project-name> or --personal");
+      if (find && (values.project !== undefined && values.personal !== undefined || values.project !== undefined && !safeName(values.project))) throw new WikiError("usage", "find accepts at most one of --project <safe-project-name> or --personal");
       if (find && values.limit !== undefined && !(/^[1-9][0-9]*$/.test(values.limit) && Number.isSafeInteger(Number(values.limit)))) throw new WikiError("usage", "--limit must be a positive integer");
       if (find && values.type !== undefined && !safeName(values.type)) throw new WikiError("usage", "--type must be a registered type name");
       reject("check");

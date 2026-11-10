@@ -27,7 +27,7 @@ export type Written = WrittenFile | WrittenFiles;
  * unwritten: nothing was published; a temporary file is retained.
  * written: the files in written were published, then a later step failed; temporaryPath names a retained temporary name.
  * capture: the capture directory was reserved; written lists the files published inside it, if any. */
-export type PublicationRecord =
+type PublicationRecord =
   | { state: "unwritten"; temporaryCleanup: TemporaryCleanup }
   | { state: "written"; written: Written; temporaryPath?: string }
   | { state: "capture"; retainedDirectory: string; written?: Written; temporaryCleanup?: TemporaryCleanup };
@@ -85,7 +85,7 @@ export function createExclusive(root: string, relative: string, data: string | B
 
 /** Why a parsed .wiki/config.json is not the supported profile: no profile/version identity, or another profile/version.
  * Init, open and doctor share this rule and keep their own message wording. */
-export type ProfileProblem = "identity" | "unsupported";
+type ProfileProblem = "identity" | "unsupported";
 export function profileProblem(config: unknown): ProfileProblem | undefined {
   if (!isMapping(config) || !("profile" in config) || !("version" in config)) return "identity";
   return config.profile === CONFIG.profile && config.version === CONFIG.version ? undefined : "unsupported";

@@ -2,8 +2,9 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { inspectContainedPath } from "./paths.ts";
 import { safeName, type Diagnostic, type RegisteredType } from "./registry.ts";
+import type { ValidatedInventory } from "./lint.ts";
 
-export interface NavigationTopic { path: string; type: string; title: string; description: string }
+interface NavigationTopic { path: string; type: string; title: string; description: string }
 export interface NavigationDirectory { path: string; type: string }
 function isNavigationRoot(directory: string): boolean {
   return directory === "" || directory === "personal" || directory === "projects" || directory.startsWith("projects/") && directory.split("/").length === 2 && safeName(directory.slice(9));
@@ -52,7 +53,7 @@ function renderNavigationIndex(directory: string, items: NavigationRow[]): strin
   const heading = directory ? "# " + markdownText(path.posix.basename(directory)) : '---\nokf_version: "0.2"\n---\n# Wiki';
   return heading + (items.length ? "\n\n" + items.map(i => i.row).join("\n") : "") + "\n";
 }
-export function renderIndexes(directories: NavigationDirectory[], topics: NavigationTopic[]): Map<string, string> {
+function renderIndexes(directories: NavigationDirectory[], topics: NavigationTopic[]): Map<string, string> {
   const rows = navigationDirectoryRows(directories, topics);
   for (const note of topics) rows.get(path.posix.dirname(note.path))?.push({ type: note.type, path: note.path,
     row: "* [" + markdownText(note.title) + "](" + path.posix.basename(note.path) + ") - " + markdownText(note.description) });
@@ -61,6 +62,17 @@ export function renderIndexes(directories: NavigationDirectory[], topics: Naviga
     output.set(directory ? directory + "/index.md" : "index.md", renderNavigationIndex(directory, items));
   }
   return output;
+}
+/** The navigation step: generated index bytes for a clean validated inventory. Any diagnostic anywhere blocks
+ * all planned navigation (an empty map), so no caller renders a partial index. */
+export function navigationIndexes(validated: ValidatedInventory): Map<string, string> {
+  if (validated.diagnostics.length) return new Map();
+  const topics: NavigationTopic[] = [];
+  for (const note of validated.notes) {
+    const { type, title, description } = note.data;
+    if (note.canonical && typeof type === "string" && typeof title === "string" && typeof description === "string") topics.push({ path: note.path, type, title, description });
+  }
+  return renderIndexes([...validated.directories], topics);
 }
 function indexDestinationProblem(root: string, relative: string): Diagnostic | undefined {
   const inspected = inspectContainedPath(root, relative);

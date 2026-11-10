@@ -28,7 +28,7 @@ export interface ParsedNote {
 }
 /** One Markdown note path: its parsed content, or the problem that stopped reading or parsing it.
  * The problem belongs to the note, so a replacement note drops it with the old content. */
-export type ScannedNote = { readonly path: string } & ({ readonly note: ParsedNote; readonly problem?: never } | { readonly note?: never; readonly problem: Diagnostic });
+type ScannedNote = { readonly path: string } & ({ readonly note: ParsedNote; readonly problem?: never } | { readonly note?: never; readonly problem: Diagnostic });
 export interface PlannedAsset { readonly path: string; readonly bytes: Buffer }
 /** A note that a create, replace or capture will publish. Capture also plans its retained asset bytes. */
 export interface PendingNote { readonly path: string; readonly markdown: string; readonly assets?: readonly PlannedAsset[] }

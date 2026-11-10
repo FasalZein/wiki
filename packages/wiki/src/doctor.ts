@@ -2,8 +2,9 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 import { inspectContainedPath } from "./paths.ts";
-import { checkVault, navigationIndexes, searchConcepts, type ValidatedInventory } from "./lint.ts";
-import { indexFreshnessDiagnostics } from "./navigation.ts";
+import { extractorEnvironment } from "./extract-process.ts";
+import { checkVault, searchConcepts, type ValidatedInventory } from "./lint.ts";
+import { indexFreshnessDiagnostics, navigationIndexes } from "./navigation.ts";
 import { containedPath as checked, hasLayoutKind, profileProblem, VAULT_LAYOUT, type ErrorCode, type LayoutKind } from "./vault.ts";
 import { qmdModelReadiness, inspectQmdIndex, DEEP_ROLES, QMD_WRITER_LOCK, type QmdEnvironment, type QmdModels, type QmdModelRole } from "./qmd.ts";
 
@@ -40,7 +41,7 @@ const EXTRACTOR_PROBES = {
 
 function extractor(command: keyof typeof EXTRACTOR_PROBES, problems: Problem[]): VersionCheck {
   const probe = EXTRACTOR_PROBES[command];
-  const result = spawnSync(command, probe.args, { encoding: "utf8", timeout: 5000, maxBuffer: 1024 * 1024, windowsHide: true });
+  const result = spawnSync(command, probe.args, { env: extractorEnvironment(), encoding: "utf8", timeout: 5000, maxBuffer: 1024 * 1024, windowsHide: true });
   const output = result.stdout + "\n" + result.stderr;
   const version = probe.version.exec(output)?.[1];
   if (!result.error && result.status === 0 && version) return { state: "ready", version };

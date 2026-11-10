@@ -1,12 +1,11 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { extractPdf } from "./pdf.ts";
 import { assertCaptureActive } from "./extract-process.ts";
 import { fetchResource, extractWeb } from "./web.ts";
 import { loadRegistry, safeName, schemaDiagnostics, type Diagnostic } from "./registry.ts";
-import { containedEntry, WikiError, type Vault } from "./vault.ts";
+import { containedEntry, sha256, WikiError, type Vault } from "./vault.ts";
 import { parseNoteText } from "./frontmatter.ts";
 import type { HeldLock } from "./mutation.ts";
 import { publish, ValidationError } from "./publication.ts";
@@ -15,15 +14,14 @@ import { missingHeadings, parseMarkdown } from "./markdown.ts";
 export interface TextCaptureRequest {
   input: string; scope: string; title: string; description: string; slug: string;
 }
-export interface CaptureAsset { path: string; bytes: Buffer; digest: string }
+interface CaptureAsset { path: string; bytes: Buffer; digest: string }
 export interface TextCaptureCandidate {
   path: string; sourceMarkdown: string; digest: string;
   assets: [CaptureAsset, CaptureAsset];
 }
-export class CaptureValidationError extends ValidationError {
+class CaptureValidationError extends ValidationError {
   constructor(diagnostics: Diagnostic[]) { super(diagnostics, "Source capture validation failed; inspect diagnostics and repair the registry or request explicitly"); }
 }
-const digest = (bytes: Buffer | string) => "sha256:" + createHash("sha256").update(bytes).digest("hex");
 
 function isCaptureScope(scope: string): boolean {
   return scope === "personal" || scope.startsWith("projects/") && safeName(scope.slice(9));
@@ -115,8 +113,8 @@ function renderCapture(captured: ReturnType<typeof readCapture>, extraction: { t
   const { request, source, relative, assetDirectory, extension, resource, finalResource, mediaType, original, retrieved } = captured;
   const { text, bytes: extracted } = extraction;
   const assets: TextCaptureCandidate["assets"] = [
-    { path: assetDirectory + "/original" + extension, bytes: original, digest: digest(original) },
-    { path: assetDirectory + "/extracted.txt", bytes: extracted, digest: digest(extracted) },
+    { path: assetDirectory + "/original" + extension, bytes: original, digest: sha256(original) },
+    { path: assetDirectory + "/extracted.txt", bytes: extracted, digest: sha256(extracted) },
   ];
   const data = { type: "source", title: request.title, description: request.description, created: retrieved,
     resource, retrieved, ...(finalResource === undefined ? {} : { final_resource: finalResource }),
@@ -134,7 +132,7 @@ function renderCapture(captured: ReturnType<typeof readCapture>, extraction: { t
   const absent = missingHeadings(parseMarkdown(body), source.record.requiredHeadings, "source");
   if (absent.length) throw new WikiError("usage", "Source capture: " + absent.join("; "));
   const sourceMarkdown = "---\n" + Object.entries(data).map(([key, value]) => key + ": " + JSON.stringify(value)).join("\n") + "\n---\n" + body;
-  return { path: relative, sourceMarkdown, digest: digest(sourceMarkdown), assets };
+  return { path: relative, sourceMarkdown, digest: sha256(sourceMarkdown), assets };
 }
 
 

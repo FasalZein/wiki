@@ -133,6 +133,21 @@ test("wiki:17 missing extractors name Pandoc and pdftotext without installation 
   assert.equal(result.data.search.textCoverage.state, "complete");
   for (const dependency of ["pandoc", "pdftotext"]) assert.ok(result.data.diagnostics.some((d: { path: string; fix: string }) => d.path === dependency && /PATH/.test(d.fix)));
 });
+test("wiki:17 extractor version probes receive only PATH, never host variables such as tokens", () => {
+  const vault = fresh(), bin = path.join(temp, "probe-bin-" + ++counter), keys = path.join(bin, "keys.jsonl");
+  fs.mkdirSync(bin);
+  // Each fake records its environment key names only, never values, then answers its version probe.
+  for (const [command, version] of [["pandoc", "pandoc 3.0"], ["pdftotext", "pdftotext version 24.0"]] as const) {
+    fs.writeFileSync(path.join(bin, command), "#!" + process.execPath + "\nrequire('node:fs').appendFileSync(" + JSON.stringify(keys) + ", JSON.stringify(Object.keys(process.env).sort()) + '\\n');\nprocess.stdout.write(" + JSON.stringify(version + "\n") + ");\n", { mode: 0o755 });
+  }
+  const result = doctor(vault, { PATH: bin, WIKI_TEST_SECRET_TOKEN: "sentinel-not-for-children" });
+  assert.equal(result.data.extractors.pandoc.state, "ready", JSON.stringify(result.data.extractors));
+  assert.equal(result.data.extractors.pdftotext.state, "ready");
+  const runs = fs.readFileSync(keys, "utf8").trim().split("\n").map(line => JSON.parse(line));
+  assert.equal(runs.length, 2);
+  // macOS CoreFoundation sets __CF_USER_TEXT_ENCODING inside the fake's own Node process; the parent did not pass it.
+  for (const names of runs) assert.deepEqual(names.filter((name: string) => name !== "__CF_USER_TEXT_ENCODING"), ["PATH"]);
+});
 for (const mode of ["missing-sdk", "missing-native", "missing-vector"]) test("wiki:17 " + mode + " reports qmd dependency without writable store or global changes", () => {
   const vault = fresh(); note(vault); succeeds(vault, ["search", "sync"]);
   const result = doctor(vault, { WIKI_DOCTOR_GUARD: mode }); assert.equal(result.status, 7);

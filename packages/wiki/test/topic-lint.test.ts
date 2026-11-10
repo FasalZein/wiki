@@ -5,7 +5,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { after, test } from "node:test";
 import { runCli, runJson as cli } from "./cli-helper.ts";
-import { checkVault, navigationIndexes, selectedDiagnostics } from "../src/lint.ts";
+import { checkVault, selectedDiagnostics } from "../src/lint.ts";
+import { navigationIndexes } from "../src/navigation.ts";
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-topic-"));
 after(() => fs.rmSync(temp, { recursive: true, force: true }));

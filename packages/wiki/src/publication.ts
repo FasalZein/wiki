@@ -1,10 +1,10 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
-import { checkVault, navigationIndexes, validateInventory } from "./lint.ts";
+import { checkVault, validateInventory } from "./lint.ts";
 import { scanVault, withNote, type PendingNote, type PlannedAsset } from "./inventory.ts";
 import { parseNoteText } from "./frontmatter.ts";
-import { indexDestinationDiagnostics, markdownText } from "./navigation.ts";
+import { indexDestinationDiagnostics, markdownText, navigationIndexes } from "./navigation.ts";
 import { loadRegistry, sortDiagnostics, typeScaffold, type Diagnostic, type Registry } from "./registry.ts";
 import type { HeldLock } from "./mutation.ts";
 import { causeSuffix, containedEntry, createExclusive, PublicationError, sha256, unwrittenTemporary, WikiError, type ErrorCode, type TemporaryCleanup, type Written, type WrittenFile, type WrittenFiles } from "./vault.ts";
@@ -37,23 +37,30 @@ function validateCurrent(root: string): { diagnostics: readonly Diagnostic[]; in
   return { diagnostics, indexes };
 }
 
-export interface LogEntry { action: string; label: string; path: string }
+const LOCKED = Symbol("registry loaded under the held lock");
+/** A registry loaded while the mutation lock is held. Only lockedRegistry creates one, so a create change
+ * cannot carry a registry loaded before the lock and validate against stale types. */
+export interface LockedRegistry { readonly registry: Registry; readonly [LOCKED]: true }
+export function lockedRegistry(lock: HeldLock): LockedRegistry { return { registry: loadRegistry(lock.root), [LOCKED]: true }; }
+
+interface LogEntry { action: string; label: string; path: string }
 /** The log line of a validated note change: its action and the note's frontmatter title. */
 function topicLog(change: CreateChange | ReplaceChange | CaptureChange): LogEntry {
   const action = { create: "created", replace: "updated", capture: "captured" }[change.kind];
   return { action, label: markdownText(String(parseNoteText(change.markdown).frontmatter.title)), path: change.path };
 }
-export interface PublishedFile { path: string; bytes: Buffer; digest: string }
+interface PublishedFile { path: string; bytes: Buffer; digest: string }
 
 /** A note change also names its conflict message for a duplicate scoped title. Its log line names the note's title. */
 interface NoteChange { path: string; digest: string; duplicate: string }
-export type CreateChange = NoteChange & { kind: "create"; markdown: string; registry?: Registry };
+/** registry: the registry the caller already loaded under this lock, so publish validates against the same load. */
+type CreateChange = NoteChange & { kind: "create"; markdown: string; registry: LockedRegistry };
 /** recheck throws when the target no longer has the expected digest; it runs immediately before the rename. */
-export type ReplaceChange = NoteChange & { kind: "replace"; markdown: string; bytes: Buffer; mode: number; recheck: () => void };
+type ReplaceChange = NoteChange & { kind: "replace"; markdown: string; bytes: Buffer; mode: number; recheck: () => void };
 /** files: retained assets first, the source note last. */
-export type CaptureChange = NoteChange & { kind: "capture"; directory: string; markdown: string; assets: readonly PlannedAsset[]; files: PublishedFile[] };
-export type TypeChange = { kind: "type"; path: string; bytes: string; digest: string; log: LogEntry };
-export type IndexChange = { kind: "index" };
+type CaptureChange = NoteChange & { kind: "capture"; directory: string; markdown: string; assets: readonly PlannedAsset[]; files: PublishedFile[] };
+type TypeChange = { kind: "type"; path: string; bytes: string; digest: string; log: LogEntry };
+type IndexChange = { kind: "index" };
 /** A described vault change. publish validates it under the held lock, then runs its effects in this fixed order:
  * primary file(s), indexes, log line. */
 export type Change = CreateChange | ReplaceChange | CaptureChange | TypeChange | IndexChange;
@@ -61,7 +68,7 @@ export type Change = CreateChange | ReplaceChange | CaptureChange | TypeChange |
  * refusal before any effect, PublicationError (with its record) once vault bytes may have changed. */
 export interface Published<W extends Written> { state: "complete"; written: W }
 /** Index regeneration reports validation diagnostics as a refusal value, not an error. */
-export type IndexOutcome = { state: "complete"; written: WrittenFiles; indexes: ReadonlyMap<string, string> }
+type IndexOutcome = { state: "complete"; written: WrittenFiles; indexes: ReadonlyMap<string, string> }
   | { state: "refused"; diagnostics: readonly Diagnostic[] };
 
 const TOPIC_PARTIAL = "Topic published but navigation or log failed; run index to repair navigation and inspect log.md before adding any missing historical entry manually";
@@ -74,7 +81,7 @@ export function publish(lock: HeldLock, change: Change): Published<Written> | In
   const root = lock.root;
   switch (change.kind) {
     case "create": {
-      const indexes = validatePending(root, { path: change.path, markdown: change.markdown }, change.duplicate, change.registry);
+      const indexes = validatePending(root, { path: change.path, markdown: change.markdown }, change.duplicate, change.registry.registry);
       fs.mkdirSync(containedEntry(root, path.posix.dirname(change.path)).full, { recursive: true });
       createNew(root, change.path, change.markdown, "Existing topic destination: " + change.path);
       completeTopic(root, change.path, change.digest, indexes, topicLog(change));
