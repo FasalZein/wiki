@@ -46,7 +46,7 @@ bun run test:wiki` passed all 532 in 191 s; `heavy --slots 1 -- node --test
 --test-concurrency=1 packages/wiki/test/*.test.ts` passed all 532 in 890 s. A
 `verify:next` run overlapped part of the serial run, so the serial time is high.
 On 2026-11-10 the suite has 29 files and 564 tests: `heavy --slots 2 -- bun run
-verify:next` (typecheck plus every test) passed all 564 in 83 s.
+verify:next` (typecheck plus every test) passed all 564; the test step took 83 s.
 
 The handoff smoke runs under macOS `sandbox-exec` with network denied and writes
 allowed only in a disposable directory. Through the real CLI it runs: init, type
