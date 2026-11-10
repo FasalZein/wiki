@@ -2,7 +2,7 @@
 
 ## Planning and delivery routing
 
-- The approved rearchitecture specification lives in this repository: `docs/specs/wiki-rearchitecture.md`.
+- The approved specifications live in this repository: `docs/specs/wiki-rearchitecture.md` and its 2026-11-09 amendment `docs/specs/wiki-architecture-pass.md` (decisions A1-A5 override D16 and D17 where they differ).
 - Delivery tickets and status live in GitHub Issues for `FasalZein/wiki`. Do not track delivery state in the wiki vault.
 - The historical wiki vault (`/Users/tothemoon/Knowledge`, `/Users/tothemoon/Knowledge-archive`) and Linear are read-only archives. Search them for older decisions; never create, update, migrate, or delete content there.
 - Do not change global agent guidance, global qmd storage, Pi settings, or installed binaries from this repository's work.
@@ -23,4 +23,5 @@
 ## Authored Markdown and tests
 
 - Parse authored frontmatter only as safe YAML data. Do not enable executable language engines or raw-byte identity filters.
+- Test assertions about environment variables compare key names only; never print values (a failing test once dumped host API keys).
 - Synchronize race and cancellation tests at observable source or extractor events. Do not add polling delays to force an interleaving.
