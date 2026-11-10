@@ -4,7 +4,8 @@
 
 - The approved specifications live in this repository: `docs/specs/wiki-rearchitecture.md` and its 2026-11-09 amendment `docs/specs/wiki-architecture-pass.md` (decisions A1-A5 override D16 and D17 where they differ).
 - Delivery tickets and status live in GitHub Issues for `FasalZein/wiki`. Do not track delivery state in the wiki vault.
-- The historical wiki vault (`/Users/tothemoon/Knowledge`, `/Users/tothemoon/Knowledge-archive`) and Linear are read-only archives. Search them for older decisions; never create, update, migrate, or delete content there.
+- The live wiki vault is `/Users/tothemoon/Wiki`, selected through `WIKI_VAULT` (owner decision 2026-11-10). Agents read and write it only through the `wiki` CLI and the `wiki` skill.
+- The historical vaults (`/Users/tothemoon/Knowledge`, `/Users/tothemoon/Knowledge-archive`) and Linear are read-only archives. Search them for older decisions; never create, update, migrate, or delete content there.
 - Do not change global agent guidance, global qmd storage, Pi settings, or installed binaries from this repository's work.
 
 ## Live command trap
@@ -18,7 +19,7 @@
 - `packages/wiki`: `heavy --slots 2 -- bun run verify:next` covers source and tests at the batch gate (Node typecheck plus `node --test` CLI integration tests, Node >= 22.18). It and `test:wiki` run four test files at once; the slot claim must match (`docs/wiki-foundation.md`, Proof commands).
 - Boot check for `packages/wiki`: `heavy -- bun run boot:wiki` (source CLI in a temp vault; exits nonzero on any failed step). Runtime support and operating limits: `docs/wiki-foundation.md`.
 - Root dependencies: `package-lock.json` is the only root lock. Install with `heavy -- npm ci`; never run `bun install` at the root, because it writes a second lock (`bun.lock`). `bun run <script>` is fine.
-- Tests use disposable temp vaults and Git repositories only. Never point a test or a manual run at the archive vault.
+- Tests use disposable temp vaults and Git repositories only. Never point a test at the live or archive vault.
 
 ## Authored Markdown and tests
 
