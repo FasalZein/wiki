@@ -453,7 +453,7 @@ class SearchIndexSession {
     return { state: "complete", embeddingCoverage: { state: "complete" }, embedded };
   }
 }
-/** Runs one request in one session, then releases the lock. A failed release retains the lock, and
+/** Runs one request in one session, then releases the lock, also when the request throws. A failed release retains the lock, and
  * close() has invalidated every receipt this session's sync published. Each entry point passes its
  * own fold for that case, so the choice is explicit per entry point: a request that synchronized
  * reports an unavailable synchronization and drops its follow-on result (keeping that result's
@@ -462,8 +462,10 @@ class SearchIndexSession {
 async function inSession<O>(root: string, models: QmdModels | undefined, env: QmdEnvironment, run: (session: SearchIndexSession) => Promise<O>, released: (outcome: O, release: QmdDiagnostic[]) => O): Promise<O> {
   return withRequestEnvironment(env, async () => {
     const session = new SearchIndexSession(root, models);
-    const outcome = await run(session);
-    const release = session.close();
+    let outcome: O;
+    let release: QmdDiagnostic[] = [];
+    try { outcome = await run(session); }
+    finally { release = session.close(); }
     return release.length ? released(outcome, release) : outcome;
   });
 }
