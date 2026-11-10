@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
 import { parseNoteText } from "./frontmatter.ts";
+import { sha256 } from "./vault.ts";
 import type { QmdDiagnostic, QmdQuery, QmdRenderedMatch } from "./qmd.ts";
 
 /* The find pipeline after retrieval (AC15). The search session gathers engine hits under its lock
@@ -61,7 +61,6 @@ function comparePaths(a: string, b: string): number { return a < b ? -1 : a > b 
 function typeOf(markdown: string): unknown {
   try { return parseNoteText(markdown).frontmatter.type; } catch { return undefined; }
 }
-export function noteDigest(markdown: string | Uint8Array): string { return "sha256:" + createHash("sha256").update(markdown).digest("hex"); }
 
 /** Step (b). qmd order by score with canonical path tiebreak; a path keeps its best-ranked entry.
  * Literal tokens are plain substrings of canonical paths and captured note text (never regex,
@@ -123,7 +122,7 @@ export function selectMatches(plan: FindPlan, limit: number, reader: CurrentNote
     const markdown = plan.captured.get(candidate.path);
     if (markdown === undefined) { omitted.push({ path: candidate.path, message: "Indexed candidate is not in the current captured inventory (deleted, renamed or out of scope); omitted" }); continue; }
     if (plan.indexed.get(candidate.path) !== markdown) { omitted.push({ path: candidate.path, message: "Indexed content differs from the captured revision; omitted rather than attaching an old excerpt" }); continue; }
-    const expected = noteDigest(markdown);
+    const expected = sha256(markdown);
     const current = reader.digest(candidate.path);
     if (current !== expected) { omitted.push({ path: candidate.path, message: (current === undefined ? "Note disappeared" : "Note changed") + " after capture (moving target); omitted, not retried. Search again for its current revision" }); continue; }
     matches.push(renderMatch(candidate, markdown, expected, plan.queries));

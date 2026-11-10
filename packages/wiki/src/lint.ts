@@ -1,10 +1,9 @@
-import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { linkDiagnostics } from "./links.ts";
 import { canonicalPathProblem, inspectContainedPath } from "./paths.ts";
 import { metadataLines, missingHeadings } from "./markdown.ts";
 import { declaresProperty, loadRegistry, safeName, schemaDiagnostics, sortDiagnostics, type Diagnostic, type Registry } from "./registry.ts";
-import type { Vault } from "./vault.ts";
+import { sha256, type Vault } from "./vault.ts";
 import { maintainedDirectory, renderIndexes, indexFreshnessDiagnostics, type NavigationDirectory, type NavigationTopic } from "./navigation.ts";
 import { isCaptureAsset, scanVault, scopeOf, SKIP, type Inventory, type ParsedNote } from "./inventory.ts";
 
@@ -51,7 +50,7 @@ function sourceAssetDiagnostics(root: string, note: CheckedNote, field: string, 
   if (typeof value !== "string") return diagnostics; // The registered schema reports missing or non-string values.
   const problem = retainedAssetProblem(root, value, planned);
   const bytes = planned.get(value);
-  if (bytes && note.data[field + "_sha256"] !== "sha256:" + createHash("sha256").update(bytes).digest("hex")) diagnostics.push({ path: note.path, rule: "source.digest", message: field + ": digest does not match planned retained bytes", fix: "Use the digest of the exact retained asset bytes" });
+  if (bytes && note.data[field + "_sha256"] !== sha256(bytes)) diagnostics.push({ path: note.path, rule: "source.digest", message: field + ": digest does not match planned retained bytes", fix: "Use the digest of the exact retained asset bytes" });
   if (problem !== undefined) diagnostics.push({ path: note.path, rule: "source.path", message: field + ": " + problem, fix: "Use a canonical vault-relative retained asset path without dot segments or symlinks" });
   return diagnostics;
 }

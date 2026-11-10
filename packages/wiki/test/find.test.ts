@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { literalTokens, noteDigest, planFind, selectMatches, type CurrentNoteReader, type FindPlanInput } from "../src/find.ts";
+import { literalTokens, planFind, selectMatches, type CurrentNoteReader, type FindPlanInput } from "../src/find.ts";
 import { searchReport, type SearchOutcome } from "../src/search.ts";
 import type { QmdFindResult, QmdSyncResult } from "../src/qmd.ts";
+import { sha256 } from "../src/vault.ts";
 
 // In-process table tests of the find pipeline after retrieval (AC15) and of the search report (AC13).
 // No SDK, model, vault or process: hits, captured inventory and current files are plain data.
@@ -20,7 +21,7 @@ function input(over: Partial<FindPlanInput>): FindPlanInput {
 /** The current files equal the captured ones unless a test overrides a path. */
 function reader(overrides: Record<string, string | undefined> = {}): CurrentNoteReader & { reads: string[] } {
   const reads: string[] = [];
-  return { reads, digest(path) { reads.push(path); if (path in overrides) return overrides[path]; const markdown = captured.get(path); return markdown === undefined ? undefined : noteDigest(markdown); } };
+  return { reads, digest(path) { reads.push(path); if (path in overrides) return overrides[path]; const markdown = captured.get(path); return markdown === undefined ? undefined : sha256(markdown); } };
 }
 const order = (over: Partial<FindPlanInput>) => planFind(input(over)).ordered.map(c => [c.path, c.score, c.literal.join(" ")]);
 
@@ -76,8 +77,8 @@ test("wiki:13 a rendered match carries scope, type, captured digest and the lite
   const plan = planFind(input({ question: "docs/guide.md", hits: [{ path: C, score: 0.25 }] }));
   const { matches } = selectMatches(plan, 5, reader());
   assert.deepEqual(matches, [
-    { path: B, scope: "projects/alpha", type: "note", score: null, literal: ["docs/guide.md"], digest: noteDigest(captured.get(B) ?? ""), title: "Alpha B", description: "Alpha B description", excerpt: "cache line in b mentions docs/guide.md" },
-    { path: C, scope: "projects/beta", type: "decision", score: 0.25, literal: [], digest: noteDigest(captured.get(C) ?? ""), title: "Beta C", description: "Beta C description", excerpt: "cache decision" },
+    { path: B, scope: "projects/alpha", type: "note", score: null, literal: ["docs/guide.md"], digest: sha256(captured.get(B) ?? ""), title: "Alpha B", description: "Alpha B description", excerpt: "cache line in b mentions docs/guide.md" },
+    { path: C, scope: "projects/beta", type: "decision", score: 0.25, literal: [], digest: sha256(captured.get(C) ?? ""), title: "Beta C", description: "Beta C description", excerpt: "cache decision" },
   ]);
 });
 

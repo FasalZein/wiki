@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import type { QMDStore, UpdateProgress, UpdateResult } from "@tobilu/qmd";
 import { canonicalPathProblem } from "./paths.ts";
 import { isMapping } from "./frontmatter.ts";
-import { containedPath as checked, readNoteRevision } from "./vault.ts";
+import { containedPath as checked, readNoteRevision, sha256 } from "./vault.ts";
 import { planFind, selectMatches, type CurrentNoteReader, type FindHit } from "./find.ts";
 
 /** Caller supplies a complete capture of validated concepts, not a selected subset.
@@ -47,10 +47,9 @@ const SIDECARS = ["-wal", "-shm", "-journal"] as const;
 export { WRITER_LOCK as QMD_WRITER_LOCK };
 const COLLECTION = "concepts";
 const PREFIX = "qmd://" + COLLECTION + "/";
-function digest(markdown: string): string { return "sha256:" + createHash("sha256").update(markdown).digest("hex"); }
 /** Documented JSON contract (README): sha256 over the UTF-8 bytes of JSON.stringify of the path-sorted
  * inventory, the exact array bytes coverage.json stores. A caller recomputes it from the receipt or vault. */
-function inventoryDigest(sorted: readonly QmdDigest[]): string { return digest(JSON.stringify(sorted)); }
+function inventoryDigest(sorted: readonly QmdDigest[]): string { return sha256(JSON.stringify(sorted)); }
 // QMD excludes build/dist/vendor directories unconditionally. Flat opaque names
 // preserve all canonical identities without inheriting engine scan exclusions or filename limits.
 function stagedId(relative: string): string { return createHash("sha256").update(relative).digest("hex") + ".md"; }
@@ -304,7 +303,7 @@ class SearchIndexSession {
         options.signal?.throwIfAborted();
         const body = bodies.get(stagedId(relative)) ?? null;
         if (body !== markdown) throw new Error("Indexed Markdown differs from captured concept: " + relative);
-        indexed.push({ path: relative, digest: digest(markdown) });
+        indexed.push({ path: relative, digest: sha256(markdown) });
       }
       const status = await store.getStatus();
       if (status.totalDocuments !== concepts.size) throw new Error("Indexed document count differs from captured inventory");
@@ -728,7 +727,7 @@ async function inspectInScope(root: string, inventory: QmdInspectInventory | und
     snapshotStore = await createStore({ dbPath: copied, config: { collections: {}, models: models } });
     const status = await snapshotStore.getStatus();
     database = { state: lexicalHealthy && vectorsHealthy ? "ready" : "unavailable" };
-    const expected = inventory.concepts.map(c => ({ path: c.path, digest: digest(c.markdown) })).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+    const expected = inventory.concepts.map(c => ({ path: c.path, digest: sha256(c.markdown) })).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
     let complete = lexicalHealthy && indexedInventoryMatches && inventory.diagnostics.length === 0 && status.totalDocuments === expected.length;
     const receipt = readJson(root, DIRECTORY + "/coverage.json");
     if (!isMapping(receipt) || receipt.version !== 1 || JSON.stringify(receipt.inventory) !== JSON.stringify(expected)) {

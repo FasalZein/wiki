@@ -1,10 +1,9 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import type { Ajv2020, Options } from "ajv/dist/2020.js";
 import type { AnySchema, ErrorObject, ValidateFunction } from "ajv";
-import { containedEntry, WikiError } from "./vault.ts";
+import { containedEntry, sha256, WikiError } from "./vault.ts";
 import { isMapping } from "./frontmatter.ts";
 import { inspectContainedPath } from "./paths.ts";
 import { missingHeadings, parseMarkdown } from "./markdown.ts";
@@ -243,7 +242,7 @@ export function typeScaffold(root: string, name: string, folder: string): { path
   const scaffold: TypeRecord = { name, folder, frontmatterSchema: { ...COMMON_SCHEMA,
     properties: { ...COMMON_SCHEMA.properties, type: { const: name } }, additionalProperties: false }, requiredHeadings: [], template: "" };
   const bytes = JSON.stringify(scaffold, null, 2) + "\n";
-  return { path: relative, bytes, digest: "sha256:" + createHash("sha256").update(bytes).digest("hex") };
+  return { path: relative, bytes, digest: sha256(bytes) };
 }
 export function schemaDiagnostics(file: string, errors: ErrorObject[] | null | undefined): Diagnostic[] {
   return (errors ?? []).map(e => issue(file, "frontmatter.schema", (e.instancePath || "/") + " " + e.message + " " + JSON.stringify(e.params), "Correct the field to satisfy the common profile and registered type schema"));
