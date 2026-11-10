@@ -25,10 +25,10 @@ interface ValidateOptions {
 }
 
 function selectedPathDiagnostics(root: string, selected: string): Diagnostic[] {
+  const invalidPath = (message: string): Diagnostic[] => [{ path: selected, rule: "path.invalid", message, fix: "Use a vault-relative path without dot segments or operational directories" }];
   const invalid = canonicalPathProblem(selected);
-  if (invalid || isCaptureAsset(selected) || selected.split("/").some(p => SKIP.has(p))) {
-    return [{ path: selected, rule: "path.invalid", message: invalid?.message ?? "Expected a canonical note path outside operational and capture directories", fix: "Use a vault-relative path without dot segments or operational directories" }];
-  }
+  if (invalid) return invalidPath(invalid.message);
+  if (isCaptureAsset(selected) || selected.split("/").some(p => SKIP.has(p))) return invalidPath("Expected a canonical note path outside operational and capture directories");
   const inspected = inspectContainedPath(root, selected);
   if (!inspected.ok) return [{ path: selected, rule: inspected.problem.rule, message: inspected.problem.message, fix: "Use regular vault-owned note trees" }];
   if (!inspected.stat) return [{ path: selected, rule: "path.missing", message: "Missing requested path", fix: "Select an existing note path" }];
@@ -153,11 +153,7 @@ export function validateInventory(inventory: Inventory, registry: Registry, opti
   const types = registry.types, diagnostics = [...registry.diagnostics];
   const assets = planCaptureAssets(inventory, diagnostics);
   diagnostics.push(...inventory.problems);
-  const directories: NavigationDirectory[] = [];
-  for (const relative of inventory.directories) {
-    const directory = maintainedDirectory(relative, types);
-    if (directory) directories.push(directory);
-  }
+  const directories = inventory.directories.flatMap(relative => maintainedDirectory(relative, types) ?? []);
   const indexes = new Set(directories.map(d => d.path ? d.path + "/index.md" : "index.md"));
   for (const relative of inventory.indexFiles) {
     if (!indexes.has(relative)) diagnostics.push({ path: relative, rule: "path.layout", message: "Unexpected index outside a maintained directory", fix: "Place generated indexes only at vault, scope, or registered-folder roots" });

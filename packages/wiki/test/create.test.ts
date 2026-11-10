@@ -149,6 +149,36 @@ test("wiki:07 malformed fields, missing headings and unrelated invalid concepts 
   fs.writeFileSync(path.join(vault, "personal/notes/old.md"), "---\ninvalid: [\n---\n");
   const result = await rejectsUnchanged(vault, 2, "new", "note", "--personal", "--title", "New", "--description", "A topic");
   assert.ok(result.diagnostics.some((d: { path: string; rule: string }) => d.path === "personal/notes/old.md" && d.rule === "frontmatter.yaml"));
+  // Index regeneration refuses on the same current diagnostic and leaves every navigation byte unchanged.
+  const index = await rejectsUnchanged(vault, 1, "index");
+  assert.equal(index.error.code, "lint");
+  assert.ok(index.diagnostics.some((d: { path: string; rule: string }) => d.path === "personal/notes/old.md" && d.rule === "frontmatter.yaml"));
+});
+
+test("wiki:07 a type scaffold whose log append fails reports the written registry file as damaged", async () => {
+  const vault = await fresh();
+  const log = path.join(vault, "log.md"), before = read(vault, "log.md");
+  fs.chmodSync(log, 0o444);
+  try {
+    const result = await cli(vault, "type", "add", "recipe", "--folder", "recipes");
+    assert.equal(result.status, 6, JSON.stringify(result));
+    assert.equal(result.data.error.code, "damaged");
+    assert.match(result.data.error.message, /^Registry scaffold was published but its log entry failed/);
+    assert.equal(result.data.written, true);
+    assert.deepEqual(result.data.paths, [".wiki/types/recipe.json"]);
+    const bytes = fs.readFileSync(path.join(vault, ".wiki/types/recipe.json"));
+    assert.equal(result.data.digest, "sha256:" + createHash("sha256").update(bytes).digest("hex"));
+    assert.equal(read(vault, "log.md"), before);
+  } finally { fs.chmodSync(log, 0o644); }
+});
+
+test("wiki:07 a duplicate title between two other notes refuses create as validation, not as a conflict on the new note", async () => {
+  const vault = await fresh();
+  assert.equal((await create(vault, "Old")).status, 0);
+  fs.copyFileSync(path.join(vault, "personal/notes/old.md"), path.join(vault, "personal/notes/copy.md"));
+  const result = await rejectsUnchanged(vault, 2, "new", "note", "--personal", "--title", "New", "--description", "A topic");
+  assert.deepEqual(result.error, { code: "usage", message: "Proposed topic or vault validation failed" });
+  assert.deepEqual(result.diagnostics.map((d: { path: string; rule: string }) => [d.path, d.rule]), [["personal/notes/copy.md", "title.duplicate"], ["personal/notes/old.md", "title.duplicate"]]);
 });
 
 test("wiki:07 held and stale locks refuse new, type add and index promptly without stealing", async () => {

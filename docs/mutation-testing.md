@@ -31,9 +31,17 @@ The command accepts exactly one literal production path. Supported affected-test
 | `packages/wiki/src/vault.ts` | `node --test --test-concurrency=1 packages/wiki/test/init.test.ts packages/wiki/test/write-boundaries.test.ts packages/wiki/test/capture-cli.test.ts packages/wiki/test/update.test.ts` |
 | `packages/wiki/src/create.ts` | `node --test --test-concurrency=1 packages/wiki/test/create.test.ts packages/wiki/test/write-boundaries.test.ts packages/wiki/test/capture-cli.test.ts packages/wiki/test/update.test.ts` |
 | `packages/wiki/src/qmd.ts` | `node --test --test-concurrency=1 packages/wiki/test/qmd-sync.test.ts` |
+| `packages/wiki/src/publication.ts` | `node --test --test-concurrency=1 packages/wiki/test/create.test.ts packages/wiki/test/capture-text.test.ts packages/wiki/test/registry.test.ts packages/wiki/test/update.test.ts` |
+| `packages/wiki/src/inventory.ts` | `node --test --test-concurrency=1 packages/wiki/test/inventory-rules.test.ts packages/wiki/test/capture-text.test.ts` |
+| `packages/wiki/src/find.ts` | `node --test --test-concurrency=1 packages/wiki/test/find.test.ts` |
+| `packages/wiki/src/search.ts` | `node --test --test-concurrency=1 packages/wiki/test/find.test.ts` |
 
 The qmd plan is narrow. `qmd-sync` imports `src/qmd.ts` in-process and covers the writer lock, `syncQmdText`, and `searchQmdLex`.
 It does not exercise `findQmd`, `embedQmd`, or model readiness; mutate those ranges only after widening the plan with the qmd CLI test files.
+
+The publication, inventory, find, and search plans are also narrow (added 2026-11-10 by the arch-pass hardener).
+The publication plan drives create, type, index, and replace publication; capture publication and its failure records
+are exercised mainly by `capture-cli.test.ts`, which is too slow per mutant (6.9 s). Report survivors of these plans as narrow-plan survivors.
 
 The PDF plan selects all local PDF tests (`wiki:15`) and all web tests named `PDF` or `pdftotext`.
 This retains real nonempty/empty extraction, exact bytes and arguments, provenance, corrupt input,
@@ -81,7 +89,7 @@ Do not label them tested based on TypeScript tests or schema validation.
 ## Tooling checks and security
 
 Run `heavy -- bun run test:tooling` and `heavy -- bun run typecheck:tooling`.
-The focused tooling tests cover exact scoping, all twelve wiki runner plans, worker derivation, cache separation, and rejected inputs.
+The focused tooling tests cover exact scoping, all sixteen wiki runner plans, worker derivation, cache separation, and rejected inputs.
 
 Root overrides pin Stryker's transitive `minimatch` to 11.0.5 and `typed-rest-client`'s `qs` to 6.17.1.
 These avoid GHSA-g3hv-75wg-m249 and the qs advisories reported by `npm audit` with the original Stryker graph.

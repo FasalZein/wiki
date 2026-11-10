@@ -97,17 +97,23 @@ export function publish(lock: HeldLock, change: Change): Published<Written> | In
       const indexes = validatePending(root, { path: change.path, markdown: change.markdown, assets: change.assets }, change.duplicate);
       return { state: "complete", written: publishCapture(root, change, indexes) };
     }
-    case "type":
-      createNew(root, change.path, change.bytes, "Existing registry destination: " + change.path);
-      try { appendLog(root, change.log); }
-      catch { throw new PublicationError("damaged", REGISTRY_PARTIAL, { state: "written", written: { paths: [change.path], digest: change.digest } }); }
-      return { state: "complete", written: { paths: [change.path], digest: change.digest } };
-    case "index": {
-      const current = validateCurrent(root);
-      if (current.diagnostics.length) return { state: "refused", diagnostics: current.diagnostics };
-      return { state: "complete", written: writeIndexes(root, current.indexes), indexes: current.indexes };
-    }
+    case "type": return publishType(root, change);
+    case "index": return publishIndexes(root);
   }
+}
+
+function publishType(root: string, change: TypeChange): Published<WrittenFile> {
+  createNew(root, change.path, change.bytes, "Existing registry destination: " + change.path);
+  try { appendLog(root, change.log); }
+  catch { throw new PublicationError("damaged", REGISTRY_PARTIAL, { state: "written", written: { paths: [change.path], digest: change.digest } }); }
+  return { state: "complete", written: { paths: [change.path], digest: change.digest } };
+}
+
+/** Index publication refuses on any current diagnostic before it writes. */
+function publishIndexes(root: string): Published<WrittenFiles> | IndexOutcome {
+  const current = validateCurrent(root);
+  if (current.diagnostics.length) return { state: "refused", diagnostics: current.diagnostics };
+  return { state: "complete", written: writeIndexes(root, current.indexes), indexes: current.indexes };
 }
 
 /** Publish a registry type scaffold and its log line. */

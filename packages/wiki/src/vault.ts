@@ -173,12 +173,7 @@ export interface Vault {
 export function openVault(dir: string): Vault {
   const resolved = path.resolve(dir);
   if (!fs.existsSync(resolved)) throw new WikiError("not_found", "Missing vault: " + resolved);
-  for (const item of VAULT_LAYOUT) {
-    if (!item.open) continue;
-    const stat = entry(resolved, item.path);
-    if (!stat) throw new WikiError("damaged", "Missing vault entry: " + item.path);
-    if (!hasLayoutKind(stat, item.kind)) throw new WikiError("damaged", "Wrong vault entry kind: " + item.path);
-  }
+  checkOpenLayout(resolved);
   let config: unknown;
   try { config = JSON.parse(fs.readFileSync(path.join(resolved, ".wiki/config.json"), "utf8")); }
   catch { throw new WikiError("damaged", "Invalid JSON configuration"); }
@@ -191,6 +186,16 @@ export function openVault(dir: string): Vault {
     entry: relative => containedEntry(root, relative),
     readNoteRevision: (relative, noun) => readNoteRevision(root, relative, noun),
   };
+}
+
+/** Every layout entry marked open must exist with its kind; the first failure throws. */
+function checkOpenLayout(resolved: string): void {
+  for (const item of VAULT_LAYOUT) {
+    if (!item.open) continue;
+    const stat = entry(resolved, item.path);
+    if (!stat) throw new WikiError("damaged", "Missing vault entry: " + item.path);
+    if (!hasLayoutKind(stat, item.kind)) throw new WikiError("damaged", "Wrong vault entry kind: " + item.path);
+  }
 }
 
 function initializationLayoutProblems(root: string): string[] {
