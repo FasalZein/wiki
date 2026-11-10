@@ -1,7 +1,7 @@
-import { loadRegistry, safeName, type Registry } from "./registry.ts";
+import { safeName, type Registry } from "./registry.ts";
 import { containedEntry, sha256, WikiError } from "./vault.ts";
 import type { HeldLock } from "./mutation.ts";
-import { publish, ValidationError } from "./publication.ts";
+import { lockedRegistry, publish, ValidationError } from "./publication.ts";
 
 export interface CreateRequest {
   type: string; scope: string; title: string; description: string;
@@ -32,11 +32,11 @@ function topicMarkdown(request: CreateRequest, template: string): string {
 }
 export function createTopic(lock: HeldLock, request: CreateRequest) {
   const root = lock.root;
-  const registry = loadRegistry(root);
-  const type = registeredCreateType(registry, request.type);
+  const locked = lockedRegistry(lock);
+  const type = registeredCreateType(locked.registry, request.type);
   const relative = topicDestination(root, request, type.record.folder);
   const markdown = topicMarkdown(request, type.record.template);
   const digest = sha256(markdown);
-  publish(lock, { kind: "create", path: relative, markdown, digest, registry, duplicate: "Duplicate normalized title in " + request.scope });
+  publish(lock, { kind: "create", path: relative, markdown, digest, registry: locked, duplicate: "Duplicate normalized title in " + request.scope });
   return { path: relative, title: request.title, description: request.description, digest };
 }

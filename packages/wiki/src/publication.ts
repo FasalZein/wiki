@@ -37,6 +37,12 @@ function validateCurrent(root: string): { diagnostics: readonly Diagnostic[]; in
   return { diagnostics, indexes };
 }
 
+const LOCKED = Symbol("registry loaded under the held lock");
+/** A registry loaded while the mutation lock is held. Only lockedRegistry creates one, so a create change
+ * cannot carry a registry loaded before the lock and validate against stale types. */
+export interface LockedRegistry { readonly registry: Registry; readonly [LOCKED]: true }
+export function lockedRegistry(lock: HeldLock): LockedRegistry { return { registry: loadRegistry(lock.root), [LOCKED]: true }; }
+
 interface LogEntry { action: string; label: string; path: string }
 /** The log line of a validated note change: its action and the note's frontmatter title. */
 function topicLog(change: CreateChange | ReplaceChange | CaptureChange): LogEntry {
@@ -47,7 +53,8 @@ interface PublishedFile { path: string; bytes: Buffer; digest: string }
 
 /** A note change also names its conflict message for a duplicate scoped title. Its log line names the note's title. */
 interface NoteChange { path: string; digest: string; duplicate: string }
-type CreateChange = NoteChange & { kind: "create"; markdown: string; registry?: Registry };
+/** registry: the registry the caller already loaded under this lock, so publish validates against the same load. */
+type CreateChange = NoteChange & { kind: "create"; markdown: string; registry: LockedRegistry };
 /** recheck throws when the target no longer has the expected digest; it runs immediately before the rename. */
 type ReplaceChange = NoteChange & { kind: "replace"; markdown: string; bytes: Buffer; mode: number; recheck: () => void };
 /** files: retained assets first, the source note last. */
@@ -74,7 +81,7 @@ export function publish(lock: HeldLock, change: Change): Published<Written> | In
   const root = lock.root;
   switch (change.kind) {
     case "create": {
-      const indexes = validatePending(root, { path: change.path, markdown: change.markdown }, change.duplicate, change.registry);
+      const indexes = validatePending(root, { path: change.path, markdown: change.markdown }, change.duplicate, change.registry.registry);
       fs.mkdirSync(containedEntry(root, path.posix.dirname(change.path)).full, { recursive: true });
       createNew(root, change.path, change.markdown, "Existing topic destination: " + change.path);
       completeTopic(root, change.path, change.digest, indexes, topicLog(change));
