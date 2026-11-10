@@ -1,10 +1,10 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
-import { checkVault, navigationIndexes, validateInventory } from "./lint.ts";
+import { checkVault, validateInventory } from "./lint.ts";
 import { scanVault, withNote, type PendingNote, type PlannedAsset } from "./inventory.ts";
 import { parseNoteText } from "./frontmatter.ts";
-import { indexDestinationDiagnostics, markdownText } from "./navigation.ts";
+import { indexDestinationDiagnostics, markdownText, navigationIndexes } from "./navigation.ts";
 import { loadRegistry, sortDiagnostics, typeScaffold, type Diagnostic, type Registry } from "./registry.ts";
 import type { HeldLock } from "./mutation.ts";
 import { causeSuffix, containedEntry, createExclusive, PublicationError, sha256, unwrittenTemporary, WikiError, type ErrorCode, type TemporaryCleanup, type Written, type WrittenFile, type WrittenFiles } from "./vault.ts";

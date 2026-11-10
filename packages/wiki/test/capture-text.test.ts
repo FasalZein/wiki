@@ -11,7 +11,8 @@ import { parseNoteText } from "../src/frontmatter.ts";
 import { parseMarkdown, visitAuthored } from "../src/markdown.ts";
 import { loadRegistry } from "../src/registry.ts";
 import { initVault, openVault } from "../src/vault.ts";
-import { navigationIndexes, validateInventory } from "../src/lint.ts";
+import { validateInventory } from "../src/lint.ts";
+import { navigationIndexes } from "../src/navigation.ts";
 import { scanVault, withNote, type PendingNote } from "../src/inventory.ts";
 
 /** The vault as it will be after the planned capture publishes, validated, with its planned index bytes. */

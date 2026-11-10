@@ -8,7 +8,8 @@ import { readUpdateCandidate, updateTopic, UpdateConflictError } from "./update.
 import { createTopic, type CreateRequest } from "./create.ts";
 import { withMutationLock, MutationReleaseError, type HeldLock } from "./mutation.ts";
 import { addType, publish, ValidationError } from "./publication.ts";
-import { checkVault, lintVault, navigationIndexes } from "./lint.ts";
+import { checkVault, lintVault } from "./lint.ts";
+import { navigationIndexes } from "./navigation.ts";
 import { QMD_DEFAULT_LIMIT, type QmdFindFilters } from "./qmd.ts";
 import { runSearch } from "./search.ts";
 import { prepareCapture, publishTextCapture, type TextCaptureRequest, type TextCaptureCandidate } from "./capture.ts";

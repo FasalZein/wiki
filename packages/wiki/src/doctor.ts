@@ -3,8 +3,8 @@ import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 import { inspectContainedPath } from "./paths.ts";
 import { extractorEnvironment } from "./extract-process.ts";
-import { checkVault, navigationIndexes, searchConcepts, type ValidatedInventory } from "./lint.ts";
-import { indexFreshnessDiagnostics } from "./navigation.ts";
+import { checkVault, searchConcepts, type ValidatedInventory } from "./lint.ts";
+import { indexFreshnessDiagnostics, navigationIndexes } from "./navigation.ts";
 import { containedPath as checked, hasLayoutKind, profileProblem, VAULT_LAYOUT, type ErrorCode, type LayoutKind } from "./vault.ts";
 import { qmdModelReadiness, inspectQmdIndex, DEEP_ROLES, QMD_WRITER_LOCK, type QmdEnvironment, type QmdModels, type QmdModelRole } from "./qmd.ts";
 

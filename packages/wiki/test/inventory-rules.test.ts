@@ -6,7 +6,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { after, test } from "node:test";
 import { parseNote, withNote, type Inventory } from "../src/inventory.ts";
-import { navigationIndexes, searchConcepts, validateInventory } from "../src/lint.ts";
+import { searchConcepts, validateInventory } from "../src/lint.ts";
+import { navigationIndexes } from "../src/navigation.ts";
 import { loadRegistry } from "../src/registry.ts";
 import { initVault } from "../src/vault.ts";
 

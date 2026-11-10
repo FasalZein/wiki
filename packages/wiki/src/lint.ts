@@ -4,7 +4,7 @@ import { canonicalPathProblem, inspectContainedPath } from "./paths.ts";
 import { metadataLines, missingHeadings } from "./markdown.ts";
 import { declaresProperty, loadRegistry, safeName, schemaDiagnostics, sortDiagnostics, type Diagnostic, type Registry } from "./registry.ts";
 import { sha256, type Vault } from "./vault.ts";
-import { maintainedDirectory, renderIndexes, indexFreshnessDiagnostics, type NavigationDirectory, type NavigationTopic } from "./navigation.ts";
+import { maintainedDirectory, indexFreshnessDiagnostics, navigationIndexes, type NavigationDirectory } from "./navigation.ts";
 import { isCaptureAsset, scanVault, scopeOf, SKIP, type Inventory, type ParsedNote } from "./inventory.ts";
 
 // The validation step: the rules run over a scanned inventory and a compiled registry.
@@ -188,18 +188,6 @@ export function searchConcepts(validated: ValidatedInventory): { path: string; m
     return false;
   };
   return validated.notes.filter(note => note.canonical && !touched(note.path)).map(({ path, markdown }) => ({ path, markdown }));
-}
-
-/** The navigation step: generated index bytes for a clean validated inventory. Any diagnostic anywhere blocks
- * all planned navigation (an empty map), so no caller renders a partial index. */
-export function navigationIndexes(validated: ValidatedInventory): Map<string, string> {
-  if (validated.diagnostics.length) return new Map();
-  const topics: NavigationTopic[] = [];
-  for (const note of validated.notes) {
-    const { type, title, description } = note.data;
-    if (note.canonical && typeof type === "string" && typeof title === "string" && typeof description === "string") topics.push({ path: note.path, type, title, description });
-  }
-  return renderIndexes([...validated.directories], topics);
 }
 
 /** The diagnostics a selected-path lint reports: the selection, registry records, and scoped-title conflicts
