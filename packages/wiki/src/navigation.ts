@@ -67,12 +67,14 @@ function renderIndexes(directories: NavigationDirectory[], topics: NavigationTop
  * all planned navigation (an empty map), so no caller renders a partial index. */
 export function navigationIndexes(validated: ValidatedInventory): Map<string, string> {
   if (validated.diagnostics.length) return new Map();
-  const topics: NavigationTopic[] = [];
-  for (const note of validated.notes) {
-    const { type, title, description } = note.data;
-    if (note.canonical && typeof type === "string" && typeof title === "string" && typeof description === "string") topics.push({ path: note.path, type, title, description });
-  }
+  const topics = validated.notes.flatMap(note => navigationTopic(note) ?? []);
   return renderIndexes([...validated.directories], topics);
+}
+/** A canonical note with string type, title and description is listed; any other note is not. */
+function navigationTopic(note: ValidatedInventory["notes"][number]): NavigationTopic | undefined {
+  const { type, title, description } = note.data;
+  if (note.canonical && typeof type === "string" && typeof title === "string" && typeof description === "string") return { path: note.path, type, title, description };
+  return undefined;
 }
 function indexDestinationProblem(root: string, relative: string): Diagnostic | undefined {
   const inspected = inspectContainedPath(root, relative);

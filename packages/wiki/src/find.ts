@@ -72,13 +72,7 @@ export function planFind(input: FindPlanInput): FindPlan {
   const ranked = [...input.hits].sort((a, b) => b.score - a.score || comparePaths(a.path, b.path));
   const candidates = new Map<string, FindCandidate & { rank: number }>();
   for (const [rank, hit] of ranked.entries()) if (!candidates.has(hit.path)) candidates.set(hit.path, { path: hit.path, score: hit.score, rank, literal: [] });
-  if (literals.length) for (const [relative, markdown] of input.captured) {
-    const literal = literals.filter(token => relative.includes(token) || markdown.includes(token));
-    if (!literal.length) continue;
-    const existing = candidates.get(relative);
-    if (existing) existing.literal = literal;
-    else candidates.set(relative, { path: relative, score: null, rank: Infinity, literal });
-  }
+  addLiteralMatches(candidates, literals, input.captured);
   const inScope = (relative: string) => input.scope === undefined || relative.startsWith(input.scope + "/");
   // A candidate outside the captured inventory has no type; selectMatches reports its omission.
   const ofType = (relative: string) => input.type === undefined || !input.captured.has(relative) || typeOf(input.captured.get(relative) ?? "") === input.type;
@@ -86,6 +80,18 @@ export function planFind(input: FindPlanInput): FindPlan {
     .sort((a, b) => Number(!a.literal.length) - Number(!b.literal.length) || a.rank - b.rank || comparePaths(a.path, b.path))
     .map(({ path, score, literal }) => ({ path, score, literal }));
   return { literals, ordered, omitted, captured: input.captured, indexed: input.indexed, queries: input.queries };
+}
+
+/** A captured note that contains literal tokens records them; a note qmd did not rank joins with score null. */
+function addLiteralMatches(candidates: Map<string, FindCandidate & { rank: number }>, literals: readonly string[], captured: FindPlanInput["captured"]): void {
+  if (!literals.length) return;
+  for (const [relative, markdown] of captured) {
+    const literal = literals.filter(token => relative.includes(token) || markdown.includes(token));
+    if (!literal.length) continue;
+    const existing = candidates.get(relative);
+    if (existing) existing.literal = literal;
+    else candidates.set(relative, { path: relative, score: null, rank: Infinity, literal });
+  }
 }
 
 /** The first line containing a matched literal token, else the first line containing a lexical term. */
@@ -119,13 +125,19 @@ export function selectMatches(plan: FindPlan, limit: number, reader: CurrentNote
   for (const candidate of plan.ordered) {
     if (matches.length === limit) break;
     beforeEach();
-    const markdown = plan.captured.get(candidate.path);
-    if (markdown === undefined) { omitted.push({ path: candidate.path, message: "Indexed candidate is not in the current captured inventory (deleted, renamed or out of scope); omitted" }); continue; }
-    if (plan.indexed.get(candidate.path) !== markdown) { omitted.push({ path: candidate.path, message: "Indexed content differs from the captured revision; omitted rather than attaching an old excerpt" }); continue; }
-    const expected = sha256(markdown);
-    const current = reader.digest(candidate.path);
-    if (current !== expected) { omitted.push({ path: candidate.path, message: (current === undefined ? "Note disappeared" : "Note changed") + " after capture (moving target); omitted, not retried. Search again for its current revision" }); continue; }
-    matches.push(renderMatch(candidate, markdown, expected, plan.queries));
+    const revision = currentRevision(plan, candidate.path, reader);
+    if ("omitted" in revision) omitted.push({ path: candidate.path, message: revision.omitted });
+    else matches.push(renderMatch(candidate, revision.markdown, revision.digest, plan.queries));
   }
   return { matches, omitted };
+}
+/** The captured bytes of one candidate when the index, the capture and the disk all agree, or why not. */
+function currentRevision(plan: FindPlan, relative: string, reader: CurrentNoteReader): { markdown: string; digest: string } | { omitted: string } {
+  const markdown = plan.captured.get(relative);
+  if (markdown === undefined) return { omitted: "Indexed candidate is not in the current captured inventory (deleted, renamed or out of scope); omitted" };
+  if (plan.indexed.get(relative) !== markdown) return { omitted: "Indexed content differs from the captured revision; omitted rather than attaching an old excerpt" };
+  const digest = sha256(markdown);
+  const current = reader.digest(relative);
+  if (current !== digest) return { omitted: (current === undefined ? "Note disappeared" : "Note changed") + " after capture (moving target); omitted, not retried. Search again for its current revision" };
+  return { markdown, digest };
 }
