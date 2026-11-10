@@ -16,7 +16,7 @@ export type QmdInventory = {
   diagnostics: readonly QmdDiagnostic[];
 };
 export type QmdDiagnostic = { path: string; message: string };
-export type QmdDigest = { path: string; digest: string };
+type QmdDigest = { path: string; digest: string };
 export type QmdTextCoverage =
   /** inventoryCount and inventoryDigest summarize the receipt's sorted inventory; see inventoryDigest(). */
   | { state: "complete"; inventoryCount: number; inventoryDigest: string }
@@ -32,8 +32,8 @@ export type QmdSyncResult =
   | { state: "unavailable"; code: "conflict" | "unavailable"; textCoverage: Extract<QmdTextCoverage, { state: "unavailable" }>; embeddingCoverage: { state: "unavailable" } };
 /** models: preflighted local files. Text update never runs inference, but QMD counts
  * pending embeddings against the configured embedding model identity. */
-export type QmdSyncOptions = { signal?: AbortSignal; onProgress?: (progress: UpdateProgress) => void; models?: QmdModels };
-export type QmdLexResult =
+type QmdSyncOptions = { signal?: AbortSignal; onProgress?: (progress: UpdateProgress) => void; models?: QmdModels };
+type QmdLexResult =
   | { state: "successful"; matches: { path: string; markdown: string; score: number }[] }
   | { state: "unavailable"; diagnostics: QmdDiagnostic[] };
 
@@ -496,7 +496,7 @@ export async function searchQmdLex(root: string, query: string, limit = 10): Pro
 export type QmdModelRole = "embed" | "generate" | "rerank";
 export type QmdModels = Partial<Record<QmdModelRole, string>>;
 export type QmdReadyModels<R extends QmdModelRole> = Record<R, string> & QmdModels;
-export type QmdReadiness<R extends QmdModelRole> =
+type QmdReadiness<R extends QmdModelRole> =
   | { state: "ready"; models: QmdReadyModels<R> }
   | { state: "unavailable"; diagnostics: QmdDiagnostic[] };
 export const FAST_ROLES = ["embed"] as const;
@@ -546,7 +546,7 @@ export const QMD_DEFAULT_LIMIT = 10;
  * type: a registered type name, matched against the captured frontmatter type. */
 export type QmdFindFilters = { scope?: "personal" | `projects/${string}`; type?: string; limit?: number };
 /** lexical: model-free degraded request after a model readiness failure. */
-export type QmdFindRequest = QmdFindFilters & (
+type QmdFindRequest = QmdFindFilters & (
   | { mode: "fast"; question: string; terms?: string; models: QmdReadyModels<"embed"> }
   | { mode: "deep"; question: string; terms?: string; models: QmdReadyModels<"embed" | "generate" | "rerank"> }
   | { mode: "lexical"; requested: "fast" | "deep"; question: string; terms?: string; reason: QmdDiagnostic[] });
@@ -584,10 +584,10 @@ export async function findQmd(root: string, request: QmdFindRequest, captured: Q
   return inSession(root, undefined, process.env, session => session.find(request, captured, signal),
     (find, release) => ({ state: "unavailable", code: find.state === "unavailable" ? find.code : "unavailable", diagnostics: [...(find.state === "unavailable" ? find.diagnostics : []), ...release] }));
 }
-export type QmdUnavailableSync = Extract<QmdSyncResult, { state: "unavailable" }>;
+type QmdUnavailableSync = Extract<QmdSyncResult, { state: "unavailable" }>;
 export type QmdAvailableSync = Exclude<QmdSyncResult, { state: "unavailable" }>;
 /** A sync-led find: find ran exactly when the text update was available. */
-export type QmdSyncedFind = { sync: QmdUnavailableSync } | { sync: QmdAvailableSync; find: QmdFindResult };
+type QmdSyncedFind = { sync: QmdUnavailableSync } | { sync: QmdAvailableSync; find: QmdFindResult };
 /** One find request: synchronize text and query under one session lock. */
 export async function syncAndFindQmd(root: string, inventory: QmdInventory, options: QmdSyncOptions, request: QmdFindRequest, env: QmdEnvironment, signal?: AbortSignal): Promise<QmdSyncedFind> {
   return inSession(root, options.models, env, async (session): Promise<QmdSyncedFind> => {
@@ -601,7 +601,7 @@ export type QmdEmbedResult =
   | { state: "failed"; code: "conflict" | "unavailable"; embeddingCoverage: QmdEmbeddingCoverage; embedded?: { docsProcessed: number; chunksEmbedded: number; errors: number }; diagnostics: QmdDiagnostic[] };
 
 /** A sync-led embedding: embedding ran exactly when the text update was available. */
-export type QmdSyncedEmbed = { sync: QmdUnavailableSync } | { sync: QmdAvailableSync; embed: QmdEmbedResult };
+type QmdSyncedEmbed = { sync: QmdUnavailableSync } | { sync: QmdAvailableSync; embed: QmdEmbedResult };
 /** One search sync --embed request: synchronize text and embed under one session lock. */
 export async function syncAndEmbedQmd(root: string, inventory: QmdInventory, options: QmdSyncOptions, models: QmdReadyModels<"embed">, env: QmdEnvironment, signal?: AbortSignal): Promise<QmdSyncedEmbed> {
   return inSession(root, options.models, env, async (session): Promise<QmdSyncedEmbed> => {
@@ -611,10 +611,10 @@ export async function syncAndEmbedQmd(root: string, inventory: QmdInventory, opt
 }
 
 // Doctor inspection of a disposable copy. Database file names and QMD 2.8.3 tables stay in this module.
-export type QmdVersionCheck = { state: "ready"; version: string } | { state: "unavailable"; version?: string };
-export type QmdInspectInventory = { concepts: readonly { path: string; markdown: string }[]; diagnostics: readonly unknown[] };
-export type QmdInspectProblem = (file: string, text: string, fix: string, code?: "unavailable") => void;
-export type QmdInspection = {
+type QmdVersionCheck = { state: "ready"; version: string } | { state: "unavailable"; version?: string };
+type QmdInspectInventory = { concepts: readonly { path: string; markdown: string }[]; diagnostics: readonly unknown[] };
+type QmdInspectProblem = (file: string, text: string, fix: string, code?: "unavailable") => void;
+type QmdInspection = {
   qmd: QmdVersionCheck;
   database: { state: "ready" | "unavailable" };
   textCoverage: { state: "complete" | "incomplete" | "unavailable" };

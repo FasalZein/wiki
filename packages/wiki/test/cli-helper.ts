@@ -7,8 +7,8 @@ import { fileURLToPath } from "node:url";
 import { run } from "../src/cli.ts";
 
 export const BIN = fileURLToPath(new URL("../bin/wiki.js", import.meta.url));
-export type CliResult = { status: number; stdout: string; stderr: string };
-export type CliEnv = Readonly<Record<string, string | undefined>>;
+type CliResult = { status: number; stdout: string; stderr: string };
+type CliEnv = Readonly<Record<string, string | undefined>>;
 
 /** Runs one command in process. WIKI_VAULT is empty unless opts.env sets it; the caller's environment never selects a vault.
  * An aborted signal acts like SIGINT or SIGTERM delivered to the bin while the command listens for interrupts. */

@@ -10,7 +10,7 @@ import { missingHeadings, parseMarkdown } from "./markdown.ts";
 
 export interface Diagnostic { path: string; rule: string; message: string; fix: string }
 interface Heading { level: number; text: string }
-export interface TypeRecord {
+interface TypeRecord {
   name: string; folder: string; frontmatterSchema: AnySchema;
   requiredHeadings: Heading[]; template: string; scopes?: string[];
 }
@@ -29,7 +29,7 @@ function newAjv(options: Options): Ajv2020 {
 }
 const line = { type: "string", minLength: 1, pattern: "^[^\\r\\n]*\\S[^\\r\\n]*$" };
 const date = { type: "string", format: "date-time", pattern: "T.*(?:Z|[+-][0-9]{2}:[0-9]{2})$" };
-export const COMMON_SCHEMA = {
+const COMMON_SCHEMA = {
   $schema: "https://json-schema.org/draft/2020-12/schema", type: "object",
   required: ["type", "title", "description", "created"],
   properties: {

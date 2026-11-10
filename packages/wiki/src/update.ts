@@ -11,7 +11,7 @@ export class UpdateConflictError extends WikiError {
     this.path = path; this.expected = expected; this.current = current;
   }
 }
-export interface UpdateCandidate { bytes: Buffer; markdown: string; digest: string }
+interface UpdateCandidate { bytes: Buffer; markdown: string; digest: string }
 /** Nonblocking open plus descriptor check also refuses FIFOs swapped in after lstat. */
 export function readUpdateCandidate(file: string): UpdateCandidate {
   try {
@@ -46,7 +46,7 @@ function difference(before: Buffer, after: UpdateCandidate) {
     diff: { startLine: start + 1, removed: oldLines.slice(start, oldEnd), added: newLines.slice(start, newEnd) } };
 }
 /** Apply needs the held mutation lock; dry-run never acquires it or writes. */
-export type UpdateMode = { dryRun: true; vault: Vault } | { dryRun: false; lock: HeldLock };
+type UpdateMode = { dryRun: true; vault: Vault } | { dryRun: false; lock: HeldLock };
 /** The vault root comes only from the mode: dry-run reads the opened vault; apply validates, rechecks and
  * publishes under the locked root, so validation and publication cannot name different vaults. */
 export function updateTopic(apply: UpdateMode, relative: string, expected: string, candidate: UpdateCandidate) {

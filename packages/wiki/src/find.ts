@@ -26,8 +26,8 @@ export type FindPlanInput = {
   type?: string;
 };
 /** score: null when only literal matching found the note. literal: matched path-like tokens. */
-export type FindCandidate = { path: string; score: number | null; literal: string[] };
-export type FindPlan = {
+type FindCandidate = { path: string; score: number | null; literal: string[] };
+type FindPlan = {
   literals: string[];
   /** Filtered and ordered, before the limit: literal matches first, then qmd rank, then path. */
   ordered: FindCandidate[];

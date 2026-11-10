@@ -10,16 +10,15 @@ import { isCaptureAsset, scanVault, scopeOf, SKIP, type Inventory, type ParsedNo
 // The validation step: the rules run over a scanned inventory and a compiled registry.
 
 /** A note with a registered type. canonical: registered folder and scope, one safe slug. */
-export interface CheckedNote extends ParsedNote { readonly scope: string | undefined; readonly canonical: boolean }
+interface CheckedNote extends ParsedNote { readonly scope: string | undefined; readonly canonical: boolean }
 /** An inventory after validation. diagnostics: every rule result over the whole vault, sorted. */
 export interface ValidatedInventory {
-  readonly inventory: Inventory;
   readonly registry: Registry;
   readonly notes: readonly CheckedNote[];
   readonly directories: readonly NavigationDirectory[];
   readonly diagnostics: readonly Diagnostic[];
 }
-export interface ValidateOptions {
+interface ValidateOptions {
   /** Selected-path lint requires link targets that exist now. Whole-vault validation also accepts generated
    * indexes and the pending note, because publication or index writes them. */
   existingLinkTargets?: boolean;
@@ -170,7 +169,7 @@ export function validateInventory(inventory: Inventory, registry: Registry, opti
     if (checked) notes.push(checked);
   }
   diagnostics.push(...crossNoteDiagnostics(inventory, notes, indexes, assets, options));
-  return { inventory, registry, notes, directories, diagnostics: sortDiagnostics(diagnostics) };
+  return { registry, notes, directories, diagnostics: sortDiagnostics(diagnostics) };
 }
 
 /** Scan and validate the current vault. A caller that already compiled the registry passes it. */

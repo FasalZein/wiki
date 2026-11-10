@@ -4,9 +4,9 @@ import { syncQmdText, syncAndFindQmd, syncAndEmbedQmd, qmdModelReadiness, FAST_R
 
 /** One search command's complete report. failure: the error code that sets the exit status.
  * value: the JSON document; human and stderr: the text output. The CLI only prints it. */
-export type SearchReport = { failure: "conflict" | "unavailable" | undefined; value: object; human: string; stderr: string };
+type SearchReport = { failure: "conflict" | "unavailable" | undefined; value: object; human: string; stderr: string };
 /** A validated search command. find filters: scope and type already checked by the caller. */
-export type SearchCommand =
+type SearchCommand =
   | { kind: "sync"; embed: boolean }
   | { kind: "find"; question: string; terms?: string; deep: boolean; filters: QmdFindFilters };
 /** What the search session returned, in the shape the report reads. An unavailable synchronization

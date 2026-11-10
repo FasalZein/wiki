@@ -14,12 +14,12 @@ import { missingHeadings, parseMarkdown } from "./markdown.ts";
 export interface TextCaptureRequest {
   input: string; scope: string; title: string; description: string; slug: string;
 }
-export interface CaptureAsset { path: string; bytes: Buffer; digest: string }
+interface CaptureAsset { path: string; bytes: Buffer; digest: string }
 export interface TextCaptureCandidate {
   path: string; sourceMarkdown: string; digest: string;
   assets: [CaptureAsset, CaptureAsset];
 }
-export class CaptureValidationError extends ValidationError {
+class CaptureValidationError extends ValidationError {
   constructor(diagnostics: Diagnostic[]) { super(diagnostics, "Source capture validation failed; inspect diagnostics and repair the registry or request explicitly"); }
 }
 
