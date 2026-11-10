@@ -9,7 +9,6 @@ qmd search. It runs from TypeScript sources under Node; there is no build step.
 | Path | Contents |
 | --- | --- |
 | `packages/wiki` | The `wiki` CLI. Commands, limits, and verification: [packages/wiki/README.md](packages/wiki/README.md). |
-| `packages/wiki-core`, `packages/wiki-cli` | Earlier Node knowledge core and its standalone CLI, kept under `verify:next`. |
 | `skills/wiki/SKILL.md` | The agent skill for vault retrieval and distilled handoff. |
 | `agents/wiki.md` | The dedicated wiki agent definition. |
 | `docs/` | The approved specification, the foundation proof and runtime limits, and the mutation-testing guide. |
@@ -36,7 +35,7 @@ changes the installed `wiki`; keep `packages/wiki/node_modules` installed.
 ## Verify
 
 ```sh
-bun run verify:next      # Node typecheck and tests for all packages (batch gate)
+bun run verify:next      # Node typecheck and packages/wiki tests (batch gate, heavy --slots 2)
 bun run boot:wiki        # boot check in a temporary vault
 bun run test:tooling     # mutation tooling tests
 bun run typecheck:tooling

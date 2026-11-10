@@ -1,4 +1,8 @@
-import { parseDocument } from "yaml";
+import { createRequire } from "node:module";
+
+// yaml loads on first parse, so --help, init and plain show skip it.
+const require = createRequire(import.meta.url);
+let parseDocument: typeof import("yaml").parseDocument | undefined;
 
 export function isMapping(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -8,6 +12,7 @@ export function isMapping(value: unknown): value is Record<string, unknown> {
 export function parseNoteText(text: string): { frontmatter: Record<string, unknown>; body: string } {
   const match = /^\uFEFF?---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(text);
   if (!match) throw new Error("Expected YAML mapping frontmatter with plain --- delimiters");
+  parseDocument ??= (require("yaml") as typeof import("yaml")).parseDocument;
   const doc = parseDocument(match[1] ?? "", { schema: "core", customTags: [], uniqueKeys: true });
   // Unknown tags are warnings in yaml; they must fail closed, not silently lose their tag.
   const problem = doc.errors[0] ?? doc.warnings[0];

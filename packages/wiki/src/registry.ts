@@ -1,30 +1,35 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { createHash } from "node:crypto";
-import { Ajv2020 } from "ajv/dist/2020.js";
-import addFormats from "ajv-formats";
+import { createRequire } from "node:module";
+import type { Ajv2020, Options } from "ajv/dist/2020.js";
 import type { AnySchema, ErrorObject, ValidateFunction } from "ajv";
-import { containedEntry, createExclusive, WikiError } from "./vault.ts";
+import { containedEntry, sha256, WikiError } from "./vault.ts";
 import { isMapping } from "./frontmatter.ts";
 import { inspectContainedPath } from "./paths.ts";
 import { missingHeadings, parseMarkdown } from "./markdown.ts";
 
 export interface Diagnostic { path: string; rule: string; message: string; fix: string }
 interface Heading { level: number; text: string }
-export interface TypeRecord {
+interface TypeRecord {
   name: string; folder: string; frontmatterSchema: AnySchema;
   requiredHeadings: Heading[]; template: string; scopes?: string[];
 }
 export interface RegisteredType { record: TypeRecord; validate: ValidateFunction }
+export interface Registry { types: RegisteredType[]; diagnostics: Diagnostic[] }
 const NAME = "[a-z0-9]+(?:-[a-z0-9]+)*";
 const RESERVED = new Set(["index", "log", "assets", "projects", "personal", "node-modules", "types", "tmp", "locks"]);
 export function safeName(value: string): boolean { return new RegExp("^" + NAME + "$").test(value) && !RESERVED.has(value); }
-const ajv = new Ajv2020({ allErrors: true, strict: false, validateFormats: true, ownProperties: true });
-// The callable CJS export also exposes .default, matching its NodeNext type declaration.
-addFormats.default(ajv);
+// Ajv loads on first validation, so commands without a registry (--help, init, show) skip it.
+const require = createRequire(import.meta.url);
+function newAjv(options: Options): Ajv2020 {
+  const ajv = new (require("ajv/dist/2020.js") as typeof import("ajv/dist/2020.js")).Ajv2020(options);
+  // The callable CJS export also exposes .default, matching its NodeNext type declaration.
+  (require("ajv-formats") as typeof import("ajv-formats").default).default(ajv);
+  return ajv;
+}
 const line = { type: "string", minLength: 1, pattern: "^[^\\r\\n]*\\S[^\\r\\n]*$" };
 const date = { type: "string", format: "date-time", pattern: "T.*(?:Z|[+-][0-9]{2}:[0-9]{2})$" };
-export const COMMON_SCHEMA = {
+const COMMON_SCHEMA = {
   $schema: "https://json-schema.org/draft/2020-12/schema", type: "object",
   required: ["type", "title", "description", "created"],
   properties: {
@@ -39,7 +44,7 @@ export const COMMON_SCHEMA = {
     { if: { required: ["superseded_by"] }, then: { required: ["status"], properties: { status: { const: "deprecated" } } } },
   ],
 };
-const validRecord = ajv.compile<TypeRecord>({
+const RECORD_SCHEMA = {
   type: "object", required: ["name", "folder", "frontmatterSchema", "requiredHeadings", "template"], additionalProperties: false,
   properties: {
     name: { type: "string" }, folder: { type: "string" }, frontmatterSchema: { type: ["object", "boolean"] },
@@ -48,35 +53,21 @@ const validRecord = ajv.compile<TypeRecord>({
     template: { type: "string" }, scopes: { type: "array", uniqueItems: true,
       items: { type: "string", pattern: "^(?:personal|projects/" + NAME + ")$" } },
   },
-});
+};
+let recordValidator: { ajv: Ajv2020; validate: ValidateFunction<TypeRecord> } | undefined;
+function registryRecordValidator() {
+  if (!recordValidator) {
+    const ajv = newAjv({ allErrors: true, strict: false, validateFormats: true, ownProperties: true });
+    recordValidator = { ajv, validate: ajv.compile<TypeRecord>(RECORD_SCHEMA) };
+  }
+  return recordValidator;
+}
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error); }
 export function sortDiagnostics(items: Diagnostic[]): Diagnostic[] {
   return items.sort((a, b) => compare(a.path, b.path) || compare(a.rule, b.rule) || compare(a.message, b.message));
 }
 function compare(a: string, b: string): number { return a < b ? -1 : a > b ? 1 : 0; }
 function issue(file: string, rule: string, message: string, fix: string): Diagnostic { return { path: file, rule, message, fix }; }
-function validateVaultLayout(root: string): void {
-  for (const relative of ["", ".wiki", ".wiki/config.json", ".wiki/types", ".wiki/tmp", "log.md"]) {
-    const item = containedEntry(root, relative).stat;
-    if (!item) throw new WikiError("damaged", "Missing vault entry: " + relative);
-    const directory = ["", ".wiki", ".wiki/types", ".wiki/tmp"].includes(relative);
-    if (directory ? !item.isDirectory() : !item.isFile()) throw new WikiError("damaged", "Wrong vault entry kind: " + relative);
-  }
-}
-function validateVaultConfiguration(config: unknown): void {
-  if (!isMapping(config) || !("profile" in config) || !("version" in config)) throw new WikiError("damaged", "Invalid configuration");
-  if (config.profile !== "wiki-okf" || config.version !== 1) throw new WikiError("unsupported", "Unsupported profile/version; no conversion performed");
-}
-export function openVault(dir: string): string {
-  const root = path.resolve(dir);
-  if (!fs.existsSync(root)) throw new WikiError("not_found", "Missing vault: " + root);
-  validateVaultLayout(root);
-  let config: unknown;
-  try { config = JSON.parse(fs.readFileSync(path.join(root, ".wiki/config.json"), "utf8")); }
-  catch { throw new WikiError("damaged", "Invalid JSON configuration"); }
-  validateVaultConfiguration(config);
-  return fs.realpathSync(root);
-}
 
 function assertFragmentIdentifier(schema: Record<string, unknown>, key: string, message: string): void {
   if (key in schema && (typeof schema[key] !== "string" || !schema[key].startsWith("#"))) throw new Error(message);
@@ -132,19 +123,27 @@ function registryTemplateProblem(data: TypeRecord): string | undefined {
 function compileRegisteredType(data: TypeRecord): RegisteredType {
   if (isMapping(data.frontmatterSchema) && data.frontmatterSchema.$schema !== undefined && data.frontmatterSchema.$schema !== COMMON_SCHEMA.$schema) throw new Error("Expected JSON Schema draft 2020-12");
   checkReferences(data.frontmatterSchema);
-  // Compile each type in isolation: duplicate $ids cannot leak across records or commands.
-  const validator = new Ajv2020({ allErrors: true, strict: false, ownProperties: true });
-  addFormats.default(validator);
-  validator.addSchema(data.frontmatterSchema, "urn:wiki:type");
-  const validate = validator.compile({ allOf: [COMMON_SCHEMA, { $ref: "urn:wiki:type" }], unevaluatedProperties: false });
+  const key = JSON.stringify(data.frontmatterSchema);
+  let validate = compiledSchemas.get(key);
+  if (!validate) {
+    // Compile each distinct schema in isolation: duplicate $ids cannot leak across records or commands.
+    // Records with the exact same schema JSON share one validator, which is the same validator either would compile.
+    const validator = newAjv({ allErrors: true, strict: false, ownProperties: true });
+    validator.addSchema(data.frontmatterSchema, "urn:wiki:type");
+    validate = validator.compile({ allOf: [COMMON_SCHEMA, { $ref: "urn:wiki:type" }], unevaluatedProperties: false });
+    compiledSchemas.set(key, validate);
+  }
   return { record: data, validate };
 }
+// Compiling is most of a registry load; a process reloads the registry under the mutation lock and in tests.
+const compiledSchemas = new Map<string, ValidateFunction>();
 function loadRegistryRecord(root: string, file: string, diagnostics: Diagnostic[]): RegisteredType | undefined {
   const fail = (rule: string, text: string) => diagnostics.push(issue(".wiki/types/" + file, rule, text, "Repair the registry record and rerun whole-vault lint"));
   const loaded = readRegistryJson(root, file, fail);
   if (!loaded) return;
   const { data } = loaded;
-  if (!validRecord(data)) { fail("registry.record", ajv.errorsText(validRecord.errors)); return; }
+  const records = registryRecordValidator();
+  if (!records.validate(data)) { fail("registry.record", records.ajv.errorsText(records.validate.errors)); return; }
   const identity = registryIdentityProblem(data, file);
   if (identity) { fail(...identity); return; }
   const template = registryTemplateProblem(data);
@@ -165,7 +164,7 @@ function registryFolderDiagnostics(types: RegisteredType[]): Diagnostic[] {
   }
   return diagnostics;
 }
-export function loadRegistry(root: string): { types: RegisteredType[]; diagnostics: Diagnostic[] } {
+export function loadRegistry(root: string): Registry {
   const types: RegisteredType[] = [], diagnostics: Diagnostic[] = [];
   for (const file of fs.readdirSync(path.join(root, ".wiki/types")).sort()) {
     const type = loadRegistryRecord(root, file, diagnostics);
@@ -226,16 +225,6 @@ export function declaresProperty(schema: unknown, key: string): boolean {
     isMapping(s.properties) && Object.hasOwn(s.properties, key) ||
     isMapping(s.patternProperties) && Object.keys(s.patternProperties).some(pattern => new RegExp(pattern, "u").test(key)));
 }
-export class RegistryWriteError extends WikiError {
-  readonly written = true;
-  readonly paths: string[];
-  readonly digest: string;
-  constructor(relative: string, bytes: string) {
-    super("damaged", "Registry scaffold was published but its log entry failed; inspect log.md before adding the missing entry manually");
-    this.paths = [relative];
-    this.digest = "sha256:" + createHash("sha256").update(bytes).digest("hex");
-  }
-}
 function typeScaffoldDestination(root: string, name: string, folder: string): string {
   if (!safeName(name) || !safeName(folder)) throw new WikiError("usage", "Use safe, non-reserved lowercase hyphenated type and folder names");
   const relative = ".wiki/types/" + name + ".json";
@@ -247,24 +236,13 @@ function typeScaffoldDestination(root: string, name: string, folder: string): st
   if (registry.types.some(t => t.record.folder === folder)) throw new WikiError("usage", "Folder conflicts with an existing type: " + folder);
   return relative;
 }
-export function addType(root: string, name: string, folder: string): { path: string; digest: string } {
+/** Returns the scaffold to publish; the caller publishes it under the held mutation lock. */
+export function typeScaffold(root: string, name: string, folder: string): { path: string; bytes: string; digest: string } {
   const relative = typeScaffoldDestination(root, name, folder);
   const scaffold: TypeRecord = { name, folder, frontmatterSchema: { ...COMMON_SCHEMA,
     properties: { ...COMMON_SCHEMA.properties, type: { const: name } }, additionalProperties: false }, requiredHeadings: [], template: "" };
   const bytes = JSON.stringify(scaffold, null, 2) + "\n";
-  try { createExclusive(root, relative, bytes); }
-  catch (error) {
-    if (isMapping(error) && error.code === "EEXIST") throw new WikiError("conflict", "Existing registry destination: " + relative);
-    throw error;
-  }
-  try {
-    const log = containedEntry(root, "log.md").full;
-    const previous = fs.readFileSync(log, "utf8");
-    const heading = "## " + new Date().toISOString().slice(0, 10) + "\n\n";
-    const entry = "**type-added** [" + name + "](" + relative + ")\n\n";
-    fs.writeFileSync(log, heading + entry + (previous.startsWith(heading) ? previous.slice(heading.length) : previous));
-  } catch { throw new RegistryWriteError(relative, bytes); }
-  return { path: relative, digest: "sha256:" + createHash("sha256").update(bytes).digest("hex") };
+  return { path: relative, bytes, digest: sha256(bytes) };
 }
 export function schemaDiagnostics(file: string, errors: ErrorObject[] | null | undefined): Diagnostic[] {
   return (errors ?? []).map(e => issue(file, "frontmatter.schema", (e.instancePath || "/") + " " + e.message + " " + JSON.stringify(e.params), "Correct the field to satisfy the common profile and registered type schema"));

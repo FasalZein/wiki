@@ -41,5 +41,11 @@ for (const method of ["renameSync", "linkSync", "copyFileSync", "symlinkSync"]) 
   const original = fs[method]; fs[method] = (from, to, ...args) => { check(from); check(to); return original(from, to, ...args); };
 }
 const open = fs.openSync;
-fs.openSync = (file, flags, ...args) => { if (flags !== "r" && flags !== fs.constants.O_RDONLY) check(file); return open(file, flags, ...args); };
+const WRITE_FLAGS = fs.constants.O_WRONLY | fs.constants.O_RDWR | fs.constants.O_CREAT | fs.constants.O_TRUNC | fs.constants.O_APPEND;
+fs.openSync = (file, flags, ...args) => {
+  if (flags !== "r" && !(typeof flags === "number" && (flags & WRITE_FLAGS) === 0)) check(file);
+  // The protected note read opens a descriptor; inject the unreadable concept at that open.
+  if (mode === "unreadable" && String(file).endsWith("/personal/notes/telescope.md")) throw Object.assign(new Error("Injected unreadable concept"), { code: "EACCES" });
+  return open(file, flags, ...args);
+};
 syncBuiltinESMExports();

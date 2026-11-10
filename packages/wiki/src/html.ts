@@ -1,7 +1,8 @@
 import { WikiError } from "./vault.ts";
 import { runTool } from "./extract-process.ts";
 
-// Adapted from wiki-core Pandoc text rendering; no evidence or storage policy.
+// Adapted from the Pandoc text rendering of the former Node core package
+// (removed in #41; see git history); no evidence or storage policy.
 function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }

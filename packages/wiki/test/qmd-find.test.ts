@@ -1,14 +1,13 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, test } from "node:test";
+import { spawnCli } from "./cli-helper.ts";
 import { fileURLToPath } from "node:url";
 
 // Real CLI processes over real QMD storage. Only external inference is faked
 // (qmd-fake-inference.js); the real local-model smoke is qmd-model-proof.js find.
-const BIN = fileURLToPath(new URL("../bin/wiki.js", import.meta.url));
 const GUARD = fileURLToPath(new URL("./qmd-cli-guard.js", import.meta.url));
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-qmd-find-"));
 after(() => {
@@ -21,8 +20,8 @@ type Call = { op: string; models?: Record<string, string>; tokenizer?: string; q
 function cli(vault: string, args: string[], mode = "", json = true, extraEnv: Record<string, string> = {}) {
   const log = path.join(vault + ".calls.jsonl");
   fs.rmSync(log, { force: true });
-  const result = spawnSync(process.execPath, ["--import", GUARD, BIN, "--vault", vault, ...(json ? ["--json"] : []), ...args], {
-    encoding: "utf8", timeout: 30000,
+  const result = spawnCli(["--vault", vault, ...(json ? ["--json"] : []), ...args], {
+    imports: [GUARD], timeout: 30000,
     env: { ...process.env, HOME: temp, XDG_CACHE_HOME: path.join(temp, "cache"), XDG_CONFIG_HOME: path.join(temp, "config"), XDG_DATA_HOME: path.join(temp, "data"), WIKI_VAULT: "", QMD_EMBED_MODEL: "", WIKI_QMD_CLI_GUARD: mode, WIKI_QMD_CALL_LOG: log, WIKI_QMD_DENY_SUBPROCESS: "1", ...extraEnv },
   });
   assert.equal(result.error, undefined);
@@ -63,7 +62,7 @@ test("wiki:11 fast find forwards one typed lex/vec request without expansion or 
   assert.equal(result.calls[1]?.request?.rerank, false);
   assert.equal(result.data.mode, "fast"); assert.equal(result.data.rerank, false);
   assert.deepEqual(result.data.matches.map((m: { path: string }) => m.path), [star]);
-  assert.equal(result.data.textCoverage.state, "complete"); assert.equal(result.data.textCoverage.inventory.length, 2);
+  assert.equal(result.data.textCoverage.state, "complete"); assert.equal(result.data.textCoverage.inventoryCount, 2);
   assert.deepEqual(result.data.embeddingCoverage, { state: "incomplete", contentHashes: 2 }, "Pending embeddings are reported separately from text coverage");
   const terms = cli(vault, ["find", question, "--terms", "garden tomatoes"], "fake-inference");
   assert.equal(terms.status, 0); assert.deepEqual(ops(terms.calls), ["createStore", "search"]);
@@ -161,16 +160,36 @@ test("wiki:11 SIGTERM during explicit embedding, expansion or search is never re
   }
 });
 
-test("wiki:11 a writer taking the index lock between text sync and find/embed is conflict exit 3, not unavailable", () => {
+test("wiki:11 find and search sync --embed hold one index lock from text sync through query/embedding; a writer arriving after release is untouched", () => {
   const vault = fresh(); note(vault, "Observatory", "Observatory telescope");
   configure(vault, ["embed"]);
   for (const args of [["find", "telescope"], ["search", "sync", "--embed"]]) {
     const lock = path.join(vault, ".wiki/search/writer.lock"); fs.rmSync(lock, { force: true });
     const result = cli(vault, args, "fake-inference-steal-lock");
-    assert.equal(result.status, 3, JSON.stringify(result.data)); assert.equal(result.data.error.code, "conflict");
-    assert.equal(result.data.textCoverage.state, "complete", "Text sync finished before the other writer arrived");
+    assert.notEqual(result.data.error?.code, "conflict", JSON.stringify(result.data));
+    assert.equal(result.data.textCoverage.state, "complete", JSON.stringify(result.data));
+    const ops = result.calls.map(c => c.op).filter(op => ["lock", "unlock", "update", args[0] === "find" ? "search" : "embed"].includes(op));
+    assert.deepEqual(ops, ["lock", "update", args[0] === "find" ? "search" : "embed", "unlock"], "One lock spans text sync and the query or embedding");
     assert.equal(fs.readFileSync(lock, "utf8"), "other writer", "The other writer's lock is never removed");
-    const human = cli(vault, args, "fake-inference-steal-lock", false); assert.equal(human.status, 3); assert.match(human.stderr, /^conflict:/);
+    fs.rmSync(lock);
+  }
+});
+
+test("wiki:12 a failed index-lock release after a successful text sync never reports complete coverage for find or search sync --embed", () => {
+  const vault = fresh(); note(vault, "Observatory", "Observatory telescope");
+  configure(vault, ["embed"]);
+  for (const args of [["find", "telescope"], ["search", "sync", "--embed"]]) {
+    const lock = path.join(vault, ".wiki/search/writer.lock"); fs.rmSync(lock, { force: true });
+    const result = cli(vault, args, "fake-inference-release-fail");
+    assert.equal(result.status, 7, JSON.stringify(result.data)); assert.equal(result.data.error.code, "unavailable");
+    assert.equal(result.data.error.message, "Search synchronization unavailable");
+    assert.equal(result.data.textCoverage.state, "unavailable", JSON.stringify(result.data));
+    assert.match(JSON.stringify(result.data.diagnostics), /Writer lock removal failed: Injected writer lock removal failure/);
+    assert.equal(fs.existsSync(lock), true, "The lock is reported retained, not removed");
+    assert.equal(fs.existsSync(path.join(vault, ".wiki/search/coverage.json")), false, "No receipt survives a retained lock");
+    assert.equal(result.data.matches, undefined); assert.equal(result.data.embedding, undefined);
+    fs.rmSync(lock); // Explicit operator recovery between runs.
+    const human = cli(vault, args, "fake-inference-release-fail", false); assert.equal(human.status, 7); assert.match(human.stderr, /^unavailable: Search synchronization unavailable/);
     fs.rmSync(lock);
   }
 });

@@ -1,36 +1,17 @@
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
-import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
-import type { QMDStore } from "@tobilu/qmd";
 import { inspectContainedPath } from "./paths.ts";
-import { inspectVault } from "./lint.ts";
-import { isMapping } from "./frontmatter.ts";
-import { indexFreshnessDiagnostics } from "./navigation.ts";
-import type { ErrorCode } from "./vault.ts";
-import { qmdModelReadiness, DEEP_ROLES, type QmdModels, type QmdModelRole } from "./qmd.ts";
+import { extractorEnvironment } from "./extract-process.ts";
+import { checkVault, searchConcepts, type ValidatedInventory } from "./lint.ts";
+import { indexFreshnessDiagnostics, navigationIndexes } from "./navigation.ts";
+import { containedPath as checked, hasLayoutKind, profileProblem, VAULT_LAYOUT, type ErrorCode, type LayoutKind } from "./vault.ts";
+import { qmdModelReadiness, inspectQmdIndex, DEEP_ROLES, QMD_WRITER_LOCK, type QmdEnvironment, type QmdModels, type QmdModelRole } from "./qmd.ts";
 
 type Problem = { path: string; message: string; fix: string };
 type Check = { state: "ready" } | { state: "unavailable" };
 type VersionCheck = { state: "ready"; version: string } | { state: "unavailable"; version?: string };
-type Coverage = { state: "complete" | "incomplete" | "unavailable" };
-type EmbeddingCoverage = { state: "complete" | "incomplete"; contentHashes: number } | { state: "unavailable" };
-const SEARCH = ".wiki/search";
-const DATABASE = SEARCH + "/qmd.sqlite";
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error); }
-function digest(bytes: string | Buffer): string { return "sha256:" + createHash("sha256").update(bytes).digest("hex"); }
-// QMD 2.8.3 stores standalone FTS fields with each CJK run spaced by character
-// (store.js normalizeCjkForFTS). Compare that representation, not raw Markdown.
-function qmdFtsText(text: string): string {
-  return text.replace(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]+/gu, run => " " + Array.from(run).join(" ") + " ");
-}
-function checked(root: string, relative: string): string {
-  const inspected = inspectContainedPath(root, relative);
-  if (!inspected.ok) throw new Error(inspected.problem.message);
-  return inspected.full;
-}
 function readJson(root: string, relative: string): unknown { return JSON.parse(fs.readFileSync(checked(root, relative), "utf8")); }
 
 /** Delegate all file/configuration validation to search's model-free preflight.
@@ -60,7 +41,7 @@ const EXTRACTOR_PROBES = {
 
 function extractor(command: keyof typeof EXTRACTOR_PROBES, problems: Problem[]): VersionCheck {
   const probe = EXTRACTOR_PROBES[command];
-  const result = spawnSync(command, probe.args, { encoding: "utf8", timeout: 5000, maxBuffer: 1024 * 1024, windowsHide: true });
+  const result = spawnSync(command, probe.args, { env: extractorEnvironment(), encoding: "utf8", timeout: 5000, maxBuffer: 1024 * 1024, windowsHide: true });
   const output = result.stdout + "\n" + result.stderr;
   const version = probe.version.exec(output)?.[1];
   if (!result.error && result.status === 0 && version) return { state: "ready", version };
@@ -69,15 +50,11 @@ function extractor(command: keyof typeof EXTRACTOR_PROBES, problems: Problem[]):
 }
 
 type ReportProblem = (file: string, text: string, fix: string, code?: ErrorCode) => void;
-const REQUIRED_LAYOUT = [["", "directory"], [".wiki", "directory"], [".wiki/config.json", "file"], [".wiki/types", "directory"], [".wiki/tmp", "directory"], [".wiki/locks", "directory"], ["index.md", "file"], ["log.md", "file"], [".gitignore", "file"]] as const;
-
-const HAS_KIND = { directory: (stat: fs.Stats) => stat.isDirectory(), file: (stat: fs.Stats) => stat.isFile() };
-
-function layoutEntryProblem(root: string, relative: string, kind: keyof typeof HAS_KIND): string | undefined {
+function layoutEntryProblem(root: string, relative: string, kind: LayoutKind): string | undefined {
   try {
     const item = inspectContainedPath(root, relative);
     if (!item.ok) return item.problem.message;
-    if (!item.stat || !HAS_KIND[kind](item.stat)) return "Missing or not a " + kind;
+    if (!item.stat || !hasLayoutKind(item.stat, kind)) return "Missing or not a " + kind;
     return undefined;
   } catch (error) { return message(error); }
 }
@@ -85,7 +62,7 @@ function layoutEntryProblem(root: string, relative: string, kind: keyof typeof H
 /** Reports every missing or wrong-kind layout entry; ready only when none is reported. */
 function layoutCheck(root: string, problem: ReportProblem): Check {
   let ready = true;
-  for (const [relative, kind] of REQUIRED_LAYOUT) {
+  for (const { path: relative, kind } of VAULT_LAYOUT) {
     const text = layoutEntryProblem(root, relative, kind);
     if (text !== undefined) { ready = false; problem(relative, text, "Inspect incomplete layout and retained files before explicit repair; doctor changes nothing"); }
   }
@@ -93,7 +70,7 @@ function layoutCheck(root: string, problem: ReportProblem): Check {
 }
 
 function retainedLockProblems(root: string, problem: ReportProblem): void {
-  for (const relative of [".wiki/locks/mutation.lock", SEARCH + "/writer.lock"]) {
+  for (const relative of [".wiki/locks/mutation.lock", QMD_WRITER_LOCK]) {
     // throwIfNoEntry suppresses only ENOENT: an absent lock is the healthy state.
     try { if (fs.lstatSync(checked(root, relative), { throwIfNoEntry: false })) problem(relative, "Retained writer lock; inspection cannot certify a stable inventory", "Inspect ownership and verify no cooperating owner is active before explicit removal; never remove based on age", "conflict"); }
     catch (error) { problem(relative, message(error), "Inspect retained lock without reclaiming it"); }
@@ -127,50 +104,16 @@ function indexReadProblems(root: string, indexes: Iterable<[string, string]>): R
 }
 
 /** Navigation freshness is judged only over a clean inventory. */
-function navigationCheck(root: string, inventory: ReturnType<typeof inspectVault> | undefined, problem: ReportProblem): Check {
+function navigationCheck(root: string, inventory: ValidatedInventory | undefined, problem: ReportProblem): Check {
   if (!inventory || inventory.diagnostics.length) return { state: "unavailable" };
-  const problems = indexReadProblems(root, inventory.indexes);
+  const problems = indexReadProblems(root, navigationIndexes(inventory));
   for (const d of problems) problem(d.path, d.rule + ": " + d.message, d.fix);
   return { state: problems.length ? "unavailable" : "ready" };
 }
 
-/** Throws unless the retained search state shows no active or interrupted writer. */
-function assertQuiescentSearch(root: string): void {
-  if (fs.existsSync(checked(root, SEARCH + "/writer.lock"))) throw new Error("Index writer lock retained; do not trust previous coverage");
-  for (const suffix of ["-wal", "-shm", "-journal"]) {
-    if (fs.existsSync(checked(root, DATABASE + suffix))) throw new Error("Retained SQLite sidecar " + DATABASE + suffix + "; index may be active or interrupted. Inspect the writer before explicit recovery");
-  }
-}
-
-function isWithin(base: string, target: string): boolean {
-  const relative = path.relative(base, target);
-  return !relative || relative !== ".." && !relative.startsWith(".." + path.sep) && !path.isAbsolute(relative);
-}
-
-/** Throws when the diagnostic scratch directory lies inside the vault or HOME/XDG roots. */
-function assertIsolatedScratch(root: string, scratch: string): void {
-  for (const protectedRoot of [root, process.env.HOME, process.env.XDG_CACHE_HOME, process.env.XDG_CONFIG_HOME, process.env.XDG_DATA_HOME]) {
-    if (!protectedRoot) continue;
-    const base = fs.existsSync(protectedRoot) ? fs.realpathSync(protectedRoot) : path.resolve(protectedRoot);
-    if (isWithin(base, scratch)) throw new Error("Diagnostic scratch directory must be outside the vault and HOME/XDG; set TMPDIR to an isolated temporary directory");
-  }
-}
-
-/** Embedding metadata is healthy only when every active chunk has a physical vector row. */
-function embeddingVectorsHealthy(db: QMDStore["internal"]["db"], embedded: { hash: string; seq: number }[], problem: ReportProblem): boolean {
-  if (!embedded.length) return true;
-  try {
-    const vectors = new Set(db.prepare("SELECT hash_seq FROM inspected.vectors_vec").all<{ hash_seq: string }>().map(row => row.hash_seq));
-    if (embedded.some(row => !vectors.has(row.hash + "_" + row.seq))) throw new Error("Embedding metadata has missing physical vector rows");
-    return true;
-  } catch (error) {
-    problem(DATABASE, "Embedding vector storage is incomplete: " + message(error), "Inspect the interrupted embedding operation and retained local database before explicit search sync --embed; metadata alone does not prove vector coverage");
-    return false;
-  }
-}
-
-/** Inspect only. No writer lock, synchronization, note publication, or SDK model resolution. */
-export async function doctorVault(selected: string) {
+/** Inspect only. No writer lock, synchronization, note publication, or SDK model resolution.
+ * env: the request environment the index inspection reads. */
+export async function doctorVault(selected: string, env: QmdEnvironment) {
   const root = path.resolve(selected), diagnostics: Problem[] = [];
   let failure: ErrorCode | undefined;
   const problem: ReportProblem = (file, text, fix, code = "damaged") => {
@@ -183,19 +126,20 @@ export async function doctorVault(selected: string) {
   let profile: Check = { state: "unavailable" };
   try {
     const config = readJson(root, ".wiki/config.json");
-    if (!isMapping(config) || !("profile" in config) || !("version" in config)) throw new Error("Configuration requires profile and version");
-    if (config.profile !== "wiki-okf" || config.version !== 1) problem(".wiki/config.json", "Unsupported profile/version; expected wiki-okf version 1", "Select a compatible explicit vault; no conversion or reinitialization performed", "unsupported");
+    const mismatch = profileProblem(config);
+    if (mismatch === "identity") throw new Error("Configuration requires profile and version");
+    if (mismatch === "unsupported") problem(".wiki/config.json", "Unsupported profile/version; expected wiki-okf version 1", "Select a compatible explicit vault; no conversion or reinitialization performed", "unsupported");
     else profile = { state: "ready" };
   } catch (error) { problem(".wiki/config.json", message(error), "Inspect retained configuration and restore valid wiki-okf version 1 JSON explicitly; do not reinitialize over retained files"); }
   const layout = layoutCheck(root, problem);
-  let inventory: ReturnType<typeof inspectVault> | undefined;
+  let inventory: ValidatedInventory | undefined;
   let registry: Check = { state: "unavailable" };
   if (profile.state === "ready") {
     try {
       const directory = inspectContainedPath(root, ".wiki/types");
       if (!directory.ok) throw new Error(directory.problem.message);
       if (!directory.stat?.isDirectory() || !fs.readdirSync(directory.full).some(name => name.endsWith(".json"))) throw new Error("Missing registry records in .wiki/types");
-      inventory = inspectVault(root);
+      inventory = checkVault(root);
       const issues = inventory.diagnostics;
       registry = { state: issues.some(d => d.rule.startsWith("registry.")) ? "unavailable" : "ready" };
       for (const d of issues) problem(d.path, d.rule + ": " + d.message, d.fix);
@@ -207,95 +151,7 @@ export async function doctorVault(selected: string) {
   const node = nodeCheck(problem);
   const extractors = { pandoc: extractor("pandoc", diagnostics), pdftotext: extractor("pdftotext", diagnostics) };
   const modelReadiness = doctorModelReadiness(root, diagnostics);
-  let qmd: VersionCheck = { state: "unavailable" };
-  let database: Check = { state: "unavailable" };
-  let textCoverage: Coverage = { state: "unavailable" };
-  let embeddingCoverage: EmbeddingCoverage = { state: "unavailable" };
-  let probe: QMDStore | undefined, snapshotStore: QMDStore | undefined;
-  let temporary: string | undefined;
-  try {
-    const entry = import.meta.resolve("@tobilu/qmd");
-    const metadata: unknown = JSON.parse(fs.readFileSync(fileURLToPath(new URL("../package.json", entry)), "utf8"));
-    if (!isMapping(metadata) || typeof metadata.version !== "string") throw new Error("qmd package has no version");
-    qmd = { state: "unavailable", version: metadata.version };
-    const { createStore } = await import("@tobilu/qmd");
-    // Native SQLite/FTS and sqlite-vec probe uses memory only, not the vault store.
-    probe = await createStore({ dbPath: ":memory:", config: { collections: {} } });
-    probe.internal.db.prepare("SELECT vec_version()").get();
-    await probe.searchLex("doctor", { collection: "concepts", limit: 1 });
-    qmd = { state: "ready", version: metadata.version };
-    if (profile.state !== "ready" || !inventory) throw new Error("Compatible profile and readable concept inventory required");
-    assertQuiescentSearch(root);
-    // Even a read-only SQLite connection can create WAL/SHM. Capture bytes into
-    // a disposable snapshot instead. Never open the retained database with SQLite.
-    const bytes = fs.readFileSync(checked(root, DATABASE));
-    const scratch = fs.realpathSync(os.tmpdir());
-    assertIsolatedScratch(root, scratch);
-    temporary = fs.mkdtempSync(path.join(scratch, "wiki-doctor-db-"));
-    const copied = path.join(temporary, "qmd.sqlite");
-    fs.writeFileSync(copied, bytes, { flag: "wx" });
-    probe.internal.db.prepare("ATTACH DATABASE ? AS inspected").run(copied);
-    const integrity = probe.internal.db.prepare("PRAGMA inspected.quick_check").all<{ quick_check: string }>();
-    if (integrity.length !== 1 || integrity[0]?.quick_check !== "ok") throw new Error("SQLite integrity check failed: " + JSON.stringify(integrity));
-    if (probe.internal.db.prepare("PRAGMA inspected.foreign_key_check").all().length) throw new Error("SQLite foreign-key check failed");
-    // Pin the required 2.8.3 metadata schema before the SDK can migrate its copy.
-    const active = probe.internal.db.prepare("SELECT d.id, d.collection, d.path, d.title, c.doc FROM inspected.documents d JOIN inspected.content c ON c.hash = d.hash WHERE d.active = 1").all<{ id: number; collection: string; path: string; title: string; doc: string }>();
-    probe.internal.db.prepare("SELECT hash, seq, model, embed_fingerprint, total_chunks FROM inspected.content_vectors").all();
-    probe.internal.db.exec("INSERT INTO inspected.documents_fts(documents_fts) VALUES('integrity-check')");
-    // Internal FTS integrity permits missing/stale standalone rows. Check the
-    // retained set and content before SDK initialization can rebuild its copy.
-    const lexical = probe.internal.db.prepare("SELECT rowid, filepath, title, body FROM inspected.documents_fts").all<{ rowid: number; filepath: string; title: string; body: string }>();
-    const lexicalById = new Map(lexical.map(row => [row.rowid, row]));
-    const lexicalHealthy = lexical.length === active.length && active.every(doc => {
-      const row = lexicalById.get(doc.id);
-      return row?.filepath === qmdFtsText(doc.collection + "/" + doc.path) && row.title === qmdFtsText(doc.title) && row.body === qmdFtsText(doc.doc);
-    });
-    if (!lexicalHealthy) problem(DATABASE, "Lexical index rows do not equal active document identities and content", "Inspect the retained database and run search sync explicitly; FTS internal integrity and timestamps do not prove text coverage");
-    const capturedById = new Map(inventory.concepts.map(concept => [createHash("sha256").update(concept.path).digest("hex") + ".md", concept.markdown]));
-    const indexedInventoryMatches = active.length === capturedById.size && active.every(doc => doc.collection === "concepts" && capturedById.get(doc.path) === doc.doc);
-    if (!indexedInventoryMatches) problem(DATABASE, "Indexed document set/content differs from the captured inventory", "Inspect current notes and run search sync explicitly; no completeness is inferred from timestamps");
-    const embedded = probe.internal.db.prepare("SELECT DISTINCT v.hash, v.seq FROM inspected.content_vectors v JOIN inspected.documents d ON d.hash = v.hash WHERE d.active = 1").all<{ hash: string; seq: number }>();
-    const vectorsHealthy = embeddingVectorsHealthy(probe.internal.db, embedded, problem);
-    probe.internal.db.exec("DETACH DATABASE inspected");
-    snapshotStore = await createStore({ dbPath: copied, config: { collections: {}, models: modelReadiness.models } });
-    const status = await snapshotStore.getStatus();
-    database = { state: lexicalHealthy && vectorsHealthy ? "ready" : "unavailable" };
-    const expected = inventory.concepts.map(c => ({ path: c.path, digest: digest(c.markdown) })).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
-    let complete = lexicalHealthy && indexedInventoryMatches && inventory.diagnostics.length === 0 && status.totalDocuments === expected.length;
-    const receipt = readJson(root, SEARCH + "/coverage.json");
-    if (!isMapping(receipt) || receipt.version !== 1 || JSON.stringify(receipt.inventory) !== JSON.stringify(expected)) {
-      complete = false;
-      problem(SEARCH + "/coverage.json", "Successful coverage receipt does not match captured path/content digests", "Run search sync explicitly after inspecting earlier failures");
-    }
-    const identities = readJson(root, SEARCH + "/identities.json");
-    const expectedIdentities = inventory.concepts.map(c => ({ id: createHash("sha256").update(c.path).digest("hex") + ".md", path: c.path }));
-    const identityFormat = isMapping(identities) && identities.version === 1 && Array.isArray(identities.paths);
-    const actualIdentities: unknown[] = isMapping(identities) && Array.isArray(identities.paths) ? identities.paths : [];
-    if (!identityFormat || actualIdentities.length !== expectedIdentities.length || expectedIdentities.some(expected => !actualIdentities.some(row => isMapping(row) && row.id === expected.id && row.path === expected.path))) {
-      complete = false; problem(SEARCH + "/identities.json", "Missing or incompatible canonical identity mapping", "Inspect retained search state, then run search sync explicitly");
-    }
-    for (const concept of inventory.concepts) {
-      const id = createHash("sha256").update(concept.path).digest("hex") + ".md";
-      if (await snapshotStore.getDocumentBody("qmd://concepts/" + id) !== concept.markdown) {
-        complete = false; problem(concept.path, "Indexed text differs from captured note bytes", "Run search sync explicitly; timestamps do not establish coverage");
-      }
-    }
-    if (!bytes.equals(fs.readFileSync(checked(root, DATABASE))) || ["/writer.lock", "/qmd.sqlite-wal", "/qmd.sqlite-shm", "/qmd.sqlite-journal"].some(suffix => fs.existsSync(checked(root, SEARCH + suffix)))) throw new Error("Search database changed during inspection");
-    textCoverage = { state: complete ? "complete" : "incomplete" };
-    if (!complete && !diagnostics.some(d => d.path.startsWith(SEARCH))) problem(SEARCH, "Text index does not cover the complete captured inventory", "Inspect diagnostics and run search sync explicitly");
-    embeddingCoverage = vectorsHealthy && modelReadiness.models.embed ? { state: complete && status.needsEmbedding === 0 ? "complete" : "incomplete", contentHashes: status.needsEmbedding } : { state: "unavailable" };
-  } catch (error) {
-    problem(qmd.state === "ready" ? DATABASE : "@tobilu/qmd (native SQLite/sqlite-vec)", message(error), qmd.state === "ready" ? "Inspect retained local database, receipts and locks before explicit search sync; doctor never repairs them" : "Supply the pinned qmd SDK and compatible native dependencies for this Node runtime; doctor does not install them", "unavailable");
-    textCoverage = { state: "unavailable" }; embeddingCoverage = { state: "unavailable" };
-  } finally {
-    for (const store of [snapshotStore, probe]) {
-      try { await store?.close(); } catch (error) { problem(DATABASE, "Diagnostic database close failed: " + message(error), "Inspect runtime/native dependency health", "unavailable"); database = { state: "unavailable" }; textCoverage = { state: "unavailable" }; embeddingCoverage = { state: "unavailable" }; }
-    }
-    if (temporary) {
-      try { fs.rmSync(temporary, { recursive: true, force: true }); }
-      catch (error) { problem(temporary, "Diagnostic snapshot cleanup failed: " + message(error), "Inspect and explicitly remove this disposable diagnostic snapshot; the vault was not repaired", "unavailable"); }
-    }
-  }
+  const { qmd, database, textCoverage, embeddingCoverage } = await inspectQmdIndex(root, profile.state === "ready" && inventory ? { concepts: searchConcepts(inventory), diagnostics: inventory.diagnostics } : undefined, modelReadiness.models, problem, env);
   if (diagnostics.length) failure ??= "unavailable";
   return {
     ok: failure === undefined,

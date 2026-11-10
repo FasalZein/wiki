@@ -201,14 +201,15 @@ boundary as the other commands, not protection against hostile concurrent swaps.
 From the repository root:
 
 ```sh
-WIKI_TEST_PATTERN="wiki:01|wiki:02" heavy -- bun run test:wiki
-WIKI_TEST_PATTERN="wiki:06" heavy -- bun run test:wiki
+WIKI_TEST_PATTERN="wiki:01|wiki:02" heavy --slots 2 -- bun run test:wiki
+WIKI_TEST_PATTERN="wiki:06" heavy --slots 2 -- bun run test:wiki
 heavy -- bun run typecheck:wiki
 ```
 
 The test runner reads `WIKI_TEST_PATTERN` and passes its name-pattern option before
-file arguments to Node. `verify:wiki` checks this package and all its tests. The
-existing `verify:next` wildcard also runs these tests, and its TypeScript project
+file arguments to Node. `verify:wiki` checks this package and all its tests.
+`verify:next` also runs these tests through the same runner with `--all`, which ignores
+`WIKI_TEST_PATTERN`, so the gate always runs every test. Its TypeScript project
 includes this package source and tests. Full suites run at the batch gate, not
 after every slice. Current process tests use disposable fixtures only.
 
@@ -623,7 +624,7 @@ The first detected error sets the exit: usage 2, retained lock 3, missing vault 
 unsupported profile 5, damaged retained state 6, unavailable dependency or
 uninspectable search 7. Human output includes the same diagnostics.
 
-Run `WIKI_TEST_PATTERN='wiki:17' heavy -- bun run test:wiki` for real CLI checks.
+Run `WIKI_TEST_PATTERN='wiki:17' heavy --slots 2 -- bun run test:wiki` for real CLI checks.
 They compare byte digests and complete entry listings, including `.wiki/`, against
 before/after vault and decoy HOME/XDG snapshots on healthy and damaged state.
 
@@ -644,11 +645,30 @@ prevents a validated roster, so no concepts are indexed until it is repaired.
 
 JSON includes ok, coverageBasis: "captured-inventory", textCoverage,
 embeddingCoverage, and diagnostics. Each public coverage state is
-complete, incomplete, or unavailable. Complete text coverage includes
-canonical paths and full-file SHA-256 digests. Pending embeddings are reported as
+complete, incomplete, or unavailable. Pending embeddings are reported as
 embeddingCoverage: {state: "incomplete", contentHashes: N}, not as complete
 coverage. A model-free text update does not fill embeddings. An empty current
 captured inventory can have vacuously complete embedding coverage.
+
+Complete text coverage in `search sync --json` and `find --json` is
+`{state: "complete", inventoryCount: N, inventoryDigest: "sha256:<hex>"}`.
+The output does not list the inventory; its size does not grow with the vault.
+`inventoryCount` is the number of indexed concepts. `inventoryDigest` is
+"sha256:" plus the lowercase hex SHA-256 of the UTF-8 bytes of
+`JSON.stringify(inventory)`. `inventory` is the array of
+`{"path": <canonical path>, "digest": "sha256:<hex of the full file bytes>"}`
+objects, keys in that order, sorted by path in JavaScript string order (UTF-16
+code units), with no whitespace. These are the exact bytes of the `inventory`
+array in the receipt `.wiki/search/coverage.json` (`{"version":1,"inventory":[...]}`),
+whose format is unchanged and which doctor still compares in full. Recompute
+the digest from the receipt, run from the vault root, with:
+
+    node -e 'const r=JSON.parse(require("fs").readFileSync(".wiki/search/coverage.json","utf8"));console.log("sha256:"+require("crypto").createHash("sha256").update(JSON.stringify(r.inventory)).digest("hex"))'
+
+Or recompute it from the vault: list every captured concept as `{path, digest}`
+(canonical path and `sha256:` digest of its current bytes), sort by path, and hash
+the same serialization.
+Incomplete and unavailable text coverage keep their `diagnostics` list.
 
 Coverage attests captured bytes compared with the actual indexed Markdown, not
 files frozen until command return. A noncooperating editor can change files after

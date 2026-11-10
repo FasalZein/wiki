@@ -7,23 +7,18 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, test } from "node:test";
+import { BIN, spawnCli, spawnJson } from "./cli-helper.ts";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseNoteText } from "../src/frontmatter.ts";
 import { parseMarkdown, visitAuthored } from "../src/markdown.ts";
 import { buildPdf } from "./pdf-fixture.ts";
 
-const BIN = fileURLToPath(new URL("../bin/wiki.js", import.meta.url));
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-pdf-"));
 after(() => fs.rmSync(temp, { recursive: true, force: true }));
 let counter = 0;
 const digest = (bytes: Buffer | string) => "sha256:" + createHash("sha256").update(bytes).digest("hex");
 function cli(root: string, args: string[], env: NodeJS.ProcessEnv = {}) {
-  const result = spawnSync(process.execPath, [BIN, "--json", "--vault", root, ...args], {
-    encoding: "utf8", timeout: 15000, killSignal: "SIGKILL", env: { ...process.env, HOME: temp, WIKI_VAULT: "", ...env },
-  });
-  assert.equal(result.error, undefined); assert.equal(result.stderr, "");
-  assert.equal(result.stdout.trim().split("\n").length, 1);
-  return { status: result.status, data: JSON.parse(result.stdout) };
+  return spawnJson(["--vault", root, ...args], { timeout: 15000, killSignal: "SIGKILL", env: { HOME: temp, ...env } });
 }
 function fresh(bytes: Buffer) {
   const directory = path.join(temp, String(++counter)); fs.mkdirSync(directory);
@@ -168,6 +163,23 @@ if (${JSON.stringify(phase)} === 'extraction' && process.argv.includes('-v')) {
   });
 }
 
+test("wiki:15 the extractor child receives only PATH, never host variables such as tokens", () => {
+  const { root, input, directory } = fresh(buildPdf("BT ET"));
+  const keys = path.join(directory, "keys.jsonl");
+  // Records environment key names only, never values.
+  const bin = tool(directory, `
+require('node:fs').appendFileSync(${JSON.stringify(keys)}, JSON.stringify(Object.keys(process.env).sort()) + '\\n');
+if (process.argv.includes('-v')) process.stderr.write('pdftotext version test');
+else { process.stdin.resume(); process.stdin.on('end', () => process.stdout.write('Fake text.\\n')); }
+`);
+  const result = cli(root, args(input), { PATH: bin, WIKI_TEST_SECRET_TOKEN: "sentinel-not-for-children" });
+  assert.equal(result.status, 0, JSON.stringify(result));
+  const runs = fs.readFileSync(keys, "utf8").trim().split("\n").map(line => JSON.parse(line));
+  assert.equal(runs.length, 2, "version probe and extraction");
+  // macOS CoreFoundation sets __CF_USER_TEXT_ENCODING inside the fake's own Node process; the parent did not pass it.
+  for (const names of runs) assert.deepEqual(names.filter((name: string) => name !== "__CF_USER_TEXT_ENCODING"), ["PATH"]);
+});
+
 test("wiki:15 same captured PDF buffer feeds stdin with documented flags despite pathname replacement", () => {
   const bytes = buildPdf("BT /F1 24 Tf 72 720 Td (Original capture.) Tj ET");
   const { root, input, directory } = fresh(bytes);
@@ -219,8 +231,8 @@ test("wiki:15 real PDF instructions, headings and links remain inert literal tex
 
 test("wiki:15 human PDF output explicitly reports empty layer and dependency errors", () => {
   const { root, input, directory } = fresh(buildPdf("BT ET"));
-  const run = (env: NodeJS.ProcessEnv) => spawnSync(process.execPath, [BIN, "--vault", root, ...args(input)], {
-    encoding: "utf8", timeout: 15000, env: { ...process.env, HOME: temp, WIKI_VAULT: "", ...env },
+  const run = (env: NodeJS.ProcessEnv) => spawnCli(["--vault", root, ...args(input)], {
+    timeout: 15000, env: { ...process.env, HOME: temp, WIKI_VAULT: "", ...env },
   });
   const bin = path.join(directory, "missing"); fs.mkdirSync(bin);
   const before = snapshot(root), failed = run({ PATH: bin });

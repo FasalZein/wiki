@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { after, test } from "node:test";
+import { spawnCli } from "./cli-helper.ts";
 import { parse } from "yaml";
 
 const AGENT = new URL("../../../agents/wiki.md", import.meta.url);
@@ -32,7 +32,6 @@ test("wiki:19 the Pi agent example has documented frontmatter, stays inactive, a
 
 // A test-only deterministic protocol driver, not an autonomous agent or production
 // handoff endpoint. Real CLI, qmd storage and lexical search run without models.
-const BIN = fileURLToPath(new URL("../bin/wiki.js", import.meta.url));
 const GUARD = fileURLToPath(new URL("./qmd-cli-guard.js", import.meta.url));
 const fixture = JSON.parse(fs.readFileSync(new URL("./fixtures/wiki-handoff.json", import.meta.url), "utf8"));
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-agent-"));
@@ -64,8 +63,8 @@ function session(vault: string, mode = "model-free") {
   const callLog = path.join(temp, "qmd-calls-" + ++counter + ".jsonl");
   const calls: { args: string[]; status: number | null }[] = [];
   function cli(args: string[]) {
-    const result = spawnSync(process.execPath, ["--import", GUARD, BIN, "--vault", vault, ...args, "--json"], {
-      encoding: "utf8", timeout: 30000, cwd: temp,
+    const result = spawnCli(["--vault", vault, ...args, "--json"], {
+      imports: [GUARD], timeout: 30000, cwd: temp,
       env: { ...process.env, HOME: temp, XDG_CACHE_HOME: path.join(temp, "cache"), XDG_CONFIG_HOME: path.join(temp, "config"),
         XDG_DATA_HOME: path.join(temp, "data"), WIKI_VAULT: "", QMD_EMBED_MODEL: "",
         WIKI_QMD_CLI_GUARD: mode, WIKI_QMD_CALL_LOG: callLog, WIKI_QMD_DENY_SUBPROCESS: "1" },

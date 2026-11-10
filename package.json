@@ -1,7 +1,7 @@
 {
   "name": "wiki",
   "version": "0.1.0",
-  "description": "Workspace root for the wiki CLI (packages/wiki) and its Node packages, plus local mutation tooling.",
+  "description": "Workspace root for the wiki CLI (packages/wiki) and local mutation tooling.",
   "type": "module",
   "scripts": {
     "mutation:file": "node scripts/mutation-file.mjs",
@@ -11,10 +11,7 @@
     "test:wiki": "node packages/wiki/test/run.js",
     "verify:wiki": "bun run typecheck:wiki && bun run test:wiki",
     "boot:wiki": "node packages/wiki/scripts/boot.js",
-    "verify:next": "tsc -p packages/tsconfig.json && node --test \"packages/*/test/*.test.ts\""
-  },
-  "dependencies": {
-    "gray-matter": "^4.0.3"
+    "verify:next": "tsc -p packages/tsconfig.json && node packages/wiki/test/run.js --all"
   },
   "devDependencies": {
     "@stryker-mutator/core": "10.1.1",

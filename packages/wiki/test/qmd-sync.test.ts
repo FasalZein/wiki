@@ -10,7 +10,8 @@ import tls from "node:tls";
 import { syncBuiltinESMExports } from "node:module";
 import { createHash } from "node:crypto";
 import "./qmd-cleanup-guard.js";
-import { syncQmdText, searchQmdLex } from "../src/qmd.ts";
+import { DatabaseSync } from "node:sqlite";
+import { syncQmdText, searchQmdLex, findQmd, syncAndFindQmd, withRequestEnvironment } from "../src/qmd.ts";
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-qmd-"));
 // Importing the adapter does not import QMD. Sandbox all SDK defaults before first use.
@@ -48,7 +49,9 @@ test("wiki:10 real SDK adds exact full Markdown without embeddings and retrieves
   assert.equal(found.matches.length, 1);
   assert.equal(found.matches[0]?.path, "personal/notes/quasar.md");
   assert.equal(found.matches[0]?.markdown, markdown);
-  assert.match(result.textCoverage.inventory[0]?.digest ?? "", /^sha256:[a-f0-9]{64}$/);
+  assert.equal(result.textCoverage.state, "complete");
+  if (result.textCoverage.state === "complete") assert.equal(result.textCoverage.inventoryCount, 1);
+  assert.match(result.state === "successful" ? result.textCoverage.inventoryDigest : "", /^sha256:[a-f0-9]{64}$/);
 });
 
 function receipt(root: string) { return path.join(root, ".wiki/search/coverage.json"); }
@@ -162,6 +165,81 @@ test("wiki:10 SDK-skipped empty content cannot pass indexed-body verification", 
   assert.equal(fs.existsSync(receipt(root)), false);
 });
 
+/** Rewrites one indexed body in place under its unchanged content hash: only an exact body comparison can see it. */
+function tamperIndexedBody(root: string, markdown: string, replacement: string) {
+  const db = new DatabaseSync(path.join(root, ".wiki/search/qmd.sqlite"));
+  try {
+    const hash = createHash("sha256").update(markdown).digest("hex");
+    assert.equal(db.prepare("UPDATE content SET doc = ? WHERE hash = ?").run(replacement, hash).changes, 1);
+  } finally { db.close(); }
+}
+
+test("wiki:10 an indexed body that differs from the captured Markdown under the same content hash is a find index mismatch and fails sync", async () => {
+  const root = fresh();
+  const good = inventory([note("star", "# Star\nGalaxy\n"), note("nova", "# Nova\nFlare\n")]);
+  fs.mkdirSync(path.join(root, "personal/notes"), { recursive: true });
+  for (const concept of good.concepts) fs.writeFileSync(path.join(root, concept.path), concept.markdown);
+  assert.equal((await syncQmdText(root, good)).state, "successful");
+  tamperIndexedBody(root, "# Star\nGalaxy\n", "# Star\nGalaxx\n");
+  const found = await findQmd(root, { mode: "lexical", requested: "fast", question: "flare", reason: [] }, good.concepts);
+  assert.equal(found.state, "successful", JSON.stringify(found));
+  assert.deepEqual(found.indexMismatch.map(d => d.path), ["personal/notes/star.md"]);
+  assert.match(found.indexMismatch[0]?.message ?? "", /different revision than this request captured/);
+  assert.deepEqual(found.matches.map(m => m.path), ["personal/notes/nova.md"]);
+  // QMD keeps the tampered row because the file hash is unchanged; the sync body check must catch it.
+  const resync = await syncQmdText(root, good);
+  assert.equal(resync.state, "unavailable", JSON.stringify(resync));
+  assert.match(JSON.stringify(resync), /Indexed Markdown differs from captured concept: personal\/notes\/star.md/);
+  assert.equal(fs.existsSync(receipt(root)), false);
+});
+
+test("wiki:12 a query hit whose indexed body differs from the captured revision is omitted, never rendered as current", async () => {
+  const root = fresh();
+  const good = inventory([note("star", "# Star\nGalaxy\n"), note("nova", "# Nova\nFlare\n")]);
+  fs.mkdirSync(path.join(root, "personal/notes"), { recursive: true });
+  for (const concept of good.concepts) fs.writeFileSync(path.join(root, concept.path), concept.markdown);
+  assert.equal((await syncQmdText(root, good)).state, "successful");
+  // The stale indexed body still matches the query, so the hit reaches rendering.
+  tamperIndexedBody(root, "# Star\nGalaxy\n", "# Star\nGalaxy old\n");
+  const found = await findQmd(root, { mode: "lexical", requested: "fast", question: "galaxy", reason: [] }, good.concepts);
+  assert.equal(found.state, "successful", JSON.stringify(found));
+  assert.deepEqual(found.matches, [], "The stale indexed excerpt never leaks as current");
+  assert.deepEqual(found.omitted.map(d => d.path), ["personal/notes/star.md"]);
+  assert.match(found.omitted[0]?.message ?? "", /Indexed content differs from the captured revision/);
+});
+
+test("wiki:10 overlapping request environment scopes restore the host environment once, whichever ends first", async () => {
+  // The writer-lock test below overlaps scopes the same way: a later request starts while an earlier one runs.
+  const host = { ...process.env };
+  // Names only: a failure message must not print environment values.
+  const changed = () => [...new Set([...Object.keys(host), ...Object.keys(process.env)])].filter(key => host[key] !== process.env[key]).sort();
+  const gate = () => { let open!: () => void; const opened = new Promise<void>(resolve => { open = resolve; }); return { open, opened }; };
+  const outerSet = gate(), innerStarted = gate(), outerEnd = gate(), innerEnd = gate();
+  const seen: (string | undefined)[] = [];
+  // Unlucky order: the outer scope sets a vault-local value (as open() does), the inner scope starts, the outer
+  // sets another value, the inner scope ends while the outer still runs, then the outer ends before a third scope.
+  const outer = withRequestEnvironment(host, async () => {
+    process.env.XDG_CACHE_HOME = "/vault/outer"; outerSet.open();
+    await innerStarted.opened; process.env.QMD_EMBED_MODEL = "/vault/outer.gguf";
+    await outerEnd.opened; seen.push(process.env.XDG_CACHE_HOME, process.env.QMD_EMBED_MODEL);
+  });
+  await outerSet.opened;
+  const inner = withRequestEnvironment(process.env, async () => { innerStarted.open(); await innerEnd.opened; });
+  const last = gate();
+  const third = withRequestEnvironment(process.env, async () => { await last.opened; });
+  innerEnd.open(); await inner;
+  outerEnd.open(); await outer;
+  assert.deepEqual(seen, ["/vault/outer", "/vault/outer.gguf"], "an inner scope that ends first must not strip the outer scope's values");
+  last.open(); await third;
+  assert.deepEqual(changed(), []);
+  // A nested scope with a different request environment is refused; the active scope is unaffected.
+  const hold = gate();
+  const active = withRequestEnvironment(host, async () => { await hold.opened; });
+  await assert.rejects(withRequestEnvironment({ ...host, QMD_SQLITE_BUSY_TIMEOUT: "1" }, async () => {}), /different request environment/);
+  hold.open(); await active;
+  assert.deepEqual(changed(), []);
+});
+
 test("wiki:10 exclusive writer lock rejects competing sync and lexical reads without taking the mutation lock", async () => {
   const root = fresh();
   fs.mkdirSync(path.join(root, ".wiki"));
@@ -175,6 +253,23 @@ test("wiki:10 exclusive writer lock rejects competing sync and lexical reads wit
   assert.equal((await first).state, "successful");
   assert.deepEqual(await paths(root, "Galaxy"), ["personal/notes/star.md"]);
   assert.equal(fs.readFileSync(path.join(root, ".wiki/mutation.lock"), "utf8"), "unrelated content operation");
+});
+
+test("wiki:10 an operation that throws outside the session failure boundary still releases the writer lock", async () => {
+  const root = fresh();
+  const concepts = [note("star", "# Star\nGalaxy\n")];
+  // The sync reads concepts before it publishes coverage.json; the follow-on find reads them after.
+  // Throwing on that second read (a source event: the published receipt) escapes the session's
+  // operations, so only the request wrapper can release the lock.
+  const throwing = { diagnostics: [], get concepts() {
+    if (fs.existsSync(receipt(root))) throw new Error("operation threw after synchronization");
+    return concepts;
+  } };
+  const request = { mode: "lexical" as const, requested: "fast" as const, question: "Galaxy", reason: [] };
+  await assert.rejects(syncAndFindQmd(root, throwing, {}, request, process.env), /operation threw after synchronization/);
+  assert.equal(fs.existsSync(path.join(root, ".wiki/search/writer.lock")), false, "the writer lock must not stay behind");
+  const next = await syncQmdText(root, inventory(concepts));
+  assert.equal(next.state, "successful", JSON.stringify(next));
 });
 
 test("wiki:10 native database failures, duplicate captures, and symlinks fail closed", async () => {
@@ -314,8 +409,12 @@ test("wiki:10 coverage receipt lists captured concepts sorted by canonical path 
     { path: "personal/notes/mid.md", digest: sha256("# Mid\n") },
     { path: "personal/notes/zeta.md", digest: sha256("# Zeta\n") },
   ];
-  if (result.state === "successful") assert.deepEqual(result.textCoverage.inventory, expected);
-  assert.equal(fs.readFileSync(receipt(root), "utf8"), JSON.stringify({ version: 1, inventory: expected }) + "\n");
+  // README contract: inventoryDigest is sha256 over the exact inventory array bytes the receipt stores.
+  const stored = fs.readFileSync(receipt(root), "utf8");
+  assert.equal(stored, JSON.stringify({ version: 1, inventory: expected }) + "\n");
+  const arrayBytes = stored.slice(stored.indexOf("["), stored.lastIndexOf("]") + 1);
+  assert.deepEqual(result.textCoverage, { state: "complete", inventoryCount: 3, inventoryDigest: sha256(arrayBytes) });
+  assert.equal(sha256(JSON.stringify(JSON.parse(stored).inventory)), sha256(arrayBytes), "Re-serializing the parsed receipt reproduces the digest");
 });
 
 test("wiki:10 failure codes distinguish a busy writer from other unavailability", async () => {

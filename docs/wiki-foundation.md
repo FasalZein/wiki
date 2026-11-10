@@ -24,9 +24,29 @@ the installed `wiki` command.
 | Command | What it proves |
 | --- | --- |
 | `heavy -- bun run boot:wiki` | Boot check. It starts `packages/wiki/bin/wiki.js` under the current Node, in a new temporary directory with a decoy HOME. It runs init, type list, lint, new, show, an update with a stale expected digest (must exit 3 and leave the topic unchanged), and index --check. It removes the directory and exits 0. Any failed step exits 1. It loads no search engine or model. |
-| `WIKI_TEST_PATTERN='wiki:20' heavy -- bun run test:wiki` | Runs the boot script as a real process. Checks the step list, the removal of its temporary state, and a nonzero exit when it cannot complete. |
+| `WIKI_TEST_PATTERN='wiki:20' heavy --slots 2 -- bun run test:wiki` | Runs the boot script as a real process. Checks the step list, the removal of its temporary state, and a nonzero exit when it cannot complete. |
 | `WIKI_QMD_PROOF=handoff WIKI_QMD_MODEL_DIR=/existing/models heavy -- node packages/wiki/test/qmd-model-proof.js` | Complete synthetic handoff smoke with real local models. See below. |
-| `heavy -- bun run verify:next` | Batch gate. Its TypeScript project and its `packages/*/test/*.test.ts` glob include this package. Do not also run `verify:wiki` at the gate. |
+| `heavy --slots 2 -- bun run verify:next` | Batch gate. Its TypeScript project includes this package, and it runs all of this package's tests through `packages/wiki/test/run.js --all`, which ignores `WIKI_TEST_PATTERN`. Do not also run `verify:wiki` at the gate. |
+
+`test:wiki` and `verify:next` both run `packages/wiki/test/run.js`, which runs four
+test files at the same time (`FILE_CONCURRENCY`, `--test-concurrency=4`). Each test file is one Node process.
+Most tests run commands inside it, and the others start one CLI process at a
+time, so a run usually has about four busy processes: claim `heavy --slots 2`, one
+slot per two processes. Brief peaks are higher: two race tests start two CLI
+processes at once, and some commands start git or extractor children. If you change the concurrency, change the slot claim with it.
+When `WIKI_TEST_PATTERN` is set and matches no test, `test:wiki` exits 1 with a
+message, so a mistyped pattern cannot read as a passing run.
+The mutation plans in `scripts/mutation-file.mjs` stay serial
+(`--test-concurrency=1`), one Stryker worker per sandbox.
+
+Measured on 2026-11-09, before slices 48 to 51 moved most tests in process and
+added tests (14-core Apple Silicon, other jobs running, 1-minute load
+about 23 to 33), full `packages/wiki` suite, 25 files, 532 tests: `heavy --slots 2 --
+bun run test:wiki` passed all 532 in 191 s; `heavy --slots 1 -- node --test
+--test-concurrency=1 packages/wiki/test/*.test.ts` passed all 532 in 890 s. A
+`verify:next` run overlapped part of the serial run, so the serial time is high.
+On 2026-11-10 the suite has 29 files and 564 tests: `heavy --slots 2 -- bun run
+verify:next` (typecheck plus every test) passed all 564; the test step took 83 s.
 
 The handoff smoke runs under macOS `sandbox-exec` with network denied and writes
 allowed only in a disposable directory. Through the real CLI it runs: init, type

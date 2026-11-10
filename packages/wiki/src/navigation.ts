@@ -2,8 +2,9 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { inspectContainedPath } from "./paths.ts";
 import { safeName, type Diagnostic, type RegisteredType } from "./registry.ts";
+import type { ValidatedInventory } from "./lint.ts";
 
-export interface NavigationTopic { path: string; type: string; title: string; description: string }
+interface NavigationTopic { path: string; type: string; title: string; description: string }
 export interface NavigationDirectory { path: string; type: string }
 function isNavigationRoot(directory: string): boolean {
   return directory === "" || directory === "personal" || directory === "projects" || directory.startsWith("projects/") && directory.split("/").length === 2 && safeName(directory.slice(9));
@@ -30,10 +31,18 @@ interface NavigationRow { type: string; path: string; row: string }
 function navigationDirectoryRows(directories: NavigationDirectory[], topics: NavigationTopic[]): Map<string, NavigationRow[]> {
   const rows = new Map<string, NavigationRow[]>();
   for (const directory of directories) rows.set(directory.path, []);
+  // One pass: credit each topic to every ancestor directory path.
+  const counts = new Map<string, number>();
+  for (const topic of topics) {
+    for (let slash = topic.path.indexOf("/"); slash !== -1; slash = topic.path.indexOf("/", slash + 1)) {
+      const ancestor = topic.path.slice(0, slash);
+      counts.set(ancestor, (counts.get(ancestor) ?? 0) + 1);
+    }
+  }
   for (const directory of directories) {
     if (!directory.path) continue;
     const parent = path.posix.dirname(directory.path) === "." ? "" : path.posix.dirname(directory.path);
-    const count = topics.filter(n => n.path.startsWith(directory.path + "/")).length;
+    const count = counts.get(directory.path) ?? 0;
     rows.get(parent)?.push({ type: directory.type, path: directory.path,
       row: "* [" + markdownText(path.posix.basename(directory.path)) + "](" + path.posix.relative(parent, directory.path + "/index.md") + ") - " + count + " concept" + (count === 1 ? "" : "s") });
   }
@@ -44,7 +53,7 @@ function renderNavigationIndex(directory: string, items: NavigationRow[]): strin
   const heading = directory ? "# " + markdownText(path.posix.basename(directory)) : '---\nokf_version: "0.2"\n---\n# Wiki';
   return heading + (items.length ? "\n\n" + items.map(i => i.row).join("\n") : "") + "\n";
 }
-export function renderIndexes(directories: NavigationDirectory[], topics: NavigationTopic[]): Map<string, string> {
+function renderIndexes(directories: NavigationDirectory[], topics: NavigationTopic[]): Map<string, string> {
   const rows = navigationDirectoryRows(directories, topics);
   for (const note of topics) rows.get(path.posix.dirname(note.path))?.push({ type: note.type, path: note.path,
     row: "* [" + markdownText(note.title) + "](" + path.posix.basename(note.path) + ") - " + markdownText(note.description) });
@@ -53,6 +62,19 @@ export function renderIndexes(directories: NavigationDirectory[], topics: Naviga
     output.set(directory ? directory + "/index.md" : "index.md", renderNavigationIndex(directory, items));
   }
   return output;
+}
+/** The navigation step: generated index bytes for a clean validated inventory. Any diagnostic anywhere blocks
+ * all planned navigation (an empty map), so no caller renders a partial index. */
+export function navigationIndexes(validated: ValidatedInventory): Map<string, string> {
+  if (validated.diagnostics.length) return new Map();
+  const topics = validated.notes.flatMap(note => navigationTopic(note) ?? []);
+  return renderIndexes([...validated.directories], topics);
+}
+/** A canonical note with string type, title and description is listed; any other note is not. */
+function navigationTopic(note: ValidatedInventory["notes"][number]): NavigationTopic | undefined {
+  const { type, title, description } = note.data;
+  if (note.canonical && typeof type === "string" && typeof title === "string" && typeof description === "string") return { path: note.path, type, title, description };
+  return undefined;
 }
 function indexDestinationProblem(root: string, relative: string): Diagnostic | undefined {
   const inspected = inspectContainedPath(root, relative);

@@ -5,9 +5,9 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, test } from "node:test";
+import { spawnCli } from "./cli-helper.ts";
 import { fileURLToPath } from "node:url";
 
-const BIN = fileURLToPath(new URL("../bin/wiki.js", import.meta.url));
 const GUARD = fileURLToPath(new URL("./doctor-guard.js", import.meta.url));
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-doctor-"));
 const home = path.join(temp, "home");
@@ -17,7 +17,8 @@ const env = { ...process.env, HOME: home, XDG_CACHE_HOME: path.join(home, "cache
 after(() => fs.rmSync(temp, { recursive: true, force: true }));
 let counter = 0;
 function cli(vault: string, args: string[], overrides = {}, json = true) {
-  const result = spawnSync(process.execPath, [...(args[0] === "doctor" ? ["--import", GUARD] : []), BIN, "--vault", vault, ...(json ? ["--json"] : []), ...args], { env: { ...env, ...overrides }, encoding: "utf8", timeout: 20000 });
+  // The doctor guard patches globals per process, so doctor runs stay in a subprocess.
+  const result = spawnCli(["--vault", vault, ...(json ? ["--json"] : []), ...args], { imports: args[0] === "doctor" ? [GUARD] : [], env: { ...env, ...overrides }, timeout: 20000 });
   assert.equal(result.error, undefined); assert.equal(result.signal, null, result.stderr);
   if (json) assert.equal(result.stderr, "");
   return { status: result.status, data: json ? JSON.parse(result.stdout) : undefined, stdout: result.stdout, stderr: result.stderr };
@@ -131,6 +132,21 @@ test("wiki:17 missing extractors name Pandoc and pdftotext without installation 
   assert.equal(result.data.extractors.pandoc.state, "unavailable"); assert.equal(result.data.extractors.pdftotext.state, "unavailable");
   assert.equal(result.data.search.textCoverage.state, "complete");
   for (const dependency of ["pandoc", "pdftotext"]) assert.ok(result.data.diagnostics.some((d: { path: string; fix: string }) => d.path === dependency && /PATH/.test(d.fix)));
+});
+test("wiki:17 extractor version probes receive only PATH, never host variables such as tokens", () => {
+  const vault = fresh(), bin = path.join(temp, "probe-bin-" + ++counter), keys = path.join(bin, "keys.jsonl");
+  fs.mkdirSync(bin);
+  // Each fake records its environment key names only, never values, then answers its version probe.
+  for (const [command, version] of [["pandoc", "pandoc 3.0"], ["pdftotext", "pdftotext version 24.0"]] as const) {
+    fs.writeFileSync(path.join(bin, command), "#!" + process.execPath + "\nrequire('node:fs').appendFileSync(" + JSON.stringify(keys) + ", JSON.stringify(Object.keys(process.env).sort()) + '\\n');\nprocess.stdout.write(" + JSON.stringify(version + "\n") + ");\n", { mode: 0o755 });
+  }
+  const result = doctor(vault, { PATH: bin, WIKI_TEST_SECRET_TOKEN: "sentinel-not-for-children" });
+  assert.equal(result.data.extractors.pandoc.state, "ready", JSON.stringify(result.data.extractors));
+  assert.equal(result.data.extractors.pdftotext.state, "ready");
+  const runs = fs.readFileSync(keys, "utf8").trim().split("\n").map(line => JSON.parse(line));
+  assert.equal(runs.length, 2);
+  // macOS CoreFoundation sets __CF_USER_TEXT_ENCODING inside the fake's own Node process; the parent did not pass it.
+  for (const names of runs) assert.deepEqual(names.filter((name: string) => name !== "__CF_USER_TEXT_ENCODING"), ["PATH"]);
 });
 for (const mode of ["missing-sdk", "missing-native", "missing-vector"]) test("wiki:17 " + mode + " reports qmd dependency without writable store or global changes", () => {
   const vault = fresh(); note(vault); succeeds(vault, ["search", "sync"]);

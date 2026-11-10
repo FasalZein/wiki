@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -7,9 +7,9 @@ import * as path from "node:path";
 import { Readable } from "node:stream";
 import { createInterface } from "node:readline";
 import { after, test } from "node:test";
+import { BIN, spawnJson } from "./cli-helper.ts";
 import { fileURLToPath } from "node:url";
 
-const BIN = fileURLToPath(new URL("../bin/wiki.js", import.meta.url));
 const GUARD = fileURLToPath(new URL("./concurrency-io-guard.js", import.meta.url));
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-concurrent-"));
 after(() => fs.rmSync(temp, { recursive: true, force: true }));
@@ -18,14 +18,8 @@ let counter = 0;
 function digest(bytes: string) { return "sha256:" + createHash("sha256").update(bytes).digest("hex"); }
 function read(vault: string, file = relative) { return fs.readFileSync(path.join(vault, file), "utf8"); }
 function env() { return { ...process.env, HOME: temp, WIKI_VAULT: "" }; }
-function cli(vault: string, ...args: string[]) {
-  const result = spawnSync(process.execPath, [BIN, "--json", "--vault", vault, ...args], {
-    cwd: temp, env: env(), encoding: "utf8", timeout: 15000,
-  });
-  assert.equal(result.error, undefined); assert.equal(result.stderr, "");
-  assert.equal(result.stdout.trim().split("\n").length, 1);
-  return { status: result.status, data: JSON.parse(result.stdout) };
-}
+// Two-process races are the subject of this file, so every run goes through the real process.
+function cli(vault: string, ...args: string[]) { return spawnJson(["--vault", vault, ...args], { cwd: temp, env: env(), timeout: 15000 }); }
 function succeeds(vault: string, ...args: string[]) {
   const result = cli(vault, ...args); assert.equal(result.status, 0, JSON.stringify(result)); return result.data;
 }
@@ -153,13 +147,10 @@ for (const mode of ["index-fail", "log-fail"]) test("wiki:09 index recovery pres
   const { vault, note, bytes } = fresh();
   const published = bytes.replace("Original description", "Published description") + "Published fact\n";
   const log = read(vault, "log.md");
-  const result = spawnSync(process.execPath, ["--import", fileURLToPath(new URL("./update-io-guard.js", import.meta.url)), BIN, "--json", "--vault", vault, ...args(note.digest, candidate(published))], {
-    cwd: temp, env: { ...env(), WIKI_UPDATE_GUARD: mode }, encoding: "utf8", timeout: 15000,
+  const { status, data: partial } = spawnJson(["--vault", vault, ...args(note.digest, candidate(published))], {
+    imports: [fileURLToPath(new URL("./update-io-guard.js", import.meta.url))], cwd: temp, env: { ...env(), WIKI_UPDATE_GUARD: mode }, timeout: 15000,
   });
-  assert.equal(result.error, undefined); assert.equal(result.stderr, "");
-  assert.equal(result.stdout.trim().split("\n").length, 1);
-  const partial = JSON.parse(result.stdout);
-  assert.equal(result.status, 6); assert.equal(partial.ok, false); assert.equal(partial.written, true);
+  assert.equal(status, 6); assert.equal(partial.ok, false); assert.equal(partial.written, true);
   assert.deepEqual(partial.paths, [relative]); assert.equal(partial.digest, digest(published));
   assert.match(partial.error.message, /run index to repair navigation.*inspect log.md.*manually/);
   assert.equal(read(vault), published); assert.equal(read(vault, "log.md"), log);

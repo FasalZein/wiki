@@ -5,13 +5,13 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, test } from "node:test";
+import { spawnCli } from "./cli-helper.ts";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 
 // The repository skill is the contract under test: its commands are parsed from SKILL.md
 // and run as real CLI processes against disposable vaults. Only model inference is faked
 // (qmd-cli-guard.js fake-inference mode); qmd indexing and lexical retrieval stay real.
-const BIN = fileURLToPath(new URL("../bin/wiki.js", import.meta.url));
 const GUARD = fileURLToPath(new URL("./qmd-cli-guard.js", import.meta.url));
 const REPO = fileURLToPath(new URL("../../../", import.meta.url));
 const SKILL_DIR = path.join(REPO, "skills/wiki");
@@ -47,8 +47,8 @@ const flags = (args: string[]) => args.filter(word => word.startsWith("--"));
 function cli(args: string[], extraEnv: Record<string, string> = {}) {
   const log = path.join(temp, "calls-" + (++counter) + ".jsonl");
   const search = ["find", "search"].includes(args.find(word => !word.startsWith("-") && !word.startsWith("/")) ?? "");
-  const result = spawnSync(process.execPath, ["--import", GUARD, BIN, ...args], {
-    encoding: "utf8", timeout: 30000,
+  const result = spawnCli([...args], {
+    imports: [GUARD], timeout: 30000,
     env: { ...process.env, HOME: temp, XDG_CACHE_HOME: path.join(temp, "cache"), XDG_CONFIG_HOME: path.join(temp, "config"), XDG_DATA_HOME: path.join(temp, "data"), WIKI_VAULT: "", QMD_EMBED_MODEL: "", WIKI_QMD_CLI_GUARD: "fake-inference", WIKI_QMD_CALL_LOG: log, ...(search ? { WIKI_QMD_DENY_SUBPROCESS: "1" } : {}), ...extraEnv },
   });
   assert.equal(result.error, undefined);

@@ -19,7 +19,13 @@ const testCommands = new Map([
   // searchQmdLex, and the writer lock. findQmd, embedQmd, and model readiness
   // need the CLI test files; widen this plan before claiming those ranges.
   ["packages/wiki/src/qmd.ts", "node --test --test-concurrency=1 packages/wiki/test/qmd-sync.test.ts"],
-  ["packages/wiki-cli/src/cli.ts", "node --test --test-concurrency=1 packages/wiki-cli/test/cli.test.ts packages/wiki-cli/test/capture-sources.test.ts"],
+  // Narrow plans for the architecture-pass modules. create, registry and update drive
+  // publish (create, type, index, replace); capture publication and its failure records
+  // are exercised by the slower capture-cli suite, which this plan omits.
+  ["packages/wiki/src/publication.ts", "node --test --test-concurrency=1 packages/wiki/test/create.test.ts packages/wiki/test/capture-text.test.ts packages/wiki/test/registry.test.ts packages/wiki/test/update.test.ts"],
+  ["packages/wiki/src/inventory.ts", "node --test --test-concurrency=1 packages/wiki/test/inventory-rules.test.ts packages/wiki/test/capture-text.test.ts"],
+  ["packages/wiki/src/find.ts", "node --test --test-concurrency=1 packages/wiki/test/find.test.ts"],
+  ["packages/wiki/src/search.ts", "node --test --test-concurrency=1 packages/wiki/test/find.test.ts"],
 ]);
 
 // Reserve the coordinator plus seven processes per worker: Stryker worker,

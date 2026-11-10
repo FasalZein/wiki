@@ -5,11 +5,11 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, test } from "node:test";
+import { BIN, spawnCli } from "./cli-helper.ts";
 import { fileURLToPath } from "node:url";
 
 // B12: real CLI processes over real QMD storage. Only inference is faked
 // (qmd-fake-inference.js: expansion, vector/rerank search, document embedding).
-const BIN = fileURLToPath(new URL("../bin/wiki.js", import.meta.url));
 const GUARD = fileURLToPath(new URL("./qmd-cli-guard.js", import.meta.url));
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wiki-qmd-current-"));
 after(() => {
@@ -19,12 +19,13 @@ after(() => {
 });
 let counter = 0;
 type Match = { path: string; score: number; digest: string; title: string; description: string; excerpt: string };
-const argv = (vault: string, args: string[], json: boolean) => ["--import", GUARD, BIN, "--vault", vault, ...(json ? ["--json"] : []), ...args];
+const cliArgs = (vault: string, args: string[], json: boolean) => ["--vault", vault, ...(json ? ["--json"] : []), ...args];
+const argv = (vault: string, args: string[], json: boolean) => ["--import", GUARD, BIN, ...cliArgs(vault, args, json)];
 const environment = (vault: string, mode: string, extraEnv: Record<string, string>) => ({ ...process.env, HOME: temp, XDG_CACHE_HOME: path.join(temp, "cache"), XDG_CONFIG_HOME: path.join(temp, "config"), XDG_DATA_HOME: path.join(temp, "data"), WIKI_VAULT: "", QMD_EMBED_MODEL: "", CI: "", WIKI_QMD_CLI_GUARD: mode, WIKI_QMD_CALL_LOG: vault + ".calls.jsonl", WIKI_QMD_DENY_SUBPROCESS: "1", ...extraEnv });
 function cli(vault: string, args: string[], mode = "fake-inference", extraEnv: Record<string, string> = {}, json = true, quiet = true) {
   const log = vault + ".calls.jsonl";
   fs.rmSync(log, { force: true });
-  const result = spawnSync(process.execPath, argv(vault, args, json), { encoding: "utf8", timeout: 30000, env: environment(vault, mode, extraEnv) });
+  const result = spawnCli(cliArgs(vault, args, json), { imports: [GUARD], timeout: 30000, env: environment(vault, mode, extraEnv) });
   assert.equal(result.error, undefined);
   assert.equal(result.signal, null, result.stderr);
   if (json && quiet) assert.equal(result.stderr, "");
@@ -71,7 +72,7 @@ test("wiki:12 add, equal-size restored-mtime edit, rename and delete between fin
   found = succeeds(vault, ["find", "photon"]).data;
   assert.deepEqual(paths(found.matches), [renamed], "Deleted and old renamed paths are never emitted");
   assert.equal(found.matches[0].digest, sha(edited)); assert.equal(found.matches[0].excerpt, "Yellow photon detector");
-  assert.deepEqual(found.textCoverage.inventory.map((n: { path: string }) => n.path), [renamed]);
+  assert.deepEqual(found.textCoverage, { state: "complete", inventoryCount: 1, inventoryDigest: sha(JSON.stringify([{ path: renamed, digest: sha(edited) }])) });
   assert.equal(fs.readFileSync(path.join(vault, renamed), "utf8"), edited, "Search preserves current file bytes");
   const human = cli(vault, ["find", "photon"], "fake-inference", {}, false);
   assert.equal(human.status, 0); assert.match(human.stdout, new RegExp(renamed + " \\S+ " + sha(edited) + "\\n  Observatory: Observatory telescope\\n  Yellow photon detector"));
@@ -148,7 +149,9 @@ test("wiki:12 a deep expansion failure swallowed by QMD falls back to labelled d
 
 /** FIFO under the test temp directory; opening it blocks until the peer opens it (a source event, not polling). */
 function fifos(dir: string) { fs.mkdirSync(dir); for (const name of ["b-captured", "b-go", "a-go"]) assert.equal(spawnSync("mkfifo", [path.join(dir, name)]).status, 0); }
-for (const [query, label] of [["betaword", "term only in the newer revision"], ["photon", "term in both revisions (indexed body differs)"]] as const) test("wiki:12 another sync replacing the index between this find's sync and query never reports complete coverage: " + label, async () => {
+// A's first index-lock release is the event. Before S5 it came between A's sync and A's query, so B's
+// R0 sync replaced A's index before the query; with one session lock it comes after the query.
+for (const [query, label] of [["betaword", "term only in the newer revision"], ["photon", "term in both revisions"]] as const) test("wiki:12 another sync waiting for the index lock replaces the index only after this find has queried: " + label, async () => {
   const vault = fresh(), relative = note(vault, "Observatory", "Observatory telescope", "Photon alphaword");
   const file = path.join(vault, relative), dir = path.join(temp, "fifo-" + counter); fifos(dir);
   const env = { WIKI_QMD_FIFO_DIR: dir };
@@ -158,14 +161,12 @@ for (const [query, label] of [["betaword", "term only in the newer revision"], [
   const bExit = new Promise<number | null>(resolve => b.on("close", resolve));
   assert.equal(fs.readFileSync(path.join(dir, "b-captured"), "utf8"), "captured R0");
   const r1 = fs.readFileSync(file, "utf8").replace("alphaword", "betaword"); fs.writeFileSync(file, r1);
-  // A captures and syncs R1, releases, lets B sync R0, then queries B's index.
+  // A captures R1 and runs to its first lock release; B then syncs R0 and releases; A finishes.
   const a = cli(vault, ["find", query], "fake-inference-stale-a", env);
-  assert.equal(await bExit, 0, bOut + bErr); assert.equal(JSON.parse(bOut).textCoverage.inventory[0].digest, sha(r1.replace("betaword", "alphaword")), "B indexed R0");
+  assert.equal(await bExit, 0, bOut + bErr); assert.deepEqual(JSON.parse(bOut).textCoverage, { state: "complete", inventoryCount: 1, inventoryDigest: sha(JSON.stringify([{ path: relative, digest: sha(r1.replace("betaword", "alphaword")) }])) }, "B indexed R0 after A released");
   assert.equal(a.status, 0, JSON.stringify(a.data));
-  assert.equal(a.data.textCoverage.state, "incomplete", JSON.stringify(a.data));
-  assert.ok(a.data.diagnostics.some((d: { path: string; message: string }) => d.path === relative && /different revision than this request captured/.test(d.message)), JSON.stringify(a.data.diagnostics));
-  assert.deepEqual(a.data.matches, [], "No R0 candidate is rendered as current");
-  if (query === "photon") assert.ok(a.data.diagnostics.some((d: { message: string }) => /Indexed content differs from the captured revision/.test(d.message)), "Returned candidate hit the indexed-body comparison");
+  assert.equal(a.data.textCoverage.state, "complete", JSON.stringify(a.data));
+  assert.deepEqual(a.data.matches.map((m: Match) => m.digest), [sha(r1)], "Only the captured revision is rendered");
   assert.equal(fs.readFileSync(file, "utf8"), r1, "Search preserved current file bytes");
   const next = succeeds(vault, ["find", "betaword"]).data;
   assert.equal(next.textCoverage.state, "complete"); assert.deepEqual(next.matches.map((m: Match) => m.digest), [sha(r1)]);
