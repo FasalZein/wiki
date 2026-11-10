@@ -395,7 +395,7 @@ Verification commands to establish during package setup:
 - `WIKI_TEST_PATTERN="wiki:NN" heavy -- bun run test:wiki`: the affected slice test group, where NN is its ticket number.
 - `heavy -- bun run verify:wiki`: standalone new-package typecheck plus all new-package tests; do not repeat it at landing when the expanded `verify:next` already covers that exact scope.
 - `heavy -- bun run boot:wiki`: disposable CLI boot check; no build or root dist output.
-- `heavy -- bun run verify:next`: established Node-package integration suite, extended to check the new package at batch gates.
+- `heavy -- bun run verify:next`: established Node-package integration suite, extended to check the new package at batch gates (now only `packages/wiki`; see the 2026-11-09 notes).
 - The legacy CLI and its checks were removed (#38); no legacy verification scope remains.
 
 The test script must place the name-pattern option before test file arguments and read the optional `WIKI_TEST_PATTERN` environment value; affected runs must not accidentally run every test. Full CI/local policy follows repository guidance. No test, checker, build, extractor run, or model call was executed while writing this local contract.
@@ -470,6 +470,6 @@ This specification reconciles the approved local build-contract and readiness dr
 
 The inventory reports local qmd source 2.5.2 and installed qmd 2.5.3; neither chooses the product pin or proves compatibility. B10 must verify and pin the public release current at implementation, record the actual Node/native support, and prove isolated real text indexing. B11 must prove real local-model fast/deep behavior. Source inspection and forwarding tests cannot substitute for those runs.
 
-There is no CI at baseline. All checks run through `heavy`. At local batch landing, run full new-package and existing Node-package verification once: `heavy -- bun run verify:next` (expanded to include the new package), plus `heavy -- bun run boot:wiki`. The standalone `verify:wiki` is not an additional duplicate full run. Existing Node typecheck includes only wiki-core/wiki-cli at baseline; B01 must include the new package in both root verification wiring and Node typecheck, not merely a test glob. No root bundle build is permitted. These are implementation gates, not checks executed for this documentation-only change.
+There is no CI at baseline. All checks run through `heavy`. At local batch landing, run full new-package and existing Node-package verification once: `heavy -- bun run verify:next` (expanded to include the new package), plus `heavy -- bun run boot:wiki`. The standalone `verify:wiki` is not an additional duplicate full run. Existing Node typecheck includes only wiki-core/wiki-cli at baseline (now only `packages/wiki`; see the 2026-11-09 notes); B01 must include the new package in both root verification wiring and Node typecheck, not merely a test glob. No root bundle build is permitted. These are implementation gates, not checks executed for this documentation-only change.
 
 Publication target is `FasalZein/wiki`. The local 20-ticket package references this canonical file. The exact shared comment for old #9-#14 states supersession, not implementation; after exact-text owner approval, close them as not planned. No GitHub write, archive change, global install, model egress, or cutover is authorized by this file.
