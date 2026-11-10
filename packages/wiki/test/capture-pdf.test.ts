@@ -163,6 +163,23 @@ if (${JSON.stringify(phase)} === 'extraction' && process.argv.includes('-v')) {
   });
 }
 
+test("wiki:15 the extractor child receives only PATH, never host variables such as tokens", () => {
+  const { root, input, directory } = fresh(buildPdf("BT ET"));
+  const keys = path.join(directory, "keys.jsonl");
+  // Records environment key names only, never values.
+  const bin = tool(directory, `
+require('node:fs').appendFileSync(${JSON.stringify(keys)}, JSON.stringify(Object.keys(process.env).sort()) + '\\n');
+if (process.argv.includes('-v')) process.stderr.write('pdftotext version test');
+else { process.stdin.resume(); process.stdin.on('end', () => process.stdout.write('Fake text.\\n')); }
+`);
+  const result = cli(root, args(input), { PATH: bin, WIKI_TEST_SECRET_TOKEN: "sentinel-not-for-children" });
+  assert.equal(result.status, 0, JSON.stringify(result));
+  const runs = fs.readFileSync(keys, "utf8").trim().split("\n").map(line => JSON.parse(line));
+  assert.equal(runs.length, 2, "version probe and extraction");
+  // macOS CoreFoundation sets __CF_USER_TEXT_ENCODING inside the fake's own Node process; the parent did not pass it.
+  for (const names of runs) assert.deepEqual(names.filter((name: string) => name !== "__CF_USER_TEXT_ENCODING"), ["PATH"]);
+});
+
 test("wiki:15 same captured PDF buffer feeds stdin with documented flags despite pathname replacement", () => {
   const bytes = buildPdf("BT /F1 24 Tf 72 720 Td (Original capture.) Tj ET");
   const { root, input, directory } = fresh(bytes);

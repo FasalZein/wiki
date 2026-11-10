@@ -6,11 +6,19 @@ export function assertCaptureActive(signal: AbortSignal): void {
   if (signal.aborted) throw new WikiError("unavailable", "Source capture cancelled; no source note or retained assets published");
 }
 
+/** The whole environment of an external extractor child (pandoc, pdftotext, and doctor's version probes).
+ * Only PATH passes, so host credentials such as API tokens never reach a program that parses untrusted bytes.
+ * The tools need no locale or temporary-directory variables: pdftotext gets -enc UTF-8 and pandoc always
+ * reads and writes UTF-8. Revisit the list if a supported tool version starts to need one. */
+export function extractorEnvironment(): NodeJS.ProcessEnv {
+  return process.env.PATH === undefined ? {} : { PATH: process.env.PATH };
+}
+
 /** Resolve only after close, including on abort/start failure, so output cannot race child cleanup. */
 export function runTool(command: "pandoc" | "pdftotext", args: readonly string[], input: Buffer, signal: AbortSignal): Promise<{ code: number | null; stdout: Buffer; stderr: Buffer }> {
   assertCaptureActive(signal);
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+    const child = spawn(command, args, { env: extractorEnvironment(), stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
     const stdout: Buffer[] = [], stderr: Buffer[] = [];
     let failure: NodeJS.ErrnoException | undefined;
     const abort = () => { child.kill("SIGTERM"); };
